@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker/volumes/
+
+# Logs
+*.log
+logs/
+
+# Test data (keep structure, ignore large files)
+testdata/packages/
+*.zip
+*.tar.gz
+
+# Prisma
+packages/backend/prisma/migrations/
+
+# Coverage
+coverage/
+
+# Temp
+tmp/
+temp/

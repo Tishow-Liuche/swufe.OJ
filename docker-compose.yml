@@ -1,0 +1,90 @@
+version: "3.8"
+
+services:
+  # ========== 基础设施 ==========
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: oj-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: oj
+      POSTGRES_PASSWORD: oj_dev_2024
+      POSTGRES_DB: oj_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oj -d oj_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: oj-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: oj-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin_dev
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========== 评测沙箱 ==========
+
+  go-judge:
+    image: criyle/go-judge:latest
+    container_name: oj-go-judge
+    privileged: true
+    restart: unless-stopped
+    command: >
+      -http-addr 0.0.0.0:5050
+      -enable-metrics
+      -parallelism 4
+      -tmp-fs-param size=256m,nr_inodes=8k
+      -output-limit 268435456
+      -copy-out-limit 67108864
+      -force-gc-target 20971520
+      -force-gc-interval 5s
+    ports:
+      - "5050:5050"
+      - "5052:5052"
+    volumes:
+      - judge_cache:/dev/shm
+    shm_size: 256m
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  judge_cache:
