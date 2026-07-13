@@ -1,13 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + Vue + TS</title>
+    <title>西财 OJ 平台 (v20260713-2)</title>
+    <style>
+      body { margin: 0; font-family: sans-serif; }
+      #load-test { padding: 8px 16px; background: #e3f2fd; text-align: center; font-size: 13px; font-family: monospace; }
+    </style>
   </head>
   <body>
+    <div id="load-test">🔍 页面版本 v20260713-2 已加载，测试 API...</div>
     <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/main.ts?v=2"></script>
+    <script>
+      // 直接测试——不依赖 Vue，不依赖构建工具
+      fetch('/api/problems?pageSize=5')
+        .then(r => r.json())
+        .then(d => {
+          document.getElementById('load-test').textContent = '✅ API 正常: ' + d.total + ' 题, 首题: ' + (d.items[0]?.title || '无');
+          document.getElementById('load-test').style.background = '#e8f5e9';
+        })
+        .catch(e => {
+          document.getElementById('load-test').textContent = '❌ API 失败: ' + e.message;
+          document.getElementById('load-test').style.background = '#fce4ec';
+        });
+    </script>
   </body>
 </html>
