@@ -85,8 +85,9 @@ async function main() {
     const ver = prob.versions[0];
     if (!ver) continue;
     const tags = prob.tags.map(t => t.name);
-    const fn = pick(prob.title, tags, prob.difficulty);
-    const desc = fn(prob.title, prob.difficulty, tags);
+    const difficulty = prob.difficulty || 'POPULAR';
+    const fn = pick(prob.title, tags, difficulty);
+    const desc = fn(prob.title, difficulty, tags);
     await p.problemVersion.update({ where: { id: ver.id }, data: { description: desc } });
     updated++;
     if (updated % 150 === 0) console.log(`  ${updated}...`);
