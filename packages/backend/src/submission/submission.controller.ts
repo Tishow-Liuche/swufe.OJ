@@ -50,7 +50,6 @@ export class SubmissionController {
   fillResult(@Param('id') id: string, @Req() req: any, @Body() data: {
     status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string;
   }) {
-    return this.submission.fillExternalResult(id, req.user.id, data);
   }
 
   /** 重判（教师/管理员） */

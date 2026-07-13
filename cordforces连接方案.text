@@ -1,0 +1,1161 @@
+# Codeforces 用户账号绑定与浏览器辅助远程提交方案
+
+## 1. 实现目标
+
+实现以下完整流程：
+
+```text
+用户绑定自己的 Codeforces 账号
+        ↓
+用户在本平台选择 Codeforces 题目并填写代码
+        ↓
+本平台创建远程提交任务
+        ↓
+浏览器 Helper 使用用户当前已登录的 Codeforces 会话
+        ↓
+将代码提交到用户自己的 Codeforces 账号
+        ↓
+获取 Codeforces Submission ID
+        ↓
+本平台通过 Codeforces 官方 API 查询评测状态
+        ↓
+在本平台显示 AC、WA、TLE、CE 等结果
+```
+
+Codeforces 官方 API 不提供代码提交方法，因此提交动作不能由官方 API 完成。
+
+第一版必须采用：
+
+```text
+本平台后端
++
+浏览器扩展 Helper
++
+用户浏览器中的 Codeforces 登录状态
++
+Codeforces 官方读取 API
+```
+
+不采用服务器机器人账号池。
+
+---
+
+## 2. 核心原则
+
+必须遵守：
+
+1. 不要求用户提供 Codeforces 密码；
+2. 不保存用户的 Codeforces 密码；
+3. 不要求用户复制完整 Cookie；
+4. 不将 Codeforces Cookie 上传到本平台服务器；
+5. Codeforces 登录状态只保留在用户浏览器中；
+6. 浏览器 Helper 使用用户现有登录会话完成提交；
+7. 后端只保存 Codeforces Handle、Submission ID 和评测结果；
+8. 每次远程提交必须经过用户明确确认；
+9. 遇到验证码、登录验证或风险控制时立即停止；
+10. 不绕过验证码、Cloudflare 或访问限制；
+11. 默认禁止向正在进行的正式 Rated Contest 自动提交；
+12. 不自动访问用户无权限查看的 Gym、Group 或 Mashup；
+13. 提交结果不确定时，不得直接重新提交，避免重复提交；
+14. Helper 不可用时降级为打开 Codeforces 原题或提交页面。
+
+---
+
+## 3. 系统组成
+
+### 3.1 本平台后端
+
+负责：
+
+* Codeforces 账号绑定记录；
+* Helper 设备注册；
+* 创建远程提交任务；
+* 任务签名；
+* WebSocket 任务推送；
+* 接收 Helper 提交回执；
+* 保存远程 Submission ID；
+* 调用 Codeforces API 查询结果；
+* 统一评测状态；
+* 限流、超时和异常处理；
+* 审计日志。
+
+### 3.2 本平台前端
+
+负责：
+
+* Codeforces Handle 绑定；
+* 展示绑定状态；
+* 展示 Helper 是否在线；
+* 展示 Codeforces 登录状态；
+* 在线代码编辑；
+* 发起远程提交；
+* 展示评测过程和最终结果；
+* 提供原站跳转。
+
+### 3.3 浏览器 Helper 扩展
+
+负责：
+
+* 检查用户是否已登录 Codeforces；
+* 检测当前登录的 Codeforces Handle；
+* 验证当前 Handle 与绑定 Handle 是否一致；
+* 接收本平台签名任务；
+* 打开 Codeforces 对应提交页面；
+* 映射编程语言；
+* 填写代码和题目信息；
+* 在用户确认后执行提交；
+* 获取远程 Submission ID；
+* 向后端发送提交回执；
+* 报告登录失效、验证码和页面结构变化。
+
+### 3.4 Codeforces API 查询服务
+
+负责使用以下官方接口：
+
+```text
+/api/user.info
+/api/user.status
+/api/contest.status
+/api/problemset.problems
+/api/contest.list
+```
+
+用途分别为：
+
+* 验证 Handle 是否存在；
+* 查询用户提交记录和最终结果；
+* 查询指定比赛的提交记录；
+* 同步题目元数据；
+* 判断比赛状态。
+
+官方 API 不用于提交代码。
+
+---
+
+## 4. 账号绑定流程
+
+### 4.1 用户填写 Handle
+
+请求示例：
+
+```http
+POST /api/external-accounts/codeforces
+```
+
+```json
+{
+  "handle": "tourist"
+}
+```
+
+后端调用：
+
+```text
+https://codeforces.com/api/user.info?handles={handle}
+```
+
+检查：
+
+* Handle 是否存在；
+* Handle 格式是否合法；
+* 当前用户是否已经绑定；
+* 是否存在不允许重复绑定的情况。
+
+此步骤只能验证账号存在，不能证明账号归属。
+
+### 4.2 注册 Helper 设备
+
+浏览器扩展首次连接时生成设备密钥对：
+
+```typescript
+interface HelperDevice {
+  id: string;
+  userId: string;
+  name: string;
+  browser: string;
+  extensionVersion: string;
+  publicKey: string;
+  status: "ONLINE" | "OFFLINE" | "REVOKED";
+  lastSeenAt: string;
+}
+```
+
+私钥只能保存在浏览器扩展本地，不上传服务器。
+
+### 4.3 验证账号归属
+
+后端生成一次性验证任务：
+
+```typescript
+interface CodeforcesAccountVerifyTask {
+  verificationId: string;
+  expectedHandle: string;
+  nonce: string;
+  expiresAt: string;
+  signature: string;
+}
+```
+
+Helper：
+
+1. 打开 Codeforces；
+2. 检查当前是否登录；
+3. 从当前页面解析登录 Handle；
+4. 比较登录 Handle 与 `expectedHandle`；
+5. 使用 Helper 设备私钥签署验证结果；
+6. 回传后端。
+
+验证成功后：
+
+```typescript
+status = "SUBMISSION_READY";
+ownershipVerified = true;
+remoteLoginVerifiedAt = new Date();
+```
+
+如果 Handle 不一致：
+
+```typescript
+status = "ACCOUNT_MISMATCH";
+```
+
+不得允许用户使用其他人的 Codeforces 登录状态提交。
+
+---
+
+## 5. 数据模型
+
+### 5.1 第三方账号
+
+```typescript
+type ExternalAccountStatus =
+  | "PENDING_VERIFICATION"
+  | "SUBMISSION_READY"
+  | "LOGIN_REQUIRED"
+  | "ACCOUNT_MISMATCH"
+  | "HELPER_OFFLINE"
+  | "DISABLED";
+
+interface CodeforcesExternalAccount {
+  id: string;
+  userId: string;
+
+  handle: string;
+  status: ExternalAccountStatus;
+  ownershipVerified: boolean;
+
+  helperDeviceId: string | null;
+  remoteLoginVerifiedAt: string | null;
+  lastSuccessfulSubmissionAt: string | null;
+  lastFailureAt: string | null;
+  lastFailureReason: string | null;
+
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+禁止添加以下字段：
+
+```text
+password
+cookie
+sessionCookie
+csrfToken
+browserStorage
+```
+
+### 5.2 本地提交
+
+```typescript
+interface Submission {
+  id: string;
+  userId: string;
+  problemId: string;
+
+  judgeMode: "CODEFORCES_USER_ACCOUNT";
+  externalAccountId: string;
+
+  language: string;
+  sourceCode: string;
+
+  status: UnifiedJudgeStatus;
+
+  remoteSubmissionId: number | null;
+  remoteRawVerdict: string | null;
+
+  remoteTimeMs: number | null;
+  remoteMemoryBytes: number | null;
+
+  createdAt: string;
+  remoteSubmittedAt: string | null;
+  judgedAt: string | null;
+}
+```
+
+### 5.3 远程提交任务
+
+```typescript
+type RemoteTaskStatus =
+  | "PENDING"
+  | "ASSIGNED"
+  | "HELPER_PROCESSING"
+  | "AWAITING_USER_CONFIRMATION"
+  | "REMOTE_SUBMITTED"
+  | "RECONCILING"
+  | "JUDGING"
+  | "COMPLETED"
+  | "LOGIN_REQUIRED"
+  | "ACCOUNT_MISMATCH"
+  | "CAPTCHA_REQUIRED"
+  | "PAGE_STRUCTURE_CHANGED"
+  | "AMBIGUOUS_SUBMISSION"
+  | "FAILED"
+  | "EXPIRED"
+  | "CANCELLED";
+
+interface CodeforcesSubmissionTask {
+  id: string;
+  submissionId: string;
+  userId: string;
+  externalAccountId: string;
+  helperDeviceId: string;
+
+  handle: string;
+  contestId: number;
+  problemIndex: string;
+
+  localLanguage: string;
+  sourceCode: string;
+
+  status: RemoteTaskStatus;
+
+  remoteSubmissionId: number | null;
+
+  nonce: string;
+  expiresAt: string;
+  attemptCount: number;
+
+  failureCode: string | null;
+  failureMessage: string | null;
+
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+---
+
+## 6. 提交前检查
+
+用户点击提交后，后端依次检查：
+
+1. 用户已登录本平台；
+2. Codeforces 题目存在；
+3. 题目具有 `contestId` 和 `problemIndex`；
+4. 用户已绑定 Codeforces Handle；
+5. 账号归属已经验证；
+6. Helper 设备在线；
+7. Helper 版本受支持；
+8. Helper 最近确认 Codeforces 登录有效；
+9. 当前登录 Handle 与绑定 Handle 一致；
+10. 目标比赛不是正在进行的 Rated Contest；
+11. 用户对该题具有访问权限；
+12. 编程语言存在有效映射；
+13. 用户没有其他正在处理的 Codeforces 提交；
+14. 用户没有超过提交频率限制；
+15. 源代码不为空且没有超过长度限制。
+
+任何检查失败时，不创建可执行任务。
+
+---
+
+## 7. 比赛限制
+
+第一版只允许：
+
+```text
+已结束的普通公开比赛题目
+Practice 提交
+公开历史题目
+```
+
+默认禁止：
+
+```text
+正在进行的 Rated Contest
+正在进行的 Div. 1、Div. 2、Div. 3、Div. 4 或 Educational Round
+用户无权限访问的 Gym
+私有 Group
+私有 Mashup
+隐藏题目
+```
+
+后端应通过缓存的比赛状态判断是否允许提交。
+
+配置示例：
+
+```typescript
+const codeforcesSubmissionPolicy = {
+  allowPractice: true,
+  allowFinishedContestProblems: true,
+  allowLiveRatedContest: false,
+  allowPrivateGym: false,
+  allowPrivateGroup: false,
+  allowMashup: false,
+};
+```
+
+不能只依赖前端限制，后端和 Helper 都必须再次检查。
+
+---
+
+## 8. 任务签名与传输
+
+后端发送给 Helper：
+
+```typescript
+interface SignedCodeforcesTask {
+  taskId: string;
+  submissionId: string;
+
+  userId: string;
+  helperDeviceId: string;
+
+  expectedHandle: string;
+  contestId: number;
+  problemIndex: string;
+
+  language: string;
+  sourceCode: string;
+
+  createdAt: string;
+  expiresAt: string;
+  nonce: string;
+
+  serverSignature: string;
+}
+```
+
+要求：
+
+* 使用 UUID；
+* 每个任务使用唯一 nonce；
+* 有效时间建议为两分钟；
+* 绑定用户和 Helper 设备；
+* 使用服务器私钥签名；
+* Helper 必须验证签名；
+* 每个任务只能成功执行一次；
+* 任务过期后不得提交；
+* WebSocket 使用 TLS；
+* 可选：使用 Helper 设备公钥加密源代码字段。
+
+---
+
+## 9. Helper 提交流程
+
+Helper 收到任务后：
+
+1. 验证服务器签名；
+2. 检查任务是否过期；
+3. 检查任务是否已执行；
+4. 检查本平台当前用户；
+5. 检查 Codeforces 是否登录；
+6. 检查当前 Codeforces Handle；
+7. 检查比赛状态；
+8. 打开对应的 Codeforces 提交页面；
+9. 获取页面当前需要的表单字段；
+10. 获取当前页面使用的安全校验字段；
+11. 将本地语言映射为 Codeforces 语言；
+12. 填入比赛、题目、语言和代码；
+13. 向用户展示最终确认界面；
+14. 用户确认后提交；
+15. 解析提交后的页面跳转或响应；
+16. 尝试提取 Submission ID；
+17. 回传成功回执。
+
+不要在实现中长期硬编码内部提交接口和 CSRF 值。
+
+页面字段和选择器集中放在适配器模块中：
+
+```text
+extension/
+└── adapters/
+    └── codeforces/
+        ├── login-detector.ts
+        ├── account-detector.ts
+        ├── submission-page.ts
+        ├── language-map.ts
+        ├── submission-id-parser.ts
+        └── page-version-detector.ts
+```
+
+页面结构无法识别时：
+
+```typescript
+status = "PAGE_STRUCTURE_CHANGED";
+```
+
+不得尝试盲目提交。
+
+---
+
+## 10. 用户确认
+
+每次提交前，Helper 必须向用户显示：
+
+```text
+Codeforces 账号：tourist
+目标题目：4A
+语言：GNU C++17
+代码长度：1234 字节
+```
+
+提供：
+
+```text
+确认提交
+取消
+在 Codeforces 页面查看
+```
+
+不得在后台静默提交。
+
+用户确认属于每次提交授权，不能通过一次授权永久允许所有后续提交。
+
+---
+
+## 11. 获取 Submission ID
+
+优先采用以下顺序。
+
+### 11.1 页面响应直接获取
+
+如果 Codeforces 提交成功后跳转到包含提交编号的页面，直接解析 ID。
+
+### 11.2 使用官方 API 对账
+
+如果页面未直接返回 Submission ID，后端进入：
+
+```typescript
+status = "RECONCILING";
+```
+
+然后调用：
+
+```text
+/api/user.status?handle={handle}&from=1&count=10
+```
+
+匹配条件：
+
+* `author.members` 中包含绑定 Handle；
+* `problem.contestId` 相同；
+* `problem.index` 相同；
+* `programmingLanguage` 与映射语言一致；
+* `creationTimeSeconds` 在任务提交时间附近；
+* Submission ID 大于提交前记录的最后 ID。
+
+提交前最好记录：
+
+```typescript
+lastKnownSubmissionId
+```
+
+提交后只匹配更大的 Submission ID。
+
+### 11.3 歧义处理
+
+如果在匹配时间窗口中存在多条相同题目、相同语言提交，则标记：
+
+```typescript
+status = "AMBIGUOUS_SUBMISSION";
+```
+
+不得随意选择其中一条。
+
+可以：
+
+* 让 Helper 从页面进一步确认；
+* 让用户手动选择提交；
+* 降级为打开用户的 Codeforces 提交记录。
+
+不得重新提交代码来解决歧义。
+
+---
+
+## 12. 评测结果查询
+
+获得 Submission ID 后，通过 Codeforces 官方 API查询。
+
+优先使用：
+
+```text
+/api/user.status?handle={handle}&from=1&count={合理数量}
+```
+
+也可在适当场景使用：
+
+```text
+/api/contest.status?contestId={contestId}&handle={handle}
+```
+
+Codeforces 官方 API 的调用上限是每两秒一次，因此必须实现全局查询调度器，不能为每条提交启动独立高频轮询。
+
+推荐调度：
+
+```typescript
+const pollingPolicy = {
+  globalMinimumIntervalMs: 2200,
+
+  initialDelayMs: 2500,
+
+  activeIntervalsMs: [
+    2500,
+    3000,
+    4000,
+    5000,
+    8000,
+    12000,
+  ],
+
+  maximumPollingDurationMs: 10 * 60 * 1000,
+};
+```
+
+全局只能由一个 API Scheduler 调用 Codeforces API：
+
+```text
+CodeforcesApiScheduler
+├── user.info 请求
+├── user.status 请求
+├── contest.status 请求
+├── problemset.problems 请求
+└── contest.list 请求
+```
+
+相同 Handle 的多个提交应合并为一次 `user.status` 查询。
+
+---
+
+## 13. 评测状态映射
+
+```typescript
+type UnifiedJudgeStatus =
+  | "PENDING"
+  | "SUBMITTING"
+  | "JUDGING"
+  | "ACCEPTED"
+  | "WRONG_ANSWER"
+  | "TIME_LIMIT_EXCEEDED"
+  | "MEMORY_LIMIT_EXCEEDED"
+  | "RUNTIME_ERROR"
+  | "COMPILE_ERROR"
+  | "OUTPUT_LIMIT_EXCEEDED"
+  | "PRESENTATION_ERROR"
+  | "IDLENESS_LIMIT_EXCEEDED"
+  | "SECURITY_VIOLATED"
+  | "FAILED"
+  | "SKIPPED"
+  | "UNKNOWN";
+```
+
+适配器保存：
+
+```typescript
+interface CodeforcesJudgeResult {
+  submissionId: number;
+  rawVerdict: string | null;
+  unifiedStatus: UnifiedJudgeStatus;
+
+  passedTestCount: number | null;
+  timeConsumedMs: number | null;
+  memoryConsumedBytes: number | null;
+
+  finished: boolean;
+}
+```
+
+Codeforces 返回 `verdict = null` 时视为仍在评测。
+
+必须同时保存原始 `verdict`，不能只保存统一状态。
+
+---
+
+## 14. Helper 回执
+
+成功回执：
+
+```typescript
+interface CodeforcesSubmissionReceipt {
+  taskId: string;
+  submissionId: string;
+
+  handle: string;
+  contestId: number;
+  problemIndex: string;
+
+  remoteSubmissionId: number | null;
+  submittedAt: string;
+
+  pageUrl: string | null;
+  receiptNonce: string;
+  helperSignature: string;
+}
+```
+
+失败回执：
+
+```typescript
+interface CodeforcesSubmissionFailure {
+  taskId: string;
+
+  code:
+    | "LOGIN_REQUIRED"
+    | "ACCOUNT_MISMATCH"
+    | "CAPTCHA_REQUIRED"
+    | "CONTEST_FORBIDDEN"
+    | "LANGUAGE_UNSUPPORTED"
+    | "PAGE_STRUCTURE_CHANGED"
+    | "SUBMISSION_REJECTED"
+    | "NETWORK_ERROR"
+    | "UNKNOWN";
+
+  message: string;
+  retrySafe: boolean;
+
+  helperSignature: string;
+}
+```
+
+禁止回传：
+
+* Cookie；
+* Session；
+* CSRF Token；
+* 密码；
+* 完整请求头；
+* Codeforces 页面中的其他隐私数据。
+
+---
+
+## 15. 重试和幂等
+
+### 可以自动重试
+
+只允许在明确没有向 Codeforces 发出提交时重试，例如：
+
+* Helper 尚未打开提交页面；
+* 任务签名验证失败；
+* 本平台连接暂时断开；
+* Codeforces 页面加载失败且没有发送表单。
+
+### 不允许自动重试
+
+以下情况不得自动再次提交：
+
+* 已点击提交但网络中断；
+* Codeforces 已返回未知响应；
+* 页面发生跳转但未获得 Submission ID；
+* Helper 无法确认提交是否成功；
+* API 暂时未查到对应提交。
+
+这些情况应先进入：
+
+```typescript
+status = "RECONCILING";
+```
+
+通过 `user.status` 查找实际提交。
+
+每个任务使用唯一幂等键：
+
+```text
+codeforces:{userId}:{taskId}
+```
+
+---
+
+## 16. 限流
+
+建议默认：
+
+```typescript
+const codeforcesLimits = {
+  maxConcurrentTaskPerUser: 1,
+  maxConcurrentTaskPerHelper: 1,
+
+  minimumSubmitIntervalPerUserMs: 10_000,
+  minimumSubmitIntervalPerProblemMs: 10_000,
+
+  taskExpirationMs: 120_000,
+  maximumPreSubmitRetries: 1,
+
+  apiGlobalMinimumIntervalMs: 2200,
+};
+```
+
+后台允许调整，但不得低于 Codeforces 官方 API 限制。
+
+---
+
+## 17. 浏览器扩展权限
+
+Manifest V3 示例：
+
+```json
+{
+  "manifest_version": 3,
+  "name": "OJ Codeforces Submit Helper",
+  "version": "0.1.0",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://your-oj.example.com/*",
+    "https://codeforces.com/*"
+  ]
+}
+```
+
+要求：
+
+* 只申请必要域名；
+* 不申请全部网站权限；
+* 不读取非 Codeforces 页面；
+* 不上传 Cookie；
+* 不记录用户浏览历史；
+* 不在用户不知道的情况下执行提交。
+
+---
+
+## 18. 前端页面
+
+### 18.1 Codeforces 账号绑定页
+
+显示：
+
+* Codeforces Handle；
+* 账号存在状态；
+* 账号归属验证状态；
+* Helper 是否在线；
+* Codeforces 是否登录；
+* 当前检测到的 Handle；
+* 最近验证时间；
+* 最近提交时间。
+
+操作：
+
+* 绑定；
+* 验证；
+* 重新验证；
+* 解除绑定；
+* 安装 Helper；
+* 打开 Codeforces 登录页。
+
+### 18.2 题目提交页
+
+显示：
+
+```text
+来源：Codeforces
+题号：4A
+提交账号：tourist
+Helper：在线
+Codeforces 登录：正常
+提交方式：用户账号浏览器辅助提交
+```
+
+操作：
+
+* 提交代码；
+* 打开 Codeforces 原题；
+* 打开 Codeforces 提交页。
+
+### 18.3 提交状态页
+
+状态文案：
+
+```text
+等待 Helper 接收任务
+检查 Codeforces 登录状态
+等待用户确认
+正在提交至 Codeforces
+正在确认远程提交编号
+Codeforces 正在评测
+评测完成
+需要重新登录 Codeforces
+检测到账号不一致
+Codeforces 要求人工验证
+页面结构发生变化
+```
+
+---
+
+## 19. API 设计
+
+```http
+POST   /api/codeforces/accounts
+GET    /api/codeforces/accounts
+DELETE /api/codeforces/accounts/:id
+
+POST   /api/codeforces/accounts/:id/verify
+GET    /api/codeforces/accounts/:id/status
+
+POST   /api/helper/devices
+POST   /api/helper/devices/:id/heartbeat
+DELETE /api/helper/devices/:id
+
+POST   /api/codeforces/submissions
+GET    /api/submissions/:id
+
+GET    /api/helper/tasks/next
+POST   /api/helper/tasks/:id/accepted
+POST   /api/helper/tasks/:id/receipt
+POST   /api/helper/tasks/:id/failure
+POST   /api/helper/tasks/:id/captcha
+```
+
+优先使用 WebSocket 推送任务，HTTP 轮询作为备用。
+
+---
+
+## 20. WebSocket 事件
+
+服务端发送：
+
+```text
+helper.codeforces.verify
+helper.codeforces.submit
+helper.task.cancelled
+```
+
+Helper 发送：
+
+```text
+helper.connected
+helper.heartbeat
+helper.codeforces.accountDetected
+helper.task.accepted
+helper.task.awaitingConfirmation
+helper.task.submitted
+helper.task.failed
+helper.captcha.required
+helper.login.required
+```
+
+---
+
+## 21. 安全要求
+
+必须实现：
+
+* Helper 设备密钥对；
+* 服务端任务签名；
+* Helper 回执签名；
+* nonce 防重放；
+* 短期任务有效期；
+* 一次性任务；
+* WebSocket 身份认证；
+* 用户与设备绑定；
+* 操作审计；
+* 源代码访问权限；
+* Helper 撤销机制；
+* 敏感日志过滤。
+
+日志不得记录：
+
+```text
+Codeforces Cookie
+Codeforces 密码
+CSRF Token
+完整源代码
+浏览器本地存储
+完整第三方响应头
+```
+
+---
+
+## 22. 题目展示边界
+
+第一版只同步并展示 Codeforces 官方 API 提供的题目元数据：
+
+* contestId；
+* index；
+* name；
+* rating；
+* tags；
+* points；
+* solvedCount；
+* 原题链接。
+
+完整题面默认跳转 Codeforces 原站，不在本平台建立完整自动评测题面副本。
+
+题目页面必须明确显示：
+
+```text
+题目来源：Codeforces
+原题链接：Codeforces 对应题目页面
+实际评测：使用用户自己的 Codeforces 账号
+```
+
+---
+
+## 23. 异常降级
+
+按以下顺序降级：
+
+```text
+用户账号浏览器辅助提交
+        ↓
+自动填充 Codeforces 提交页面，用户手动提交
+        ↓
+打开 Codeforces 提交页面并复制代码
+        ↓
+仅跳转 Codeforces 原题
+```
+
+以下情况必须自动降级：
+
+* Helper 离线；
+* Helper 版本过旧；
+* Codeforces 未登录；
+* 当前登录账号不一致；
+* 出现验证码；
+* 页面结构发生变化；
+* Codeforces 服务不可用；
+* 当前比赛禁止辅助提交。
+
+---
+
+## 24. 管理后台
+
+管理员需要能够：
+
+* 启用或禁用 Codeforces 适配器；
+* 设置允许的比赛类型；
+* 设置提交间隔；
+* 查看 Helper 在线数量；
+* 查看提交成功率；
+* 查看 Submission ID 匹配失败率；
+* 查看 API 限流情况；
+* 查看验证码事件；
+* 查看页面结构变化事件；
+* 暂停全部 Codeforces 远程提交；
+* 强制降级为原站跳转。
+
+---
+
+## 25. MVP 开发顺序
+
+### 第一阶段：基础设施
+
+实现：
+
+* Codeforces 账号绑定数据表；
+* Helper 设备注册；
+* WebSocket；
+* 任务和回执签名；
+* 远程任务状态机；
+* 模拟提交适配器。
+
+### 第二阶段：账号验证
+
+实现：
+
+* `user.info` 检查 Handle；
+* Helper 检测登录状态；
+* Helper 检测当前 Handle；
+* 账号归属验证；
+* Handle 不一致阻止提交。
+
+### 第三阶段：真实提交
+
+实现：
+
+* 历史公开题目；
+* Codeforces 提交页面适配；
+* 语言映射；
+* 用户确认；
+* 提交回执；
+* Submission ID 直接解析。
+
+### 第四阶段：结果查询
+
+实现：
+
+* `user.status` 查询；
+* 全局 API 调度器；
+* Submission ID 对账；
+* 评测状态映射；
+* WebSocket 状态更新。
+
+### 第五阶段：稳定性
+
+实现：
+
+* 超时；
+* 对账；
+* 歧义处理；
+* 限流；
+* 页面版本检测；
+* 自动降级；
+* 管理后台；
+* 审计日志。
+
+---
+
+## 26. MVP 验收标准
+
+必须满足：
+
+1. 用户可以绑定 Codeforces Handle；
+2. 后端能够确认 Handle 存在；
+3. Helper 能检测当前 Codeforces 登录账号；
+4. 当前账号与绑定 Handle 不一致时禁止提交；
+5. 用户可以在本平台填写历史 Codeforces 题目的代码；
+6. Helper 能接收签名任务；
+7. 用户每次提交前需要明确确认；
+8. 代码使用用户自己的 Codeforces 账号提交；
+9. 服务器不保存 Codeforces 密码和 Cookie；
+10. 系统能够获得或对账出 Submission ID；
+11. 系统能够通过官方 API查询结果；
+12. 系统能够显示 AC、WA、TLE、MLE、RE 和 CE；
+13. API 查询符合每两秒一次的全局限制；
+14. 不确定是否提交成功时不会重复提交；
+15. Helper 离线时可以降级；
+16. 出现验证码时立即停止；
+17. 正在进行的 Rated Contest 默认禁止提交；
+18. 每个任务只能成功执行一次；
+19. Helper 设备可以被用户撤销；
+20. 所有关键操作都有审计日志。
+
+---
+
+## 27. 明确禁止事项
+
+不得实现：
+
+* 服务器保存 Codeforces 密码；
+* 服务器保存完整 Codeforces Cookie；
+* 机器人账号池；
+* 验证码识别或绕过；
+* Cloudflare 绕过；
+* 代理池规避风控；
+* 静默后台提交；
+* 自动提交正在进行的 Rated Contest；
+* 未验证账号归属便允许提交；
+* 任务状态不确定时自动重新提交；
+* 对 Codeforces API 进行高频请求；
+* 未经许可批量复制测试数据；
+* 将该功能称为 Codeforces 官方 Remote Judge API。
+
+---
+
+## 28. 最终产品定义
+
+该功能应描述为：
+
+> Codeforces 用户账号浏览器辅助提交：用户绑定并验证自己的 Codeforces Handle，浏览器 Helper 使用用户当前已登录的 Codeforces 会话，在用户明确确认后将代码提交至用户自己的 Codeforces 账号。本平台不保存 Codeforces 密码或 Cookie，只保存远程 Submission ID，并通过 Codeforces 官方读取 API同步评测结果。
+
+该功能不是 Codeforces 官方 Remote Judge API，不承诺 Codeforces 页面结构长期不变，必须始终保留原站跳转和人工提交作为降级方案。
