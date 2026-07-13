@@ -6,11 +6,12 @@ import { SubmissionController } from './submission.controller';
 import { JudgeProcessor } from './judge.processor';
 import { CFJudgeProcessor } from './cf-judge.processor';
 import { JudgeModule } from '../judge/judge.module';
+import { HelperModule } from '../helper/helper.module';
 import { CodeforcesAdapter } from '../codeforces/cf-adapter.service';
 
 @Module({
   imports: [
-    JudgeModule,
+    JudgeModule, HelperModule,
     BullModule.registerQueueAsync({
       name: 'judge', imports: [ConfigModule], inject: [ConfigService],
       useFactory: (c: ConfigService) => ({

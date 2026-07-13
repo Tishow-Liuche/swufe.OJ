@@ -44,12 +44,14 @@ export class SubmissionController {
     return sub;
   }
 
-  /** 回填第三方评测结果 */
+  /** 回填第三方评测结果（Helper 扩展调用，无需 JWT） */
   @Post(':id/fill-result')
-  @UseGuards(AuthGuard('jwt'))
-  fillResult(@Param('id') id: string, @Req() req: any, @Body() data: {
+  fillResult(@Param('id') id: string, @Body() data: {
     status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string;
+    userId?: string;
   }) {
+    // 验证提交属于该用户
+    return this.submission.fillExternalResultUnsafe(id, data.userId || '', data);
   }
 
   /** 重判（教师/管理员） */

@@ -1,366 +1,222 @@
 /**
- * OJ Remote Submit Helper — Background Service Worker
- *
- * 流程：
- * 1. 连接本平台 WebSocket → 注册为 Helper
- * 2. 收到任务 → 创建新 Tab 打开第三方 OJ
- * 3. 注入 content script 执行提交
- * 4. 获取 remoteSubmissionId → 回传平台
+ * OJ Remote Submit Helper v2 — 使用浏览器会话提交到 Codeforces/洛谷
  */
 
-const PLATFORM_SETTINGS = {
-  CODEFORCES: {
-    origin: 'https://codeforces.com',
-    submitUrl: '/problemset/submit',
-    resultPageBase: '/problemset/status',
-  },
-  LUOGU: {
-    origin: 'https://www.luogu.com.cn',
-    submitUrl: '/fe/api/problem/submit/',
-    resultPageBase: '/record/',
-  },
-  NOWCODER: {
-    origin: 'https://ac.nowcoder.com',
-    submitUrl: '/nccommon/submit',
-    resultPageBase: '/acm/contest/status-list',
-  },
-  QOJ: {
-    origin: 'https://qoj.ac',
-    submitUrl: '/problem/',
-    resultPageBase: '/submission/',
-  },
+const SERVER = 'http://127.0.0.1:3000';
+const PLATFORMS = {
+  CODEFORCES: { origin: 'https://codeforces.com' },
+  LUOGU: { origin: 'https://www.luogu.com.cn' },
 };
 
-// ========== 配置 ==========
-const SERVER_URL = 'http://localhost:3000'; // 你的 OJ 平台地址
-const WS_URL = 'ws://localhost:3000/helper';
-
-// ========== 状态 ==========
 let ws = null;
 let userId = '';
 let deviceId = '';
-let reconnectTimer = null;
 let currentTask = null;
 
-// ========== 初始化 ==========
-async function init() {
-  const stored = await chrome.storage.local.get(['userId', 'deviceId', 'deviceName', 'serverUrl']);
-  if (stored.userId && stored.deviceId) {
-    userId = stored.userId;
-    deviceId = stored.deviceId;
-    connect();
-  } else {
-    console.log('[Helper] 等待用户配置...');
+// ============ 初始化 ============
+chrome.storage.local.get(['userId', 'deviceId', 'deviceName'], (data) => {
+  if (data.userId && data.deviceId) {
+    userId = data.userId;
+    deviceId = data.deviceId;
+    connectWS();
   }
-}
+});
 
-// ========== WebSocket 连接 ==========
-function connect() {
-  if (ws) { ws.close(); }
-  const url = `${WS_URL}?userId=${encodeURIComponent(userId)}&deviceId=${encodeURIComponent(deviceId)}`;
-  ws = new WebSocket(url);
+// ============ WebSocket ============
+function connectWS() {
+  if (ws) ws.close();
+  ws = new WebSocket(`${SERVER.replace('http', 'ws')}/helper?userId=${userId}&deviceId=${deviceId}`);
 
   ws.onopen = () => {
-    console.log('[Helper] WebSocket 已连接');
-    // 注册
-    ws.send(JSON.stringify({
-      type: 'helper.register',
-      data: { userId, deviceId }
-    }));
-    // 请求第一个任务
-    ws.send(JSON.stringify({
-      type: 'helper.nextTask',
-      data: { userId, deviceId }
-    }));
+    console.log('[Helper] WS connected');
+    ws.send(JSON.stringify({ type: 'helper.register', data: { userId, deviceId } }));
+    ws.send(JSON.stringify({ type: 'helper.nextTask', data: { userId, deviceId } }));
   };
 
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
-      handleMessage(msg);
-    } catch (e) { console.error('[Helper] 消息解析失败', e); }
-  };
-
-  ws.onclose = () => {
-    console.log('[Helper] WebSocket 断开，5s 后重连...');
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, 5000);
-  };
-
-  ws.onerror = (e) => {
-    console.error('[Helper] WebSocket 错误', e);
-  };
-}
-
-// ========== 消息处理 ==========
-function handleMessage(msg) {
-  switch (msg.type || msg.event) {
-    case 'helper.task.created':
-      handleTask(msg.data || msg);
-      break;
-    case 'task.created':
-      handleTask(msg);
-      break;
-    default:
-      // 可能是直接返回的任务响应
-      if (msg.taskId && msg.platform) {
+      if (msg.taskId || (msg.type && msg.type.includes('task'))) {
         handleTask(msg);
       }
-  }
+    } catch (e) {
+      console.error('[Helper] Parse error:', e);
+    }
+  };
+
+  ws.onclose = () => { console.log('[Helper] WS closed, retry 5s'); setTimeout(connectWS, 5000); };
+  ws.onerror = () => {};
 }
 
-// ========== 任务执行 ==========
+// ============ 任务执行 ============
 async function handleTask(task) {
-  if (currentTask) {
-    console.log('[Helper] 已有任务在处理中');
-    return;
-  }
+  if (currentTask) return;
   currentTask = task;
-  console.log('[Helper] 收到任务:', task.taskId, task.platform, task.remoteProblemId);
+  console.log('[Helper] Task:', task.taskId, task.platform, task.remoteProblemId);
 
-  const settings = PLATFORM_SETTINGS[task.platform];
-  if (!settings) {
-    reportFailure(task, 'PLATFORM_UNSUPPORTED', '不支持的平台');
-    return;
+  if (task.platform === 'CODEFORCES') {
+    await executeCF(task);
+  } else {
+    reportFailure(task, 'PLATFORM_UNSUPPORTED', '不支持的平台: ' + task.platform);
   }
+  currentTask = null;
+}
+
+async function executeCF(task) {
+  const pid = task.remoteProblemId; // e.g. "4A" or "158A"
+  const match = pid.match(/^(\d+)([A-Z]\d?)$/);
+  if (!match) return reportFailure(task, 'INVALID_PID', 'CF 题号格式错误: ' + pid);
+  const contestId = parseInt(match[1]);
+  const problemIndex = match[2];
+
+  // 打开 CF 提交页面
+  const submitUrl = `https://codeforces.com/problemset/submit/${contestId}/${problemIndex}`;
+  console.log('[Helper] Opening CF submit:', submitUrl);
 
   try {
-    // 导航到提交页面，注入 content script 执行
-    const submitUrl = buildSubmitUrl(task, settings);
+    const tab = await chrome.tabs.create({ url: submitUrl, active: false });
+    await sleep(4000); // 等页面加载
 
-    // 创建 tab
-    const tab = await chrome.tabs.create({ url: getTaskPage(task), active: false });
-
-    // 等待页面加载
-    await sleep(3000);
-
-    // 注入提交脚本
-    const result = await chrome.scripting.executeScript({
+    // 注入脚本：从页面获取 CSRF，执行提交
+    const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: submitToPlatform,
-      args: [task, settings],
+      func: async (args) => {
+        const { contestId, problemIndex, sourceCode, lang } = args;
+        const langMap = { cpp: '73', c: '61', python: '70', java: '60' };
+        const programTypeId = langMap[lang] || '73';
+
+        // 获取 CSRF
+        const csrfMeta = document.querySelector('meta[name="X-Csrf-Token"]');
+        if (!csrfMeta) return { error: 'CF 登录已过期，请刷新 Codeforces 页面' };
+        const csrf = csrfMeta.getAttribute('content');
+
+        // 通过 XHR 提交（复用浏览器 cookie）
+        return new Promise((resolve) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', `/problemset/submit/${contestId}/${problemIndex}?csrf_token=${encodeURIComponent(csrf)}`);
+          xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+
+          const ftaa = 'a'.repeat(18);
+          const body = new URLSearchParams({
+            csrf_token: csrf, ftaa,
+            bfaa: 'f1b3f18c715565b589b7823cda7448ce',
+            action: 'submitSolutionFormSubmitted',
+            submittedProblemIndex: problemIndex,
+            programTypeId,
+            source: sourceCode,
+            tabSize: '4',
+            sourceFile: '',
+            _tta: '594',
+          });
+
+          xhr.onload = () => {
+            // 提交后重定向到 /problemset/status/XXXXX/my
+            const finalUrl = xhr.responseURL || window.location.href;
+            const sidMatch = finalUrl.match(/\/status\/(\d+)\/my/);
+            if (sidMatch) {
+              resolve({ submissionId: parseInt(sidMatch[1]), url: finalUrl });
+            } else {
+              // 等 2 秒后从当前 URL 提取
+              setTimeout(() => {
+                const url2 = window.location.href;
+                const m2 = url2.match(/\/status\/(\d+)\/my/);
+                if (m2) resolve({ submissionId: parseInt(m2[1]), url: url2 });
+                else resolve({ error: '无法获取 CF Submission ID，请查看页面' });
+              }, 2500);
+            }
+          };
+          xhr.onerror = () => resolve({ error: 'CF 提交请求失败' });
+          xhr.send(body.toString());
+        });
+      },
+      args: [{ contestId, problemIndex, sourceCode: task.sourceCode, lang: task.language }],
     });
 
-    const injectionResult = result[0]?.result;
-    if (injectionResult?.error) {
-      reportFailure(task, 'REMOTE_SUBMISSION_FAILED', injectionResult.error);
+    const result = results[0]?.result;
+    if (result?.submissionId) {
+      console.log('[Helper] CF submitted:', result.submissionId);
+      reportReceipt(task, result.submissionId);
+      // 5 秒后查询结果
+      setTimeout(() => queryCFResult(task, tab), 5000);
     } else {
-      // 提交成功，等待跳转到结果页获取 submission ID
-      await sleep(2000);
+      reportFailure(task, 'REMOTE_SUBMISSION_FAILED', result?.error || '未知错误');
+    }
+  } catch (e) {
+    reportFailure(task, 'NETWORK_ERROR', e.message);
+  }
+}
 
-      // 从结果页 URL 提取 submission ID
-      const submissionResult = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => ({ url: window.location.href }),
+// ============ 查询 CF 评测结果 ============
+async function queryCFResult(task, tab) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: async (args) => {
+      const xhr = new XMLHttpRequest();
+      return new Promise((resolve) => {
+        xhr.open('GET', `/api/user.status?handle=__me__&from=1&count=10`);
+        xhr.onload = () => {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (data.status === 'OK') {
+              const match = data.result.find(s => s.id === args.submissionId);
+              resolve(match ? {
+                verdict: match.verdict || 'TESTING',
+                time: match.timeConsumedMillis || 0,
+                memory: match.memoryConsumedBytes || 0,
+              } : null);
+            } else {
+              resolve(null);
+            }
+          } catch { resolve(null); }
+        };
+        xhr.onerror = () => resolve(null);
+        xhr.send();
       });
-
-      const currentUrl = submissionResult[0]?.result?.url || '';
-      const remoteId = extractSubmissionId(currentUrl, task.platform);
-
-      if (remoteId) {
-        reportReceipt(task, remoteId);
-      } else {
-        // 尝试从页面内容提取
-        const contentResult = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: extractFromPage,
-          args: [task.platform],
-        });
-        const fromPage = contentResult[0]?.result;
-        if (fromPage) {
-          reportReceipt(task, fromPage);
-        } else {
-          reportFailure(task, 'REMOTE_SUBMISSION_ID_NOT_FOUND', '无法获取远程提交编号');
-        }
-      }
-    }
-
-    // 关闭 tab
-    try { chrome.tabs.remove(tab.id); } catch(e) {}
-  } catch (e) {
-    reportFailure(task, 'REMOTE_SUBMISSION_FAILED', e.message);
-  } finally {
-    currentTask = null;
-  }
-}
-
-// ========== 提交到平台 ==========
-function submitToPlatform(task, settings) {
-  // 这个函数在 target OJ 页面的上下文中执行
-  try {
-    // 根据不同平台定位提交表单
-    switch (task.platform) {
-      case 'CODEFORCES':
-        return submitCodeforces(task, settings);
-      case 'LUOGU':
-        return submitLuogu(task, settings);
-      case 'NOWCODER':
-        return submitNowcoder(task, settings);
-      case 'QOJ':
-        return submitQOJ(task, settings);
-      default:
-        return { error: 'UNSUPPORTED_PLATFORM' };
-    }
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-
-function submitCodeforces(task) {
-  // 找到语言选择器
-  const langMap = { cpp: '54', c: '43', python: '70', java: '60' };
-  const langId = langMap[task.language] || '54';
-
-  const langSelect = document.querySelector('select[name="programTypeId"]');
-  const sourceTextarea = document.querySelector('textarea[name="source"]');
-  const submitBtn = document.querySelector('input[type="submit"].submit');
-
-  if (!sourceTextarea) return { error: '未找到 Codeforces 提交页面元素' };
-
-  if (langSelect) {
-    langSelect.value = langId;
-    langSelect.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-  sourceTextarea.value = task.sourceCode;
-  sourceTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-
-  if (submitBtn) submitBtn.click();
-  return { success: true };
-}
-
-function submitLuogu(task) {
-  const langMap = { cpp: '11', c: '2', python: '17', java: '8' };
-  const langId = langMap[task.language] || '11';
-
-  // 洛谷使用 AJAX 提交
-  fetch('/fe/api/problem/submit/' + task.remoteProblemId, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-csrf-token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
     },
-    body: JSON.stringify({
-      lang: parseInt(langId),
-      code: task.sourceCode,
-      enableO2: 1,
-    }),
+    args: [{ submissionId: result.submissionId }],
   });
-  return { success: true };
-}
 
-function submitNowcoder(task) {
-  const sourceTextarea = document.querySelector('textarea[name="source"]');
-  if (!sourceTextarea) return { error: '未找到牛客提交元素' };
-  sourceTextarea.value = task.sourceCode;
-  const submitBtn = document.querySelector('.submit-btn, button[type="submit"]');
-  if (submitBtn) submitBtn.click();
-  return { success: true };
-}
-
-function submitQOJ(task) {
-  const sourceTextarea = document.querySelector('textarea[name="source"]');
-  if (!sourceTextarea) return { error: '未找到 QOJ 提交元素' };
-  sourceTextarea.value = task.sourceCode;
-  const submitBtn = document.querySelector('button[type="submit"]');
-  if (submitBtn) submitBtn.click();
-  return { success: true };
-}
-
-function extractFromPage(platform) {
-  // 尝试从页面内容提取 submission ID
-  switch (platform) {
-    case 'CODEFORCES':
-      const tr = document.querySelector('table.status-frame-datatable tr[data-submission-id]');
-      return tr ? tr.getAttribute('data-submission-id') : null;
-    case 'LUOGU':
-      const recordLink = document.querySelector('a[href*="/record/"]');
-      if (recordLink) {
-        const match = recordLink.href.match(/\/record\/(\d+)/);
-        return match ? match[1] : null;
-      }
-      return null;
-    case 'NOWCODER':
-      const ncLink = document.querySelector('.submission-id');
-      return ncLink ? ncLink.textContent.trim() : null;
-    default:
-      return null;
+  const cfResult = results[0]?.result;
+  if (cfResult && cfResult.verdict !== 'TESTING') {
+    // 通过 HTTP API 更新结果
+    fetch(`${SERVER}/api/submissions/${task.submissionId}/fill-result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: mapCFVerdict(cfResult.verdict),
+        score: cfResult.verdict === 'OK' ? 100 : 0,
+        timeUsed: cfResult.time,
+        memoryUsed: cfResult.memory ? Math.round(cfResult.memory / 1024) : 0,
+        remoteSubmissionId: String(args.submissionId),
+      }),
+    });
   }
+
+  try { chrome.tabs.remove(tab.id); } catch (e) {}
 }
 
-function extractSubmissionId(url, platform) {
-  const patterns = {
-    CODEFORCES: /\/problemset\/status\/(\d+)/,
-    LUOGU: /\/record\/(\d+)/,
-    NOWCODER: /submissionId=(\d+)/,
-    QOJ: /\/submissions\/(\d+)/,
-  };
-  const re = patterns[platform];
-  if (re) {
-    const match = url.match(re);
-    return match ? match[1] : null;
-  }
-  return null;
-}
-
-// ========== 辅助函数 ==========
-function buildSubmitUrl(task, settings) {
-  const p = task.remoteProblemId;
-  switch (task.platform) {
-    case 'CODEFORCES':
-      return `${settings.origin}/problemset/submit`;
-    case 'LUOGU':
-      return `${settings.origin}/problem/${p}`;
-    case 'NOWCODER':
-      return `${settings.origin}/acm/contest/submit`;
-    case 'QOJ':
-      return `${settings.origin}/problem/${p}`;
-    default:
-      return settings.origin;
-  }
-}
-
-function getTaskPage(task) {
-  switch (task.platform) {
-    case 'CODEFORCES':
-      return `https://codeforces.com/problemset/submit`;
-    case 'LUOGU':
-      return `https://www.luogu.com.cn/problem/${task.remoteProblemId}`;
-    default:
-      return `https://codeforces.com/problemset/submit`;
-  }
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// ========== 向平台报告 ==========
-function reportReceipt(task, remoteId) {
+// ============ 报告 ============
+function reportReceipt(task, submissionId) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({
     type: 'helper.receipt',
-    data: {
-      taskId: task.taskId,
-      userId,
-      remoteSubmissionId: remoteId,
-      remoteUsername: '',
-      submittedAt: new Date().toISOString(),
-    }
+    data: { taskId: task.taskId, userId, remoteSubmissionId: String(submissionId), remoteUsername: '', submittedAt: new Date().toISOString() },
   }));
-  console.log('[Helper] 提交成功:', remoteId);
 }
 
 function reportFailure(task, code, message) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({
     type: 'helper.failure',
-    data: {
-      taskId: task.taskId,
-      userId,
-      failureCode: code,
-      failureMessage: message,
-    }
+    data: { taskId: task.taskId, userId, failureCode: code, failureMessage: message },
   }));
-  console.log('[Helper] 提交失败:', code, message);
 }
 
-// ========== 启动 ==========
-init();
+function mapCFVerdict(v) {
+  const m = { OK: 'ACCEPTED', WRONG_ANSWER: 'WRONG_ANSWER', TIME_LIMIT_EXCEEDED: 'TIME_LIMIT_EXCEEDED',
+    MEMORY_LIMIT_EXCEEDED: 'MEMORY_LIMIT_EXCEEDED', RUNTIME_ERROR: 'RUNTIME_ERROR', COMPILATION_ERROR: 'COMPILE_ERROR',
+    SKIPPED: 'CANCELLED', TESTING: 'JUDGING' };
+  return m[v] || 'UNKNOWN';
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
