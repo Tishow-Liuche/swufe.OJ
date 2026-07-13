@@ -135,7 +135,7 @@ npm install
 npm run build           # 构建产物输出到 dist/
 ```
 
-访问 **http://localhost:3000**，前后端统一端口，零跨域。
+访问 http://127.0.0.1:3000，前后端统一端口，零跨域。
 
 ---
 
