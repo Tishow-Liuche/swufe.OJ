@@ -8,12 +8,16 @@ export class SubmissionService {
   constructor(
     private prisma: PrismaService,
     @InjectQueue('judge') private judgeQueue: Queue,
+    @InjectQueue('remote-judge') private remoteQueue: Queue,
   ) {}
 
   async submit(userId: string, dto: { problemId: string; language: string; sourceCode: string }) {
     const problem = await this.prisma.problem.findUnique({
       where: { id: dto.problemId },
-      include: { versions: { where: { isCurrent: true }, take: 1 } },
+      include: {
+        versions: { where: { isCurrent: true }, take: 1 },
+        sourceInfo: true,
+      },
     });
     if (!problem || problem.status !== 'PUBLISHED') {
       throw new NotFoundException('题目不存在或未发布');
@@ -22,34 +26,51 @@ export class SubmissionService {
     const currentVersion = problem.versions[0];
     if (!currentVersion) throw new NotFoundException('题目版本不存在');
 
-    // 检查题目是否有测试用例
-    const testCaseCount = await this.prisma.problemTestCase.count({
-      where: { problemVersionId: currentVersion.id },
-    });
-    if (testCaseCount === 0) {
-      throw new NotFoundException('该题目尚未配置测试数据，请联系管理员');
-    }
-
     // 创建提交记录
     const submission = await this.prisma.submission.create({
       data: {
         problemId: dto.problemId,
         problemVersionId: currentVersion.id,
-        userId, language: dto.language,
-        sourceCode: dto.sourceCode, status: 'PENDING',
+        userId,
+        language: dto.language,
+        sourceCode: dto.sourceCode,
+        status: 'PENDING',
       },
     });
 
-    // 全部走本地评测（LOCAL + EXTERNAL）
-    await this.prisma.judgeTask.create({ data: { submissionId: submission.id } });
-    await this.judgeQueue.add('local-judge', {
-      submissionId: submission.id,
-      problemId: dto.problemId,
-      language: dto.language,
-      sourceCode: dto.sourceCode,
-      timeLimit: problem.timeLimit,
-      memoryLimit: problem.memoryLimit,
-    }, { priority: 1 });
+    // 判断评测类型：LOCAL → 本地执行，EXTERNAL → Remote Judge
+    if (problem.source === 'LOCAL') {
+      // 本地评测：检查测试用例
+      const testCaseCount = await this.prisma.problemTestCase.count({
+        where: { problemVersionId: currentVersion.id },
+      });
+      if (testCaseCount === 0) {
+        throw new NotFoundException('该题目尚未配置测试数据，请联系管理员');
+      }
+
+      await this.prisma.judgeTask.create({ data: { submissionId: submission.id } });
+      await this.judgeQueue.add('local-judge', {
+        submissionId: submission.id,
+        problemId: dto.problemId,
+        language: dto.language,
+        sourceCode: dto.sourceCode,
+        timeLimit: problem.timeLimit,
+        memoryLimit: problem.memoryLimit,
+      }, { priority: 1 });
+    } else {
+      // Remote Judge：提交到洛谷开放平台
+      const remotePid = problem.sourceInfo?.remoteProblemId;
+      if (!remotePid) throw new NotFoundException('该题目未关联第三方题目编号');
+
+      await this.prisma.remoteJudgeJob.create({ data: { submissionId: submission.id, platform: 'LUOGU', remoteProblemId: remotePid } });
+      await this.remoteQueue.add('remote-judge', {
+        submissionId: submission.id,
+        problemId: dto.problemId,
+        remoteProblemId: remotePid,
+        language: dto.language,
+        sourceCode: dto.sourceCode,
+      }, { priority: 1 });
+    }
 
     await this.prisma.submission.update({
       where: { id: submission.id },
