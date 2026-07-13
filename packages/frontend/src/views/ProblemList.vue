@@ -6,6 +6,7 @@ import api from '../api/client';
 const router = useRouter();
 const problems = ref<any[]>([]);
 const loading = ref(true);
+const errorMsg = ref('');
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -28,16 +29,23 @@ const difficulties = [
 
 async function fetchProblems() {
   loading.value = true;
+  errorMsg.value = '';
   const params: any = { page: page.value, pageSize: pageSize.value };
   if (keyword.value) params.keyword = keyword.value;
   if (difficulty.value) params.difficulty = difficulty.value;
   if (tag.value) params.tag = tag.value;
 
-  const { data } = await api.get('/api/problems', { params });
-  problems.value = data.items;
-  total.value = data.total;
-  allTags.value = [...new Set(data.items.flatMap((p: any) => p.tags?.map((t: any) => t.name) || []))] as string[];
-  loading.value = false;
+  try {
+    const res = await api.get('/api/problems', { params });
+    problems.value = res.data.items || [];
+    total.value = res.data.total || 0;
+    allTags.value = [...new Set(res.data.items?.flatMap((p: any) => p.tags?.map((t: any) => t.name) || []) || [])] as string[];
+  } catch (e: any) {
+    errorMsg.value = e.message || '请求失败';
+    console.error('Failed to fetch problems:', e);
+  } finally {
+    loading.value = false;
+  }
 }
 
 function search() {
@@ -64,7 +72,7 @@ watch([keyword, difficulty, tag], () => { page.value = 1; });
 <template>
   <div class="problem-list">
     <div class="toolbar">
-      <h2>题库 ({{ total }} 题)</h2>
+      <h2>题库 <span class="debug-ver">v2</span> ({{ total }} 题)</h2>
       <div class="toolbar-right">
         <button class="btn-import" @click="goToImport">导入题目</button>
       </div>
@@ -120,7 +128,12 @@ watch([keyword, difficulty, tag], () => { page.value = 1; });
       </tbody>
     </table>
 
-    <div v-if="!loading && problems.length === 0" class="empty">
+    <div v-if="errorMsg" class="error-box">
+      <p>❌ 请求失败：{{ errorMsg }}</p>
+      <button @click="fetchProblems">重新加载</button>
+    </div>
+
+    <div v-if="!loading && !errorMsg && problems.length === 0" class="empty">
       <p>暂无题目，点击「导入题目」添加第一批题目。</p>
     </div>
 
@@ -143,6 +156,7 @@ watch([keyword, difficulty, tag], () => { page.value = 1; });
   margin-bottom: 16px;
 }
 .toolbar h2 { margin: 0; }
+.debug-ver { font-size: 11px; background: #ff9800; color: #fff; padding: 1px 6px; border-radius: 3px; vertical-align: middle; }
 
 .btn-import {
   padding: 8px 20px;
@@ -216,6 +230,17 @@ watch([keyword, difficulty, tag], () => { page.value = 1; });
 .empty {
   text-align: center; padding: 60px 20px;
   color: #999; font-size: 16px;
+}
+.error-box {
+  text-align: center; padding: 40px 20px;
+  color: #c62828; font-size: 14px;
+  background: #fff5f5; border: 1px solid #ffcdd2;
+  border-radius: 8px; margin-bottom: 16px;
+}
+.error-box button {
+  margin-top: 10px; padding: 6px 16px;
+  background: #e74c3c; color: #fff;
+  border: none; border-radius: 4px; cursor: pointer;
 }
 .loading { text-align: center; color: #999; padding: 40px; }
 
