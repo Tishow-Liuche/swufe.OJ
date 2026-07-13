@@ -38,12 +38,21 @@ function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 function doSubmit(args){
   let L={cpp:'73',c:'61',python:'70',java:'60'},pt=L[args.lang]||'73';
   return new Promise(resolve=>{
+    // Check login first
+    let enterLink=document.querySelector('a[href*="enter"]');
+    if(enterLink && enterLink.textContent.includes('Enter')) return resolve({error:'未登录CF，请先访问codeforces.com登录账号Tishow__Liuche'});
+
     function trySubmit(n){
       let sel=document.querySelector('select[name="programTypeId"]'),area=document.querySelector('textarea[name="source"]'),btn=document.querySelector('input.submit[type="submit"]');
-      if(!sel||!area||!btn){if(n<20)return setTimeout(()=>trySubmit(n+1),800);return resolve({error:'CF页面加载超时，请确认已登录'})}
+      if(!sel||!area||!btn){
+        let pageTitle=document.title||'';
+        console.log('[Inject] Page:'+pageTitle+' retry='+n+' sel='+!!sel+' area='+!!area+' btn='+!!btn);
+        if(n<30)return setTimeout(()=>trySubmit(n+1),800);
+        return resolve({error:'CF提交表单未找到('+pageTitle.substring(0,30)+')——请确认已登录codeforces.com'})
+      }
       sel.value=pt;sel.dispatchEvent(new Event('change',{bubbles:true}));
       area.value=args.code;area.dispatchEvent(new Event('input',{bubbles:true}));
-      setTimeout(()=>{btn.click();let c=0,iv=setInterval(()=>{c++;let el=document.querySelector('tr[data-submission-id]');if(el){clearInterval(iv);resolve({sid:+el.getAttribute('data-submission-id')})}let m2=location.href.match(/\/status\/(\d+)/);if(m2){clearInterval(iv);resolve({sid:+m2[1]})}if(c>30){clearInterval(iv);resolve({error:'NO_SID'})}},1000)},2000)
+      setTimeout(()=>{btn.click();console.log('[Inject] Submit clicked');let c=0,iv=setInterval(()=>{c++;let el=document.querySelector('tr[data-submission-id]');if(el){clearInterval(iv);resolve({sid:+el.getAttribute('data-submission-id')});return}let m2=location.href.match(/\/status\/(\d+)/);if(m2){clearInterval(iv);resolve({sid:+m2[1]});return}if(c>30){clearInterval(iv);resolve({error:'NO_SID'})}},1000)},2000)
     }
     trySubmit(1)
   })
