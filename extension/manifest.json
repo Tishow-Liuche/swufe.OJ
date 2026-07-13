@@ -1,1 +1,1 @@
-{"manifest_version":3,"name":"OJ CF Helper v2","version":"2.0.0","permissions":["alarms","scripting"],"host_permissions":["https://codeforces.com/*","http://127.0.0.1:3000/*"],"background":{"service_worker":"bg.js"}}
+{"manifest_version":3,"name":"OJ CF Helper v2","version":"2.1.0","permissions":["alarms","scripting"],"host_permissions":["https://codeforces.com/*","http://127.0.0.1:3000/*"],"background":{"service_worker":"bg.js"}}
