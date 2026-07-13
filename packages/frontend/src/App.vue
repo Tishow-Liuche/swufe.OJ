@@ -20,6 +20,7 @@ function logout() {
         <router-link to="/" class="logo">西财 OJ</router-link>
         <nav>
           <router-link to="/problems">题库</router-link>
+          <router-link to="/leaderboard">排行榜</router-link>
           <router-link to="/contests">比赛</router-link>
           <router-link to="/problem-lists">题单</router-link>
         </nav>

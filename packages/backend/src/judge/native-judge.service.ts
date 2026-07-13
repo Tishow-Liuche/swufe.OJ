@@ -39,8 +39,8 @@ const LANGUAGE_CONFIG: Record<string, { extension: string; compileCmd: string; r
   },
   java: {
     extension: 'java',
-    compileCmd: 'javac {source}',
-    runCmd: 'java -cp {dir} Main',
+    compileCmd: 'javac Main.java',
+    runCmd: 'java Main',
     compileTimeout: 30000,
   },
 };
@@ -72,8 +72,9 @@ export class NativeJudgeService {
     }
 
     const id = randomUUID();
-    const sourcePath = join(this.workDir, `${id}.${config.extension}`);
-    const outputPath = join(this.workDir, `${id}.out`);
+    const sourceFileName = language === 'java' ? 'Main.java' : `${id}.${config.extension}`;
+    const sourcePath = join(this.workDir, sourceFileName);
+    const outputPath = language === 'java' ? this.workDir : join(this.workDir, `${id}.out`);
     writeFileSync(sourcePath, code, 'utf-8');
 
     const cmd = config.compileCmd
