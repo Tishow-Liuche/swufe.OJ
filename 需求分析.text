@@ -1,0 +1,2744 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage{geometry}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+\geometry{
+left=2.4cm,
+right=2.4cm,
+top=2.5cm,
+bottom=2.5cm
+}
+
+\hypersetup{
+colorlinks=true,
+linkcolor=black,
+urlcolor=blue,
+citecolor=black
+}
+
+\setlist[itemize]{
+leftmargin=2em,
+itemsep=0.2em,
+topsep=0.3em
+}
+
+\setlist[enumerate]{
+leftmargin=2.5em,
+itemsep=0.2em,
+topsep=0.3em
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{多源 OJ 教学与竞赛平台}
+\fancyhead[R]{需求功能分析}
+\fancyfoot[C]{\thepage}
+
+\titleformat{\section}
+{\Large\bfseries}
+{\thesection}
+{1em}
+{}
+
+\titleformat{\subsection}
+{\large\bfseries}
+{\thesubsection}
+{1em}
+{}
+
+\title{
+\textbf{多源 OJ 教学与竞赛平台}\
+\vspace{0.5em}
+\Large 需求功能分析
+}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{系统功能范围}
+
+平台面向程序设计教学、日常训练和线上竞赛场景，提供以下核心业务能力：
+
+\begin{enumerate}
+\item 聚合并管理多个第三方 OJ 平台的题目；
+\item 将用户代码提交至第三方 OJ，并获取远程评测结果；
+\item 录入和管理本平台原创题目；
+\item 对本平台题目进行代码编译、运行和评测；
+\item 统一管理本平台题目和第三方平台题目；
+\item 创建课程、班级、作业、训练和线上比赛；
+\item 支持学生、教师、管理员等不同角色；
+\item 记录用户做题过程和比赛表现；
+\item 分析用户知识点掌握程度和编程能力；
+\item 自动生成题目推荐和阶段性学习规划。
+\end{enumerate}
+
+\section{用户角色分析}
+
+\subsection{游客}
+
+游客是未登录用户。
+
+\subsubsection*{功能权限}
+
+\begin{itemize}
+\item 查看平台首页；
+\item 查看平台公告；
+\item 查看公开题库；
+\item 查看公开题目基本信息；
+\item 查看公开比赛信息；
+\item 查看公开排行榜；
+\item 注册账号；
+\item 登录平台。
+\end{itemize}
+
+\subsubsection*{限制}
+
+\begin{itemize}
+\item 不允许提交代码；
+\item 不允许参加比赛；
+\item 不允许收藏题目；
+\item 不允许查看私有课程、班级和作业；
+\item 不允许查看完整个人学习分析。
+\end{itemize}
+
+\subsection{学生}
+
+学生是平台的主要学习用户。
+
+\subsubsection*{功能权限}
+
+\begin{itemize}
+\item 登录和退出；
+\item 修改个人资料；
+\item 加入班级和课程；
+\item 浏览题库；
+\item 搜索和筛选题目；
+\item 查看题目内容；
+\item 提交代码；
+\item 查看评测结果；
+\item 查看个人提交记录；
+\item 参加比赛；
+\item 完成教师布置的作业；
+\item 创建个人训练计划；
+\item 收藏题目；
+\item 管理错题；
+\item 查看个人能力分析；
+\item 查看知识点掌握情况；
+\item 获取推荐题目；
+\item 查看学习规划；
+\item 绑定第三方 OJ 账号；
+\item 查看第三方 OJ 做题记录；
+\item 查看个人排名和班级排名。
+\end{itemize}
+
+\subsubsection*{限制}
+
+\begin{itemize}
+\item 不允许创建公开题目；
+\item 不允许修改他人题目；
+\item 不允许查看其他学生源代码；
+\item 不允许修改比赛规则；
+\item 不允许管理班级；
+\item 不允许访问系统配置。
+\end{itemize}
+
+\subsection{教师}
+
+教师负责课程、班级、题目、作业和比赛管理。
+
+\subsubsection*{功能权限}
+
+\begin{itemize}
+\item 创建和管理课程；
+\item 创建和管理班级；
+\item 邀请学生加入班级；
+\item 批量导入学生；
+\item 移除班级成员；
+\item 创建本平台题目；
+\item 编辑自己创建的题目；
+\item 导入第三方 OJ 题目；
+\item 创建题单；
+\item 创建作业；
+\item 创建训练任务；
+\item 创建线上比赛；
+\item 管理比赛参与者；
+\item 查看学生提交情况；
+\item 查看学生源代码；
+\item 对部分主观内容进行人工复核；
+\item 查看班级能力分析；
+\item 查看学生薄弱知识点；
+\item 查看作业完成情况；
+\item 查看比赛统计；
+\item 导出成绩和学习报告；
+\item 设置课程内题目可见范围；
+\item 设置作业和比赛的开放时间。
+\end{itemize}
+
+\subsubsection*{限制}
+
+\begin{itemize}
+\item 默认只能管理自己创建或被授权管理的课程、班级、题目和比赛；
+\item 不允许修改系统级配置；
+\item 不允许管理其他机构的数据；
+\item 不允许查看无关联学生的隐私数据；
+\item 不允许管理系统管理员账号。
+\end{itemize}
+
+\subsection{助教}
+
+助教协助教师管理课程和班级。
+
+\subsubsection*{功能权限}
+
+由教师或管理员配置，可包括：
+
+\begin{itemize}
+\item 查看班级成员；
+\item 查看学生提交；
+\item 管理作业；
+\item 管理题单；
+\item 查看班级统计；
+\item 协助管理比赛；
+\item 回复题目讨论；
+\item 对题目进行初步审核。
+\end{itemize}
+
+\subsubsection*{限制}
+
+\begin{itemize}
+\item 默认不能删除课程；
+\item 默认不能删除班级；
+\item 默认不能修改教师账号；
+\item 默认不能修改系统级权限；
+\item 权限不得超过所属课程教师。
+\end{itemize}
+
+\subsection{题目审核员}
+
+题目审核员负责题目质量检查。
+
+\subsubsection*{功能权限}
+
+\begin{itemize}
+\item 查看待审核题目；
+\item 检查题面完整性；
+\item 检查样例；
+\item 检查数据范围；
+\item 检查测试数据；
+\item 检查标准程序；
+\item 发起重测；
+\item 通过或驳回题目；
+\item 填写审核意见；
+\item 修改题目审核状态。
+\end{itemize}
+
+\subsection{管理员}
+
+管理员负责平台整体管理。
+
+\subsubsection*{功能权限}
+
+\begin{itemize}
+\item 管理所有用户；
+\item 管理用户角色；
+\item 管理学校和组织；
+\item 管理课程和班级；
+\item 管理全部题目；
+\item 管理题目审核；
+\item 管理第三方 OJ 平台；
+\item 管理 Remote Judge 适配器；
+\item 管理远程评测账号；
+\item 管理本地评测节点；
+\item 管理编程语言；
+\item 管理比赛；
+\item 管理平台公告；
+\item 管理系统参数；
+\item 查看系统日志；
+\item 查看操作审计；
+\item 查看异常提交；
+\item 封禁和解封账号；
+\item 暂停异常 OJ 接入；
+\item 执行题目重测；
+\item 执行提交重判；
+\item 查看平台统计报表；
+\item 管理数据导入和导出任务。
+\end{itemize}
+
+\section{账号与认证功能}
+
+\subsection{用户注册}
+
+平台应支持：
+
+\begin{itemize}
+\item 用户名注册；
+\item 邮箱注册；
+\item 手机号注册；
+\item 邀请码注册；
+\item 学校统一导入账号；
+\item 管理员创建账号。
+\end{itemize}
+
+\subsubsection*{注册信息}
+
+\begin{itemize}
+\item 用户名；
+\item 密码；
+\item 确认密码；
+\item 昵称；
+\item 邮箱或手机号；
+\item 所属学校；
+\item 用户身份；
+\item 验证码；
+\item 用户协议确认。
+\end{itemize}
+
+\subsubsection*{业务规则}
+
+\begin{itemize}
+\item 用户名必须唯一；
+\item 邮箱必须唯一；
+\item 手机号必须唯一；
+\item 密码必须符合安全规则；
+\item 注册后默认角色为学生；
+\item 教师角色需管理员审核或组织管理员分配；
+\item 被封禁的邮箱或手机号不得重新注册。
+\end{itemize}
+
+\subsection{用户登录}
+
+平台应支持：
+
+\begin{itemize}
+\item 用户名和密码登录；
+\item 邮箱和密码登录；
+\item 手机号和密码登录；
+\item 验证码登录；
+\item 第三方统一身份认证登录；
+\item 保持登录状态；
+\item 多设备登录管理。
+\end{itemize}
+
+\subsubsection*{登录安全}
+
+\begin{itemize}
+\item 连续登录失败限制；
+\item 异常地点登录提醒；
+\item 异常设备登录提醒；
+\item 验证码校验；
+\item 登录日志记录；
+\item 主动退出其他设备；
+\item 管理员强制用户下线。
+\end{itemize}
+
+\subsection{密码管理}
+
+平台应支持：
+
+\begin{itemize}
+\item 修改密码；
+\item 忘记密码；
+\item 邮箱找回；
+\item 手机验证码找回；
+\item 管理员重置密码；
+\item 首次登录强制修改密码；
+\item 密码修改后使旧会话失效。
+\end{itemize}
+
+\subsection{用户资料}
+
+用户可以维护：
+
+\begin{itemize}
+\item 头像；
+\item 昵称；
+\item 真实姓名；
+\item 性别；
+\item 学校；
+\item 年级；
+\item 班级；
+\item 个人简介；
+\item 常用编程语言；
+\item 联系方式；
+\item 隐私设置。
+\end{itemize}
+
+\subsection{账号状态}
+
+账号状态包括：
+
+\begin{itemize}
+\item 正常；
+\item 待验证；
+\item 暂停使用；
+\item 封禁；
+\item 注销；
+\item 密码过期；
+\item 强制改密。
+\end{itemize}
+
+\section{组织、课程与班级功能}
+
+\subsection{学校或组织管理}
+
+平台应支持：
+
+\begin{itemize}
+\item 创建学校或培训机构；
+\item 编辑组织信息；
+\item 设置组织管理员；
+\item 管理组织成员；
+\item 设置组织专属题库；
+\item 设置组织专属比赛；
+\item 设置组织数据访问范围；
+\item 查看组织整体统计。
+\end{itemize}
+
+\subsection{课程管理}
+
+教师可以：
+
+\begin{itemize}
+\item 创建课程；
+\item 设置课程名称；
+\item 设置课程介绍；
+\item 设置课程封面；
+\item 设置开课时间；
+\item 设置结课时间；
+\item 设置课程公开范围；
+\item 添加授课教师；
+\item 添加助教；
+\item 关联班级；
+\item 创建课程题单；
+\item 创建课程作业；
+\item 查看课程统计；
+\item 归档课程。
+\end{itemize}
+
+\subsubsection*{课程状态}
+
+\begin{itemize}
+\item 草稿；
+\item 未开始；
+\item 进行中；
+\item 已结束；
+\item 已归档。
+\end{itemize}
+
+\subsection{班级管理}
+
+教师可以：
+
+\begin{itemize}
+\item 创建班级；
+\item 设置班级名称；
+\item 设置年级；
+\item 设置班级描述；
+\item 生成班级邀请码；
+\item 生成加入链接；
+\item 批量导入学生；
+\item 手动添加学生；
+\item 移除学生；
+\item 转移班级管理权；
+\item 设置班级教师和助教；
+\item 查看班级成员；
+\item 查看班级学习统计；
+\item 解散或归档班级。
+\end{itemize}
+
+\subsection{学生加入班级}
+
+支持以下方式：
+
+\begin{itemize}
+\item 输入邀请码；
+\item 点击邀请链接；
+\item 教师手动添加；
+\item 管理员批量导入；
+\item 学校系统同步。
+\end{itemize}
+
+\subsubsection*{业务规则}
+
+\begin{itemize}
+\item 学生可加入多个班级；
+\item 教师可设置是否需要审核；
+\item 已被移除的学生可限制再次加入；
+\item 班级归档后不得新增成员。
+\end{itemize}
+
+\section{第三方 OJ 平台管理}
+
+\subsection{OJ 平台配置}
+
+管理员可以维护：
+
+\begin{itemize}
+\item 平台名称；
+\item 平台标识；
+\item 平台域名；
+\item 平台图标；
+\item 平台简介；
+\item 接入模式；
+\item 支持能力；
+\item 请求频率限制；
+\item 是否启用；
+\item 是否允许同步题面；
+\item 是否允许远程提交；
+\item 是否允许读取提交结果；
+\item 是否需要登录；
+\item 是否使用官方 API；
+\item 平台服务状态。
+\end{itemize}
+
+\subsection{平台能力标记}
+
+每个第三方 OJ 应标记是否支持：
+
+\begin{itemize}
+\item 题目列表同步；
+\item 题目元数据同步；
+\item 完整题面同步；
+\item 样例同步；
+\item 标签同步；
+\item 难度同步；
+\item 比赛信息同步；
+\item 用户信息同步；
+\item 用户提交记录同步；
+\item Remote Judge；
+\item 提交详情获取；
+\item 测试点详情获取；
+\item 多文件提交；
+\item 自定义语言映射；
+\item 账号绑定。
+\end{itemize}
+
+\subsection{第三方账号绑定}
+
+学生可以绑定自己的第三方 OJ 账号。
+
+\subsubsection*{支持功能}
+
+\begin{itemize}
+\item 输入平台用户名；
+\item 通过指定验证方式证明账号归属；
+\item 查看绑定状态；
+\item 解除绑定；
+\item 重新验证；
+\item 同步历史提交；
+\item 同步已通过题目；
+\item 同步比赛记录。
+\end{itemize}
+
+\subsubsection*{验证方式}
+
+根据不同平台支持：
+
+\begin{itemize}
+\item API Token；
+\item OAuth；
+\item 在个人简介填写验证码；
+\item 提交指定代码；
+\item 管理员人工审核。
+\end{itemize}
+
+\subsubsection*{安全要求}
+
+\begin{itemize}
+\item 不向学生索取可直接登录第三方平台的明文密码；
+\item Token 和 Cookie 不得展示给普通用户；
+\item 绑定失效后应提示重新验证；
+\item 用户可随时撤销绑定。
+\end{itemize}
+
+\section{Remote Judge 功能}
+
+\subsection{Remote Judge 定义}
+
+Remote Judge 是指：
+
+\begin{enumerate}
+\item 用户在本平台查看第三方题目；
+\item 用户在本平台提交代码；
+\item 本平台将代码提交到第三方 OJ；
+\item 第三方 OJ 完成评测；
+\item 本平台获取评测结果；
+\item 本平台将结果转换为统一状态并展示。
+\end{enumerate}
+
+\subsection{Remote Judge 提交流程}
+
+\subsubsection*{正常流程}
+
+\begin{enumerate}
+\item 用户打开远程题目；
+\item 用户选择编程语言；
+\item 用户填写代码；
+\item 用户点击提交；
+\item 平台检查用户权限；
+\item 平台检查题目状态；
+\item 平台检查第三方 OJ 是否可用；
+\item 平台检查语言映射；
+\item 平台创建本地提交记录；
+\item 平台将任务加入 Remote Judge 队列；
+\item Remote Judge 获取可用账号；
+\item 向第三方 OJ 提交代码；
+\item 保存第三方提交编号；
+\item 定期查询评测状态；
+\item 将第三方状态转换为本平台状态；
+\item 保存最终结果；
+\item 向用户展示结果。
+\end{enumerate}
+
+\subsection{Remote Judge 提交状态}
+
+状态包括：
+
+\begin{itemize}
+\item 等待提交；
+\item 正在排队；
+\item 正在登录第三方平台；
+\item 正在提交；
+\item 已提交至第三方平台；
+\item 第三方平台排队中；
+\item 第三方平台评测中；
+\item 已完成；
+\item 提交失败；
+\item 查询失败；
+\item 账号失效；
+\item 平台不可用；
+\item 语言不支持；
+\item 题目不存在；
+\item 超出提交频率；
+\item 任务已取消。
+\end{itemize}
+
+\subsection{Remote Judge 结果统一}
+
+第三方平台结果应转换为统一结果：
+
+\begin{itemize}
+\item Accepted；
+\item Wrong Answer；
+\item Time Limit Exceeded；
+\item Memory Limit Exceeded；
+\item Runtime Error；
+\item Compile Error；
+\item Output Limit Exceeded；
+\item Presentation Error；
+\item Partial Accepted；
+\item System Error；
+\item Judgement Failed；
+\item Unknown；
+\item Skipped。
+\end{itemize}
+
+同时保留：
+
+\begin{itemize}
+\item 第三方原始结果；
+\item 第三方提交编号；
+\item 第三方提交时间；
+\item 第三方运行时间；
+\item 第三方内存占用；
+\item 第三方得分；
+\item 原始错误信息。
+\end{itemize}
+
+\subsection{Remote Judge 账号池}
+
+管理员可以：
+
+\begin{itemize}
+\item 添加评测账号；
+\item 修改账号备注；
+\item 启用或禁用账号；
+\item 检查登录状态；
+\item 查看账号提交次数；
+\item 查看最近使用时间；
+\item 查看失败次数；
+\item 设置最大并发；
+\item 设置提交间隔；
+\item 设置每日提交上限；
+\item 手动重新验证；
+\item 删除失效凭据。
+\end{itemize}
+
+\subsubsection*{账号分配规则}
+
+系统应根据以下因素分配账号：
+
+\begin{itemize}
+\item 账号是否可用；
+\item 当前任务数量；
+\item 最近提交时间；
+\item 平台限流规则；
+\item 当日提交次数；
+\item 账号异常状态；
+\item 比赛任务优先级。
+\end{itemize}
+
+\subsection{Remote Judge 异常处理}
+
+平台应处理：
+
+\begin{itemize}
+\item 第三方平台超时；
+\item 登录失效；
+\item 验证码出现；
+\item Token 失效；
+\item 页面结构变化；
+\item API 返回异常；
+\item 第三方提交成功但未返回编号；
+\item 重复提交；
+\item 查询结果失败；
+\item 长时间无结果；
+\item 第三方平台维护；
+\item 账号被限制；
+\item 题目被删除；
+\item 比赛题目不可访问。
+\end{itemize}
+
+\subsubsection*{处理规则}
+
+\begin{itemize}
+\item 可重试错误自动重试；
+\item 不可重试错误直接标记失败；
+\item 重试不得产生重复提交；
+\item 达到重试上限后通知管理员；
+\item 平台异常时自动暂停对应适配器；
+\item 保留完整错误日志；
+\item 用户端展示可理解的错误信息。
+\end{itemize}
+
+\subsection{Remote Judge 平台降级}
+
+当某个平台无法远程评测时，平台可以降级为：
+
+\begin{itemize}
+\item 只展示题目元数据；
+\item 只展示题面；
+\item 跳转第三方原题；
+\item 引导用户在原平台提交；
+\item 同步用户原平台提交结果；
+\item 暂停该平台题目的比赛提交。
+\end{itemize}
+
+\section{本平台题目录入功能}
+
+\subsection{创建题目}
+
+教师、出题人或管理员可以创建题目。
+
+\subsubsection*{基本信息}
+
+\begin{itemize}
+\item 题目名称；
+\item 题目编号；
+\item 题目来源；
+\item 题目类型；
+\item 作者；
+\item 难度；
+\item 标签；
+\item 知识点；
+\item 可见范围；
+\item 是否公开；
+\item 允许使用的语言；
+\item 时间限制；
+\item 内存限制；
+\item 输出限制。
+\end{itemize}
+
+\subsection{题面编辑}
+
+题面应包括：
+
+\begin{itemize}
+\item 题目背景；
+\item 题目描述；
+\item 输入格式；
+\item 输出格式；
+\item 样例输入；
+\item 样例输出；
+\item 样例解释；
+\item 数据范围；
+\item 子任务说明；
+\item 提示；
+\item 来源说明。
+\end{itemize}
+
+\subsubsection*{编辑功能}
+
+\begin{itemize}
+\item Markdown 编辑；
+\item 数学公式；
+\item 代码块；
+\item 表格；
+\item 图片上传；
+\item 附件上传；
+\item 实时预览；
+\item 自动保存；
+\item 历史版本；
+\item 多语言题面。
+\end{itemize}
+
+\subsection{测试数据管理}
+
+教师可以：
+
+\begin{itemize}
+\item 上传测试数据压缩包；
+\item 在线添加测试点；
+\item 删除测试点；
+\item 修改测试点顺序；
+\item 设置测试点分值；
+\item 设置测试点分组；
+\item 设置子任务；
+\item 设置依赖关系；
+\item 下载测试数据；
+\item 替换测试数据；
+\item 查看测试数据校验结果。
+\end{itemize}
+
+\subsubsection*{测试数据校验}
+
+系统应检查：
+
+\begin{itemize}
+\item 文件命名；
+\item 输入输出文件是否成对；
+\item 文件数量；
+\item 文件大小；
+\item 压缩包安全性；
+\item 是否存在非法路径；
+\item 是否存在空文件；
+\item 是否超过存储限制。
+\end{itemize}
+
+\subsection{标准程序管理}
+
+教师可以：
+
+\begin{itemize}
+\item 上传标准程序；
+\item 选择标准程序语言；
+\item 执行标准程序；
+\item 使用标准程序生成输出；
+\item 保存多个标准程序版本；
+\item 设置主标准程序；
+\item 检查标准程序运行结果；
+\item 查看标准程序资源消耗。
+\end{itemize}
+
+\subsection{数据生成器}
+
+平台可以支持：
+
+\begin{itemize}
+\item 上传数据生成程序；
+\item 设置生成参数；
+\item 批量生成测试数据；
+\item 预览生成结果；
+\item 使用标准程序生成答案；
+\item 保存生成记录；
+\item 重新生成数据。
+\end{itemize}
+
+\subsection{Checker 与 Special Judge}
+
+题目可以选择：
+
+\begin{itemize}
+\item 标准文本比较；
+\item 忽略行末空格；
+\item 忽略空白字符；
+\item 浮点误差比较；
+\item 自定义 Checker；
+\item Special Judge；
+\item 输出合法性判断；
+\item 部分分判定。
+\end{itemize}
+
+教师可以：
+
+\begin{itemize}
+\item 上传 Checker；
+\item 设置 Checker 语言；
+\item 测试 Checker；
+\item 查看 Checker 错误；
+\item 设置浮点误差范围。
+\end{itemize}
+
+\subsection{题目审核}
+
+题目发布前可进入审核流程。
+
+\subsubsection*{审核内容}
+
+\begin{itemize}
+\item 题面是否完整；
+\item 样例是否正确；
+\item 数据范围是否合理；
+\item 测试数据是否有效；
+\item 标准程序是否正确；
+\item 时间和内存限制是否合理；
+\item 难度和标签是否准确；
+\item 是否存在版权问题；
+\item 是否存在重复题；
+\item 是否可能泄露答案。
+\end{itemize}
+
+\subsubsection*{审核结果}
+
+\begin{itemize}
+\item 通过；
+\item 驳回；
+\item 要求修改；
+\item 暂缓审核；
+\item 转交其他审核员。
+\end{itemize}
+
+\subsection{题目状态}
+
+题目状态包括：
+
+\begin{itemize}
+\item 草稿；
+\item 待审核；
+\item 审核中；
+\item 已驳回；
+\item 已发布；
+\item 已隐藏；
+\item 已停用；
+\item 已归档；
+\item 已删除。
+\end{itemize}
+
+\section{本地评测功能}
+
+\subsection{代码提交}
+
+用户提交时需选择：
+
+\begin{itemize}
+\item 题目；
+\item 编程语言；
+\item 源代码；
+\item 比赛或作业上下文；
+\item 是否公开代码。
+\end{itemize}
+
+系统应检查：
+
+\begin{itemize}
+\item 用户是否有提交权限；
+\item 题目是否可提交；
+\item 语言是否允许；
+\item 代码是否为空；
+\item 代码长度是否超限；
+\item 提交频率是否超限；
+\item 比赛是否已开始或结束；
+\item 作业是否已截止。
+\end{itemize}
+
+\subsection{编译功能}
+
+平台应：
+
+\begin{itemize}
+\item 根据语言选择编译器；
+\item 使用预设编译参数；
+\item 限制编译时间；
+\item 限制编译内存；
+\item 保存编译输出；
+\item 识别编译失败；
+\item 展示编译错误。
+\end{itemize}
+
+\subsection{程序运行}
+
+平台应对每个测试点执行：
+
+\begin{itemize}
+\item 准备输入数据；
+\item 启动隔离环境；
+\item 运行用户程序；
+\item 记录运行时间；
+\item 记录内存占用；
+\item 记录退出代码；
+\item 获取用户输出；
+\item 限制输出大小；
+\item 执行结果比较；
+\item 保存测试点结果。
+\end{itemize}
+
+\subsection{评测结果}
+
+单个测试点结果包括：
+
+\begin{itemize}
+\item 测试点编号；
+\item 状态；
+\item 得分；
+\item 运行时间；
+\item 内存占用；
+\item 退出代码；
+\item 错误信息；
+\item Checker 信息。
+\end{itemize}
+
+提交总结果包括：
+
+\begin{itemize}
+\item 最终状态；
+\item 总得分；
+\item 总运行时间；
+\item 最大内存；
+\item 通过测试点数量；
+\item 总测试点数量；
+\item 编译信息；
+\item 提交时间；
+\item 评测完成时间。
+\end{itemize}
+
+\subsection{支持的评测类型}
+
+第一阶段应支持：
+
+\begin{itemize}
+\item 传统输入输出题；
+\item 多测试点题；
+\item 分组计分题；
+\item 子任务题；
+\item 部分分题；
+\item Special Judge 题；
+\item 浮点比较题。
+\end{itemize}
+
+后续可以支持：
+
+\begin{itemize}
+\item 交互题；
+\item 通信题；
+\item 多文件题；
+\item 提交答案题；
+\item 输出型题目；
+\item Hack 模式。
+\end{itemize}
+
+\subsection{重判功能}
+
+管理员和授权教师可以：
+
+\begin{itemize}
+\item 重判单个提交；
+\item 重判某道题全部提交；
+\item 重判某场比赛全部提交；
+\item 重判指定时间范围提交；
+\item 仅重判非 AC 提交；
+\item 仅重判受测试数据影响的提交。
+\end{itemize}
+
+\subsubsection*{重判规则}
+
+\begin{itemize}
+\item 保存原评测结果；
+\item 标记重判原因；
+\item 记录操作人；
+\item 更新比赛排名；
+\item 更新作业成绩；
+\item 更新用户能力分析；
+\item 通知受影响用户。
+\end{itemize}
+
+\section{统一题库管理功能}
+
+\subsection{题目来源分类}
+
+题目分为：
+
+\begin{itemize}
+\item 本平台原创题目；
+\item 完整导入题目；
+\item 第三方 Remote Judge 题目；
+\item 第三方跳转题目；
+\item 私有教学题目；
+\item 比赛专用题目；
+\item 已归档题目。
+\end{itemize}
+
+\subsection{题目列表}
+
+题目列表显示：
+
+\begin{itemize}
+\item 题目编号；
+\item 题目名称；
+\item 来源平台；
+\item 难度；
+\item 标签；
+\item 通过人数；
+\item 提交人数；
+\item 通过率；
+\item 用户完成状态；
+\item 是否收藏；
+\item 是否在错题本；
+\item 是否支持 Remote Judge；
+\item 是否支持本地评测。
+\end{itemize}
+
+\subsection{搜索功能}
+
+支持按以下条件搜索：
+
+\begin{itemize}
+\item 题目编号；
+\item 题目名称；
+\item 题目内容；
+\item 来源；
+\item 标签；
+\item 知识点；
+\item 难度；
+\item 作者；
+\item 题目类型。
+\end{itemize}
+
+\subsection{筛选功能}
+
+支持筛选：
+
+\begin{itemize}
+\item 已通过；
+\item 未通过；
+\item 未尝试；
+\item 收藏题目；
+\item 错题；
+\item 本平台题目；
+\item 第三方题目；
+\item 支持 Remote Judge；
+\item 指定难度；
+\item 指定知识点；
+\item 指定来源；
+\item 指定语言；
+\item 指定通过率范围；
+\item 指定创建时间。
+\end{itemize}
+
+\subsection{排序功能}
+
+支持按以下方式排序：
+
+\begin{itemize}
+\item 默认顺序；
+\item 题号；
+\item 难度；
+\item 通过率；
+\item 提交人数；
+\item 最近更新；
+\item 最近提交；
+\item 推荐程度。
+\end{itemize}
+
+\subsection{标签与知识点}
+
+管理员和教师可以：
+
+\begin{itemize}
+\item 创建标签；
+\item 修改标签；
+\item 合并标签；
+\item 删除标签；
+\item 创建知识点；
+\item 设置知识点层级；
+\item 设置前置知识；
+\item 将题目关联多个知识点；
+\item 设置知识点权重。
+\end{itemize}
+
+知识点示例：
+
+\begin{itemize}
+\item 基础语法；
+\item 枚举；
+\item 模拟；
+\item 排序；
+\item 二分；
+\item 前缀和；
+\item 贪心；
+\item 动态规划；
+\item 图论；
+\item 树；
+\item 字符串；
+\item 数论；
+\item 数据结构；
+\item 计算几何。
+\end{itemize}
+
+\subsection{重复题处理}
+
+平台应支持：
+
+\begin{itemize}
+\item 根据来源和题号识别重复；
+\item 根据标题相似度识别重复；
+\item 根据题面内容识别重复；
+\item 管理员确认是否重复；
+\item 合并重复记录；
+\item 保留多个来源链接；
+\item 选择主题目记录。
+\end{itemize}
+
+\subsection{题目批量操作}
+
+教师和管理员可以：
+
+\begin{itemize}
+\item 批量修改难度；
+\item 批量添加标签；
+\item 批量修改可见性；
+\item 批量加入题单；
+\item 批量归档；
+\item 批量删除；
+\item 批量同步；
+\item 批量导出。
+\end{itemize}
+
+\section{第三方题目同步与导入}
+
+\subsection{单题导入}
+
+教师输入：
+
+\begin{itemize}
+\item 平台名称；
+\item 第三方题号或链接。
+\end{itemize}
+
+系统自动获取：
+
+\begin{itemize}
+\item 标题；
+\item 题号；
+\item 来源；
+\item 难度；
+\item 标签；
+\item 题面；
+\item 样例；
+\item 时间限制；
+\item 内存限制；
+\item 原题链接。
+\end{itemize}
+
+若部分信息不可获取，允许教师手动补充。
+
+\subsection{批量同步}
+
+管理员可以：
+
+\begin{itemize}
+\item 同步平台全部公开题目；
+\item 同步指定比赛题目；
+\item 同步指定题号范围；
+\item 同步指定更新时间后的题目；
+\item 设置自动同步周期；
+\item 暂停同步任务；
+\item 查看同步进度；
+\item 查看同步失败记录；
+\item 重新执行失败任务。
+\end{itemize}
+
+\subsection{数据更新规则}
+
+第三方题目更新时，系统应：
+
+\begin{itemize}
+\item 识别题面变化；
+\item 识别限制变化；
+\item 识别标签变化；
+\item 保存旧版本；
+\item 标记需要人工审核；
+\item 不自动覆盖教师手动修改内容；
+\item 记录同步来源和同步时间。
+\end{itemize}
+
+\subsection{版权与来源标记}
+
+第三方题目必须保存：
+
+\begin{itemize}
+\item 来源平台；
+\item 原题链接；
+\item 原作者信息；
+\item 导入时间；
+\item 最近同步时间；
+\item 内容使用方式；
+\item 是否允许完整展示；
+\item 是否仅允许跳转。
+\end{itemize}
+
+\section{题单与训练功能}
+
+\subsection{题单创建}
+
+教师和授权用户可以创建题单。
+
+题单信息包括：
+
+\begin{itemize}
+\item 题单名称；
+\item 题单介绍；
+\item 封面；
+\item 创建者；
+\item 适用人群；
+\item 难度；
+\item 知识点；
+\item 是否公开；
+\item 题目数量；
+\item 推荐完成时间。
+\end{itemize}
+
+\subsection{题单内容管理}
+
+支持：
+
+\begin{itemize}
+\item 添加本地题目；
+\item 添加第三方题目；
+\item 调整题目顺序；
+\item 设置必做题；
+\item 设置选做题；
+\item 设置前置题；
+\item 设置阶段；
+\item 设置完成条件；
+\item 添加阶段说明。
+\end{itemize}
+
+\subsection{个人训练}
+
+学生可以：
+
+\begin{itemize}
+\item 创建私人题单；
+\item 设置训练目标；
+\item 设置每日题量；
+\item 设置目标难度；
+\item 设置目标知识点；
+\item 开始限时训练；
+\item 暂停训练；
+\item 查看训练记录；
+\item 查看训练完成率。
+\end{itemize}
+
+\subsection{随机训练}
+
+平台可以根据条件随机生成题目：
+
+\begin{itemize}
+\item 难度范围；
+\item 知识点；
+\item 来源平台；
+\item 题目数量；
+\item 未做题；
+\item 错题；
+\item 最近未练知识点；
+\item 限定时间。
+\end{itemize}
+
+\section{作业功能}
+
+\subsection{创建作业}
+
+教师可以设置：
+
+\begin{itemize}
+\item 作业名称；
+\item 作业说明；
+\item 所属课程；
+\item 所属班级；
+\item 开始时间；
+\item 截止时间；
+\item 补交截止时间；
+\item 题目列表；
+\item 每题分值；
+\item 完成条件；
+\item 是否允许多次提交；
+\item 是否显示结果；
+\item 是否显示测试点；
+\item 是否允许查看题解；
+\item 是否允许迟交；
+\item 迟交扣分规则。
+\end{itemize}
+
+\subsection{作业状态}
+
+作业状态包括：
+
+\begin{itemize}
+\item 草稿；
+\item 未开始；
+\item 进行中；
+\item 已截止；
+\item 补交中；
+\item 已结束；
+\item 已归档。
+\end{itemize}
+
+\subsection{学生完成作业}
+
+学生可以：
+
+\begin{itemize}
+\item 查看作业要求；
+\item 查看题目列表；
+\item 提交代码；
+\item 查看完成进度；
+\item 查看当前得分；
+\item 查看截止时间；
+\item 查看是否迟交；
+\item 查看教师反馈。
+\end{itemize}
+
+\subsection{作业统计}
+
+教师可以查看：
+
+\begin{itemize}
+\item 班级完成率；
+\item 每题完成率；
+\item 每题通过率；
+\item 平均提交次数；
+\item 学生得分；
+\item 未提交学生；
+\item 未完成学生；
+\item 迟交学生；
+\item 常见错误类型；
+\item 知识点掌握情况；
+\item 学生代码相似度结果。
+\end{itemize}
+
+\subsection{作业成绩}
+
+支持以下计分方式：
+
+\begin{itemize}
+\item 取最高分；
+\item 取最后一次提交；
+\item 首次 AC 满分；
+\item 按提交次数扣分；
+\item 按完成时间加权；
+\item 迟交扣分；
+\item 教师人工调整；
+\item 代码规范附加分。
+\end{itemize}
+
+\section{线上比赛功能}
+
+\subsection{比赛创建}
+
+教师和管理员可以创建比赛。
+
+\subsubsection*{基本信息}
+
+\begin{itemize}
+\item 比赛名称；
+\item 比赛介绍；
+\item 比赛规则；
+\item 比赛类型；
+\item 开始时间；
+\item 结束时间；
+\item 报名开始时间；
+\item 报名结束时间；
+\item 主办方；
+\item 比赛负责人；
+\item 比赛可见范围；
+\item 是否需要密码；
+\item 参赛对象；
+\item 比赛封面。
+\end{itemize}
+
+\subsection{比赛类型}
+
+平台应支持：
+
+\begin{itemize}
+\item ACM/ICPC 模式；
+\item IOI 模式；
+\item OI 模式；
+\item 作业模式；
+\item 训练赛；
+\item 个人赛；
+\item 团队赛；
+\item 虚拟比赛；
+\item 班级内部赛；
+\item 校内公开赛。
+\end{itemize}
+
+\subsection{比赛题目配置}
+
+支持：
+
+\begin{itemize}
+\item 添加本地题目；
+\item 添加 Remote Judge 题目；
+\item 设置题目别名；
+\item 设置题目顺序；
+\item 设置分值；
+\item 设置题目开放时间；
+\item 设置题目关闭时间；
+\item 设置提交次数；
+\item 设置语言限制；
+\item 设置题目可见条件；
+\item 设置前置题目。
+\end{itemize}
+
+\subsection{比赛报名}
+
+支持：
+
+\begin{itemize}
+\item 公开报名；
+\item 邀请报名；
+\item 密码报名；
+\item 班级自动报名；
+\item 管理员导入名单；
+\item 教师审核报名；
+\item 团队报名。
+\end{itemize}
+
+\subsection{比赛过程}
+
+参赛者可以：
+
+\begin{itemize}
+\item 查看比赛公告；
+\item 查看题目；
+\item 提交代码；
+\item 查看自己的提交；
+\item 查看允许公开的排行榜；
+\item 提交问题或澄清请求；
+\item 查看裁判回复；
+\item 在允许时打印代码。
+\end{itemize}
+
+\subsection{排行榜}
+
+\subsubsection*{ACM 模式}
+
+排名依据：
+
+\begin{enumerate}
+\item 通过题目数量；
+\item 总罚时；
+\item 最后通过时间。
+\end{enumerate}
+
+\subsubsection*{IOI 模式}
+
+排名依据：
+
+\begin{enumerate}
+\item 总得分；
+\item 同分时按规则排序；
+\item 可取每题最高分。
+\end{enumerate}
+
+\subsubsection*{排行榜功能}
+
+\begin{itemize}
+\item 实时更新；
+\item 自动刷新；
+\item 按班级筛选；
+\item 按学校筛选；
+\item 查看每题状态；
+\item 查看提交次数；
+\item 封榜；
+\item 解榜；
+\item 导出排行榜；
+\item 保存最终排名。
+\end{itemize}
+
+\subsection{封榜功能}
+
+教师可以设置：
+
+\begin{itemize}
+\item 封榜开始时间；
+\item 封榜结束时间；
+\item 封榜期间是否显示个人结果；
+\item 封榜期间是否显示题目通过情况；
+\item 赛后是否自动解榜；
+\item 是否逐步滚榜。
+\end{itemize}
+
+\subsection{比赛公告与澄清}
+
+比赛管理员可以：
+
+\begin{itemize}
+\item 发布公告；
+\item 修改公告；
+\item 置顶公告；
+\item 回复参赛者问题；
+\item 将回复设为公开；
+\item 将回复设为私有；
+\item 标记重复问题；
+\item 关闭提问功能。
+\end{itemize}
+
+\subsection{虚拟比赛}
+
+学生可以：
+
+\begin{itemize}
+\item 选择历史比赛；
+\item 自定义开始时间；
+\item 按原比赛时长进行；
+\item 隐藏原比赛结果；
+\item 生成个人虚拟排名；
+\item 查看虚拟比赛复盘。
+\end{itemize}
+
+\subsection{比赛结束处理}
+
+比赛结束后：
+
+\begin{itemize}
+\item 停止接收提交；
+\item 完成剩余评测；
+\item 更新最终排名；
+\item 执行必要重判；
+\item 生成比赛报告；
+\item 统计知识点表现；
+\item 更新用户能力；
+\item 开放题解；
+\item 开放补题；
+\item 导出成绩。
+\end{itemize}
+
+\section{提交记录功能}
+
+\subsection{提交列表}
+
+提交列表显示：
+
+\begin{itemize}
+\item 提交编号；
+\item 用户；
+\item 题目；
+\item 来源平台；
+\item 比赛或作业；
+\item 编程语言；
+\item 评测状态；
+\item 得分；
+\item 运行时间；
+\item 内存；
+\item 代码长度；
+\item 提交时间。
+\end{itemize}
+
+\subsection{提交筛选}
+
+支持按以下条件筛选：
+
+\begin{itemize}
+\item 用户；
+\item 题目；
+\item 结果；
+\item 语言；
+\item 来源平台；
+\item 比赛；
+\item 作业；
+\item 提交时间；
+\item 是否 Remote Judge；
+\item 是否重判；
+\item 是否异常。
+\end{itemize}
+
+\subsection{提交详情}
+
+用户可以查看：
+
+\begin{itemize}
+\item 源代码；
+\item 编译信息；
+\item 总体结果；
+\item 测试点结果；
+\item 运行时间；
+\item 内存占用；
+\item 提交时间；
+\item 评测时间；
+\item Remote Judge 原始状态；
+\item 第三方提交编号。
+\end{itemize}
+
+查看范围受权限控制。
+
+\subsection{代码公开规则}
+
+支持：
+
+\begin{itemize}
+\item 仅自己可见；
+\item 教师可见；
+\item 比赛管理员可见；
+\item AC 后公开；
+\item 比赛结束后公开；
+\item 完全公开；
+\item 永不公开。
+\end{itemize}
+
+\section{题解与讨论功能}
+
+\subsection{题解管理}
+
+用户可以：
+
+\begin{itemize}
+\item 发布题解；
+\item 保存草稿；
+\item 编辑题解；
+\item 删除自己的题解；
+\item 使用 Markdown；
+\item 插入代码；
+\item 插入公式；
+\item 关联知识点；
+\item 标记使用语言。
+\end{itemize}
+
+\subsubsection*{题解审核}
+
+\begin{itemize}
+\item 自动审核；
+\item 教师审核；
+\item 管理员审核；
+\item 举报处理；
+\item 隐藏违规题解；
+\item 设置官方题解；
+\item 设置推荐题解。
+\end{itemize}
+
+\subsection{题目讨论}
+
+用户可以：
+
+\begin{itemize}
+\item 发布问题；
+\item 回复问题；
+\item 点赞；
+\item 收藏；
+\item 举报；
+\item 引用回复；
+\item 标记已解决；
+\item 查看教师回复。
+\end{itemize}
+
+\subsection{题解开放规则}
+
+教师可以设置：
+
+\begin{itemize}
+\item 随时可见；
+\item AC 后可见；
+\item 达到提交次数后可见；
+\item 作业截止后可见；
+\item 比赛结束后可见；
+\item 仅教师可见。
+\end{itemize}
+
+\section{收藏、错题与笔记功能}
+
+\subsection{题目收藏}
+
+用户可以：
+
+\begin{itemize}
+\item 收藏题目；
+\item 取消收藏；
+\item 创建收藏夹；
+\item 将题目移动到不同收藏夹；
+\item 添加收藏备注；
+\item 按收藏时间排序。
+\end{itemize}
+
+\subsection{错题本}
+
+系统可以自动将以下题目加入错题本：
+
+\begin{itemize}
+\item 有过错误提交；
+\item 多次提交未通过；
+\item 比赛中未通过；
+\item 教师指定复习；
+\item 用户手动加入。
+\end{itemize}
+
+错题状态包括：
+
+\begin{itemize}
+\item 待重做；
+\item 重做中；
+\item 已掌握；
+\item 暂时跳过。
+\end{itemize}
+
+\subsection{个人笔记}
+
+学生可以：
+
+\begin{itemize}
+\item 对题目添加私人笔记；
+\item 记录解题思路；
+\item 记录错误原因；
+\item 记录复杂度；
+\item 添加代码片段；
+\item 设置复习时间；
+\item 搜索笔记。
+\end{itemize}
+
+教师默认不能查看学生私人笔记，除非学生主动共享。
+
+\section{用户能力分析功能}
+
+\subsection{分析维度}
+
+平台应从以下维度分析用户：
+
+\begin{itemize}
+\item 总体编程能力；
+\item 题目难度适应能力；
+\item 知识点掌握程度；
+\item 代码正确率；
+\item 首次通过率；
+\item 平均提交次数；
+\item 平均完成时间；
+\item 比赛表现；
+\item 学习活跃度；
+\item 学习稳定性；
+\item 错误类型分布；
+\item 编程语言熟练度；
+\item 最近能力变化趋势。
+\end{itemize}
+
+\subsection{数据来源}
+
+分析数据包括：
+
+\begin{itemize}
+\item 本平台提交；
+\item Remote Judge 提交；
+\item 第三方账号同步记录；
+\item 比赛记录；
+\item 作业记录；
+\item 训练记录；
+\item 错题重做记录；
+\item 题目难度；
+\item 题目知识点；
+\item 提交时间；
+\item 提交次数；
+\item 评测结果；
+\item 运行时间；
+\item 用户主动反馈。
+\end{itemize}
+
+\subsection{知识点能力}
+
+每个知识点应计算：
+
+\begin{itemize}
+\item 当前能力值；
+\item 掌握等级；
+\item 已做题数；
+\item 已通过题数；
+\item 最近训练时间；
+\item 最近正确率；
+\item 平均题目难度；
+\item 是否需要复习；
+\item 能力变化趋势。
+\end{itemize}
+
+\subsubsection*{掌握等级}
+
+可分为：
+
+\begin{itemize}
+\item 未接触；
+\item 初步了解；
+\item 基础掌握；
+\item 熟练；
+\item 精通。
+\end{itemize}
+
+\subsection{难度能力}
+
+平台应评估用户在不同难度区间的表现：
+
+\begin{itemize}
+\item 简单题通过率；
+\item 中等题通过率；
+\item 困难题通过率；
+\item 当前稳定完成难度；
+\item 当前挑战难度；
+\item 不建议直接尝试的难度。
+\end{itemize}
+
+\subsection{错误类型分析}
+
+平台应统计：
+
+\begin{itemize}
+\item 编译错误；
+\item 答案错误；
+\item 超时；
+\item 内存超限；
+\item 运行错误；
+\item 输出格式错误；
+\item 边界错误；
+\item 数据类型错误；
+\item 算法复杂度不足；
+\item 未完成提交。
+\end{itemize}
+
+系统可以结合题目标签和提交结果推断常见薄弱点。
+
+\subsection{比赛能力分析}
+
+比赛分析包括：
+
+\begin{itemize}
+\item 比赛排名；
+\item 解题数量；
+\item 比赛得分；
+\item 首次通过时间；
+\item 罚时；
+\item 赛中错误提交数；
+\item 题目选择顺序；
+\item 简单题失误率；
+\item 难题突破能力；
+\item 时间分配；
+\item 与同水平用户对比；
+\item 历史比赛趋势。
+\end{itemize}
+
+\subsection{能力报告}
+
+学生可以查看：
+
+\begin{itemize}
+\item 能力总览；
+\item 知识点雷达图；
+\item 难度曲线；
+\item 最近学习趋势；
+\item 错误类型分布；
+\item 比赛表现趋势；
+\item 优势知识点；
+\item 薄弱知识点；
+\item 推荐训练方向；
+\item 阶段总结。
+\end{itemize}
+
+教师可以查看：
+
+\begin{itemize}
+\item 单个学生报告；
+\item 班级平均水平；
+\item 班级能力分布；
+\item 知识点掌握排名；
+\item 需要重点关注的学生；
+\item 共性薄弱知识点；
+\item 学习进步情况。
+\end{itemize}
+
+\section{个性化推荐功能}
+
+\subsection{推荐题目}
+
+系统可以根据以下因素推荐题目：
+
+\begin{itemize}
+\item 用户当前能力；
+\item 薄弱知识点；
+\item 最近学习内容；
+\item 已完成题目；
+\item 错题；
+\item 当前课程；
+\item 教师教学计划；
+\item 目标比赛；
+\item 用户偏好；
+\item 推荐题目的历史反馈。
+\end{itemize}
+
+\subsection{推荐类型}
+
+平台提供：
+
+\begin{itemize}
+\item 今日推荐；
+\item 薄弱知识点专项；
+\item 难度提升推荐；
+\item 错题复习；
+\item 比赛前训练；
+\item 长期未练知识点；
+\item 新知识点入门；
+\item 综合能力训练；
+\item 教师指定推荐。
+\end{itemize}
+
+\subsection{推荐约束}
+
+推荐时应避免：
+
+\begin{itemize}
+\item 推荐已熟练掌握的相同题目；
+\item 连续推荐过多同类型题目；
+\item 推荐明显超出当前水平的题目；
+\item 推荐当前无法提交的题目；
+\item 推荐已失效的第三方题目；
+\item 推荐无权限访问的题目；
+\item 推荐与课程进度冲突的题目。
+\end{itemize}
+
+\subsection{推荐理由}
+
+每个推荐应展示原因，例如：
+
+\begin{itemize}
+\item 该题属于你的薄弱知识点；
+\item 该题难度略高于你的当前水平；
+\item 该题用于复习最近错误较多的内容；
+\item 该题是下一知识点的前置训练；
+\item 该题适合当前比赛准备目标；
+\item 教师将该题加入你的训练计划。
+\end{itemize}
+
+\subsection{推荐反馈}
+
+用户可以反馈：
+
+\begin{itemize}
+\item 太简单；
+\item 难度合适；
+\item 太难；
+\item 不感兴趣；
+\item 已经掌握；
+\item 题目存在问题；
+\item 暂时不想练该知识点。
+\end{itemize}
+
+系统应利用反馈调整后续推荐。
+
+\section{学习规划功能}
+
+\subsection{学习目标设置}
+
+学生可以设置：
+
+\begin{itemize}
+\item 目标比赛；
+\item 目标排名；
+\item 目标能力等级；
+\item 目标知识点；
+\item 每日学习时间；
+\item 每周学习天数；
+\item 计划结束时间；
+\item 每日题量；
+\item 偏好语言；
+\item 休息日。
+\end{itemize}
+
+教师也可以为学生或班级设置学习目标。
+
+\subsection{自动生成学习计划}
+
+平台根据以下信息生成计划：
+
+\begin{itemize}
+\item 当前能力；
+\item 薄弱知识点；
+\item 前置知识关系；
+\item 可用学习时间；
+\item 目标时间；
+\item 历史完成速度；
+\item 目标比赛；
+\item 教师要求。
+\end{itemize}
+
+\subsection{计划内容}
+
+学习计划包括：
+
+\begin{itemize}
+\item 阶段目标；
+\item 每周目标；
+\item 每日训练；
+\item 推荐知识点；
+\item 推荐题目；
+\item 错题复习；
+\item 模拟比赛；
+\item 阶段测验；
+\item 复盘任务。
+\end{itemize}
+
+\subsection{计划执行}
+
+学生可以：
+
+\begin{itemize}
+\item 查看今日任务；
+\item 标记任务完成；
+\item 跳过任务；
+\item 延期任务；
+\item 替换题目；
+\item 调整每日题量；
+\item 查看计划进度；
+\item 查看连续完成天数。
+\end{itemize}
+
+\subsection{动态调整}
+
+系统应根据执行情况自动调整：
+
+\begin{itemize}
+\item 连续完成率高时适当增加难度；
+\item 连续完成率低时降低难度或减少题量；
+\item 某知识点错误率高时增加专项训练；
+\item 长期未完成时重新规划；
+\item 比赛临近时提高模拟训练比例；
+\item 用户临时暂停时顺延计划。
+\end{itemize}
+
+\subsection{教师规划}
+
+教师可以：
+
+\begin{itemize}
+\item 为班级创建统一计划；
+\item 为部分学生创建分层计划；
+\item 查看计划执行率；
+\item 查看未完成学生；
+\item 调整题目；
+\item 调整截止时间；
+\item 添加教师反馈。
+\end{itemize}
+
+\section{排行榜与激励功能}
+
+\subsection{排行榜类型}
+
+支持：
+
+\begin{itemize}
+\item 全站排行榜；
+\item 学校排行榜；
+\item 班级排行榜；
+\item 课程排行榜；
+\item 比赛排行榜；
+\item 周排行榜；
+\item 月排行榜；
+\item 知识点排行榜；
+\item 进步排行榜。
+\end{itemize}
+
+\subsection{排名指标}
+
+可按以下指标排名：
+
+\begin{itemize}
+\item 通过题目数；
+\item 总得分；
+\item 比赛积分；
+\item 学习活跃度；
+\item 连续学习天数；
+\item 本周新增 AC；
+\item 能力提升幅度；
+\item 作业完成率。
+\end{itemize}
+
+\subsection{成就系统}
+
+可设置：
+
+\begin{itemize}
+\item 首次 AC；
+\item 完成第一场比赛；
+\item 连续学习；
+\item 完成指定题量；
+\item 掌握某个知识点；
+\item 通过困难题；
+\item 完成全部作业；
+\item 比赛进入指定排名。
+\end{itemize}
+
+教师和管理员可以配置是否启用激励功能。
+
+\section{消息与通知功能}
+
+\subsection{通知类型}
+
+平台应支持：
+
+\begin{itemize}
+\item 系统公告；
+\item 班级通知；
+\item 课程通知；
+\item 作业通知；
+\item 作业截止提醒；
+\item 比赛开始提醒；
+\item 比赛结果通知；
+\item 题目审核通知；
+\item Remote Judge 异常通知；
+\item 学习计划提醒；
+\item 教师反馈；
+\item 账号安全提醒。
+\end{itemize}
+
+\subsection{通知方式}
+
+支持：
+
+\begin{itemize}
+\item 站内消息；
+\item 邮件；
+\item 短信；
+\item 浏览器通知；
+\item 移动端推送；
+\item 企业通信平台通知。
+\end{itemize}
+
+用户可以配置接收方式。
+
+\subsection{消息状态}
+
+\begin{itemize}
+\item 未读；
+\item 已读；
+\item 已归档；
+\item 已删除；
+\item 需要确认。
+\end{itemize}
+
+\section{数据统计与报表功能}
+
+\subsection{学生个人统计}
+
+包括：
+
+\begin{itemize}
+\item 提交总数；
+\item 通过题数；
+\item 总通过率；
+\item 语言使用分布；
+\item 知识点分布；
+\item 难度分布；
+\item 每日提交趋势；
+\item 每周学习时长；
+\item 比赛成绩；
+\item 作业完成情况；
+\item 学习计划完成率。
+\end{itemize}
+
+\subsection{教师班级统计}
+
+包括：
+
+\begin{itemize}
+\item 班级人数；
+\item 活跃人数；
+\item 平均通过题数；
+\item 作业完成率；
+\item 比赛参与率；
+\item 知识点平均水平；
+\item 学生能力分布；
+\item 提交结果分布；
+\item 进步最快学生；
+\item 长期不活跃学生。
+\end{itemize}
+
+\subsection{平台运营统计}
+
+管理员可以查看：
+
+\begin{itemize}
+\item 注册用户数；
+\item 活跃用户数；
+\item 教师数量；
+\item 学生数量；
+\item 题目总数；
+\item 本地题目数量；
+\item 第三方题目数量；
+\item 每日提交量；
+\item 本地评测量；
+\item Remote Judge 评测量；
+\item 各平台成功率；
+\item 平均评测时长；
+\item 比赛数量；
+\item 作业数量；
+\item 系统异常数量。
+\end{itemize}
+
+\subsection{报表导出}
+
+支持导出：
+
+\begin{itemize}
+\item Excel；
+\item CSV；
+\item PDF。
+\end{itemize}
+
+导出内容包括：
+
+\begin{itemize}
+\item 班级名单；
+\item 作业成绩；
+\item 比赛成绩；
+\item 提交记录；
+\item 学习报告；
+\item 能力分析；
+\item 平台运营报表。
+\end{itemize}
+
+\section{代码查重与反作弊功能}
+
+\subsection{代码相似度检测}
+
+平台可以：
+
+\begin{itemize}
+\item 比较同一题目的提交代码；
+\item 检测变量名替换；
+\item 检测格式调整；
+\item 检测代码块重排；
+\item 生成相似度；
+\item 展示疑似相似代码；
+\item 标记高风险提交。
+\end{itemize}
+
+\subsection{比赛反作弊}
+
+支持：
+
+\begin{itemize}
+\item 限制登录设备；
+\item 限制 IP；
+\item 记录设备信息；
+\item 检测频繁切换账号；
+\item 检测异常提交频率；
+\item 检测短时间大量 AC；
+\item 检测代码相似；
+\item 比赛期间隐藏他人代码；
+\item 比赛后生成风险报告。
+\end{itemize}
+
+\subsection{人工处理}
+
+教师和管理员可以：
+
+\begin{itemize}
+\item 查看风险记录；
+\item 查看证据；
+\item 标记正常；
+\item 标记违规；
+\item 取消比赛成绩；
+\item 取消作业成绩；
+\item 封禁用户；
+\item 添加处理备注。
+\end{itemize}
+
+\section{管理后台功能}
+
+\subsection{用户管理}
+
+管理员可以：
+
+\begin{itemize}
+\item 搜索用户；
+\item 查看用户资料；
+\item 修改用户状态；
+\item 分配角色；
+\item 重置密码；
+\item 强制下线；
+\item 查看登录日志；
+\item 查看操作记录；
+\item 封禁用户；
+\item 解封用户；
+\item 注销用户。
+\end{itemize}
+
+\subsection{题目管理}
+
+管理员可以：
+
+\begin{itemize}
+\item 查看全部题目；
+\item 修改题目；
+\item 审核题目；
+\item 隐藏题目；
+\item 删除题目；
+\item 恢复题目；
+\item 批量操作；
+\item 查看同步状态；
+\item 查看题目版本；
+\item 发起重测。
+\end{itemize}
+
+\subsection{评测管理}
+
+管理员可以：
+
+\begin{itemize}
+\item 查看评测队列；
+\item 查看正在运行的任务；
+\item 查看失败任务；
+\item 重新执行任务；
+\item 取消任务；
+\item 暂停评测节点；
+\item 恢复评测节点；
+\item 查看节点负载；
+\item 查看语言状态；
+\item 查看平均评测时间。
+\end{itemize}
+
+\subsection{Remote Judge 管理}
+
+管理员可以：
+
+\begin{itemize}
+\item 查看平台状态；
+\item 查看适配器版本；
+\item 查看请求成功率；
+\item 查看失败原因；
+\item 查看账号池状态；
+\item 暂停平台；
+\item 恢复平台；
+\item 测试平台连接；
+\item 测试账号登录；
+\item 手动重试任务；
+\item 修改限流参数。
+\end{itemize}
+
+\subsection{比赛管理}
+
+管理员可以：
+
+\begin{itemize}
+\item 查看全部比赛；
+\item 修改比赛；
+\item 暂停比赛；
+\item 延长比赛；
+\item 提前结束比赛；
+\item 解锁提交；
+\item 执行重判；
+\item 调整排名；
+\item 处理申诉；
+\item 导出比赛数据。
+\end{itemize}
+
+\subsection{系统配置}
+
+管理员可以设置：
+
+\begin{itemize}
+\item 平台名称；
+\item 平台图标；
+\item 注册方式；
+\item 默认角色；
+\item 密码规则；
+\item 上传大小；
+\item 提交频率；
+\item 支持语言；
+\item 默认评测限制；
+\item 通知设置；
+\item 公告设置；
+\item 推荐参数；
+\item 排行榜规则；
+\item 数据保留时间。
+\end{itemize}
+
+\section{日志与审计功能}
+
+\subsection{登录日志}
+
+记录：
+
+\begin{itemize}
+\item 用户；
+\item 登录时间；
+\item 登录方式；
+\item IP；
+\item 设备；
+\item 浏览器；
+\item 登录结果；
+\item 失败原因。
+\end{itemize}
+
+\subsection{操作日志}
+
+记录重要操作：
+
+\begin{itemize}
+\item 用户管理；
+\item 权限变更；
+\item 题目修改；
+\item 测试数据修改；
+\item 比赛修改；
+\item 作业修改；
+\item 重判；
+\item Remote Judge 账号修改；
+\item 系统配置修改。
+\end{itemize}
+
+\subsection{评测日志}
+
+记录：
+
+\begin{itemize}
+\item 任务编号；
+\item 提交编号；
+\item 评测节点；
+\item 开始时间；
+\item 完成时间；
+\item 结果；
+\item 异常；
+\item 重试次数。
+\end{itemize}
+
+\subsection{审计查询}
+
+管理员可以按以下条件查询：
+
+\begin{itemize}
+\item 操作人；
+\item 操作类型；
+\item 操作对象；
+\item 时间范围；
+\item IP；
+\item 操作结果。
+\end{itemize}
+
+重要操作日志不得由普通管理员直接删除。
+
+\section{数据导入与导出功能}
+
+\subsection{用户导入}
+
+支持通过模板导入：
+
+\begin{itemize}
+\item 用户名；
+\item 姓名；
+\item 学号；
+\item 邮箱；
+\item 手机号；
+\item 班级；
+\item 初始密码。
+\end{itemize}
+
+系统应返回：
+
+\begin{itemize}
+\item 成功数量；
+\item 失败数量；
+\item 失败原因；
+\item 重复用户；
+\item 格式错误。
+\end{itemize}
+
+\subsection{题目导入}
+
+支持：
+
+\begin{itemize}
+\item 标准题目压缩包；
+\item 平台自定义格式；
+\item 第三方题目链接；
+\item 批量题号；
+\item JSON；
+\item XML；
+\item Markdown。
+\end{itemize}
+
+\subsection{数据导出}
+
+管理员可以导出：
+
+\begin{itemize}
+\item 用户；
+\item 题目；
+\item 提交；
+\item 比赛；
+\item 作业；
+\item 学习记录；
+\item 能力分析结果。
+\end{itemize}
+
+导出操作需要权限验证和审计。
+
+\section{异常与业务规则}
+
+\subsection{提交限制}
+
+平台可以按不同范围设置：
+
+\begin{itemize}
+\item 单用户每分钟提交次数；
+\item 单题提交间隔；
+\item 单场比赛提交次数；
+\item 单个 Remote Judge 平台提交次数；
+\item 单账号每日远程提交次数；
+\item 单用户并发任务数。
+\end{itemize}
+
+\subsection{题目可见性}
+
+题目可设置为：
+
+\begin{itemize}
+\item 全部公开；
+\item 登录后可见；
+\item 指定学校可见；
+\item 指定课程可见；
+\item 指定班级可见；
+\item 指定比赛可见；
+\item 仅教师可见；
+\item 仅管理员可见。
+\end{itemize}
+
+题面可见和提交权限可以分别设置。
+
+\subsection{比赛时间规则}
+
+\begin{itemize}
+\item 比赛开始前不能查看隐藏题目；
+\item 比赛结束后不能继续提交，除非允许补题；
+\item 虚拟比赛按用户个人开始时间计算；
+\item 服务器时间作为最终时间标准；
+\item 比赛延长后应通知所有参赛者。
+\end{itemize}
+
+\subsection{作业截止规则}
+
+\begin{itemize}
+\item 截止前提交正常计分；
+\item 截止后根据规则允许或禁止提交；
+\item 补交提交应明确标记；
+\item 教师修改截止时间后应记录操作；
+\item 成绩重新计算后应通知学生。
+\end{itemize}
+
+\subsection{删除规则}
+
+重要数据优先使用逻辑删除：
+
+\begin{itemize}
+\item 用户；
+\item 题目；
+\item 比赛；
+\item 作业；
+\item 提交记录；
+\item 课程；
+\item 班级。
+\end{itemize}
+
+删除后管理员可以在一定期限内恢复。
+
+\section{核心功能优先级}
+
+\subsection{第一优先级}
+
+必须首先完成：
+
+\begin{itemize}
+\item 用户注册和登录；
+\item 学生、教师、管理员权限；
+\item 统一题库；
+\item 本平台题目录入；
+\item 测试数据管理；
+\item 本地代码评测；
+\item 提交记录；
+\item 班级管理；
+\item 作业管理；
+\item 基础比赛；
+\item 基础管理后台。
+\end{itemize}
+
+\subsection{第二优先级}
+
+完成基础平台后实现：
+
+\begin{itemize}
+\item Remote Judge 适配框架；
+\item 至少一个官方 Remote Judge 接入；
+\item 第三方题目同步；
+\item 第三方账号绑定；
+\item 题单；
+\item 虚拟比赛；
+\item 完整排行榜；
+\item 教师统计；
+\item 错题本；
+\item 题解和讨论。
+\end{itemize}
+
+\subsection{第三优先级}
+
+平台稳定后实现：
+
+\begin{itemize}
+\item 用户能力分析；
+\item 知识点掌握模型；
+\item 个性化推荐；
+\item 自动学习规划；
+\item 代码查重；
+\item 反作弊；
+\item 多语言题面；
+\item 交互题；
+\item 多文件题；
+\item 高级比赛模式。
+\end{itemize}
+
+\section{功能验收要求}
+
+平台初版应至少满足以下功能验收条件：
+
+\begin{enumerate}
+\item 用户能够注册、登录和退出；
+\item 系统能够区分学生、教师和管理员权限；
+\item 教师能够创建班级并添加学生；
+\item 教师能够录入本平台题目；
+\item 教师能够上传测试数据；
+\item 学生能够提交代码；
+\item 系统能够完成编译和评测；
+\item 系统能够返回标准评测结果；
+\item 教师能够查看学生提交和作业完成情况；
+\item 管理员能够统一管理本地题目和第三方题目；
+\item 平台能够同步至少一个第三方 OJ 的题目数据；
+\item 平台能够通过至少一个正式可用的接口完成 Remote Judge；
+\item Remote Judge 失败时能够展示明确状态；
+\item 教师能够创建线上比赛；
+\item 学生能够报名并参加比赛；
+\item 比赛能够生成正确排行榜；
+\item 学生能够查看个人做题统计；
+\item 教师能够查看班级做题统计；
+\item 平台能够生成基础知识点能力分析；
+\item 平台能够根据用户表现推荐训练题目；
+\item 管理员能够查看评测任务和异常日志；
+\item 重要管理操作能够被审计；
+\item 用户只能访问其权限范围内的数据；
+\item 第三方平台不可用时不影响本平台本地评测；
+\item 题目、提交、比赛和成绩数据能够被正确保存。
+\end{enumerate}
+
+\end{document}
