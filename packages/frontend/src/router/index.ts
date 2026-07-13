@@ -10,9 +10,12 @@ const router = createRouter({
     { path: '/leaderboard', component: () => import('../views/Leaderboard.vue') },
     { path: '/contests', component: () => import('../views/Contests.vue') },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue') },
-    { path: '/admin/import', component: () => import('../views/ImportProblems.vue') },
-    { path: '/admin/create-problem', component: () => import('../views/admin/CreateProblem.vue') },
     { path: '/profile', component: () => import('../views/Profile.vue') },
+    // 教师
+    { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue') },
+    // 管理员
+    { path: '/admin/create-problem', component: () => import('../views/admin/CreateProblem.vue') },
+    { path: '/admin/users', component: () => import('../views/admin/UserManage.vue') },
   ],
 });
 

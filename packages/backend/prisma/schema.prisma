@@ -417,12 +417,12 @@ model Course {
 
 model Class {
   id        String   @id @default(cuid())
-  courseId  String
+  courseId  String?
   name      String
   teacherId String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course    Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
   members   ClassMember[]
 }
 

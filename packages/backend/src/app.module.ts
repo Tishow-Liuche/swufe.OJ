@@ -8,6 +8,7 @@ import { SubmissionModule } from './submission/submission.module';
 import { UserModule } from './user/user.module';
 import { FileUploadModule } from './common/file-upload.module';
 import { PublicModule } from './public/public.module';
+import { TeacherModule } from './teacher/teacher.module';
 import { RolesGuard } from './common/guards/roles.guard';
 
 @Module({
@@ -22,10 +23,9 @@ import { RolesGuard } from './common/guards/roles.guard';
     ProblemModule,
     SubmissionModule,
     UserModule,
+    TeacherModule,
     PublicModule,
   ],
-  providers: [
-    { provide: APP_GUARD, useClass: RolesGuard },
-  ],
+  // APP_GUARD removed — RolesGuard is applied per-route to avoid execution-before-AuthGuard
 })
 export class AppModule {}

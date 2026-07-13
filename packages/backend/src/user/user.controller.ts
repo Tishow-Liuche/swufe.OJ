@@ -1,6 +1,8 @@
-import { Controller, Get, Patch, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, Req } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { UserService } from './user.service';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @Controller('api/user')
 export class UserController {
@@ -22,5 +24,28 @@ export class UserController {
   @UseGuards(AuthGuard('jwt'))
   getStats(@Req() req: any) {
     return this.userService.getStats(req.user.id);
+  }
+
+  // === 管理员接口 ===
+
+  @Get('admin/list')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  listUsers() {
+    return this.userService.listUsers();
+  }
+
+  @Patch('admin/:id/role')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  setRole(@Param('id') id: string, @Body('role') role: string) {
+    return this.userService.setRole(id, role);
+  }
+
+  @Post('admin/:id/reset-password')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  resetPassword(@Param('id') id: string, @Body('password') password: string) {
+    return this.userService.resetPassword(id, password);
   }
 }

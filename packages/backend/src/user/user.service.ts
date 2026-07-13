@@ -139,4 +139,36 @@ export class UserService {
     const last = new Date(sorted[0]), today = new Date();
     return (today.getTime() - last.getTime()) / 86400000 > 1.5 ? 0 : streak;
   }
+
+  // ========== 管理员功能 ==========
+
+  async listUsers() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true, username: true, email: true, nickname: true,
+        role: true, createdAt: true,
+        _count: { select: { submissions: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async setRole(userId: string, role: string) {
+    if (!['STUDENT', 'TEACHER', 'ADMIN'].includes(role)) {
+      throw new Error('无效的角色: ' + role);
+    }
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { role },
+      select: { id: true, username: true, role: true },
+    });
+  }
+
+  async resetPassword(userId: string, password: string) {
+    if (!password || password.length < 6) throw new Error('密码至少 6 位');
+    const bcrypt = require('bcryptjs');
+    const hashed = await bcrypt.hash(password, 10);
+    await this.prisma.user.update({ where: { id: userId }, data: { password: hashed } });
+    return { success: true };
+  }
 }

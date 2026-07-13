@@ -7,6 +7,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProblemService } from './problem.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateProblemDto, UpdateProblemDto, QueryProblemDto } from './dto';
 
 @Controller('api/problems')

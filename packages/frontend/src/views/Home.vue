@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
 
 const router = useRouter();
-const isLoggedIn = ref(!!localStorage.getItem('accessToken'));
+const auth = useAuthStore();
 const stats = ref({ problemCount: 0, submissionCount: 0, userCount: 0 });
 
 onMounted(async () => {
@@ -16,7 +17,6 @@ onMounted(async () => {
 
 <template>
   <div class="home">
-    <!-- Hero -->
     <section class="hero">
       <div class="hero-content">
         <h1 class="hero-title">西财 OJ</h1>
@@ -24,7 +24,7 @@ onMounted(async () => {
         <p class="hero-desc">多源题库 · 实时评测 · 教学管理 · 能力分析 · 竞赛训练</p>
         <div class="hero-actions">
           <button class="btn-primary" @click="router.push('/problems')">进入题库</button>
-          <button v-if="!isLoggedIn" class="btn-outline" @click="router.push('/login')">登录 / 注册</button>
+          <button v-if="!auth.isLoggedIn()" class="btn-outline" @click="router.push('/login')">登录 / 注册</button>
           <button v-else class="btn-outline" @click="router.push('/profile')">个人中心</button>
         </div>
       </div>
@@ -58,10 +58,20 @@ onMounted(async () => {
           <h3>个人中心</h3>
           <p>提交记录 · 热力图 · 统计概览 · 语言分布 · 难度分析 · 连续打卡</p>
         </div>
-        <div class="feature-card" @click="router.push('/admin/create-problem')">
+        <div v-if="auth.isAdmin()" class="feature-card" @click="router.push('/admin/create-problem')">
           <div class="card-icon icon-create">✍️</div>
           <h3>录题</h3>
           <p>Markdown 编辑器 + ZIP 测试数据上传，支持 Special Judge</p>
+        </div>
+        <div v-if="auth.isTeacher()" class="feature-card" @click="router.push('/teacher/classes')">
+          <div class="card-icon icon-class">🎓</div>
+          <h3>班级管理</h3>
+          <p>创建班级、批量导入学生、布置作业、发布比赛</p>
+        </div>
+        <div v-if="auth.isAdmin()" class="feature-card" @click="router.push('/admin/users')">
+          <div class="card-icon icon-admin">⚙️</div>
+          <h3>系统管理</h3>
+          <p>用户管理、角色分配、权限控制</p>
         </div>
         <div class="feature-card disabled">
           <div class="card-icon icon-list">📋</div>
