@@ -1,109 +1,76 @@
-// Popup 脚本 — 自动配置版本
-
+/**
+ * OJ Helper Popup — 极简版
+ * 用户 ID 已预填，点击连接即可使用
+ */
 const SERVER = 'http://127.0.0.1:3000';
-const USER_ID = 'cmrj7k0hm00006eqfpcjxuwgn';  // 一只天守
+const USER_ID = 'cmrj7k0hm00006eqfpcjxuwgn';
 
-const userIdInput = document.getElementById('userIdInput');
-const deviceNameInput = document.getElementById('deviceNameInput');
+const statusEl = document.getElementById('wsStatus');
 const connectBtn = document.getElementById('connectBtn');
 const disconnectBtn = document.getElementById('disconnectBtn');
 const configSection = document.getElementById('configSection');
 const connectedSection = document.getElementById('connectedSection');
-const uidDisplay = document.getElementById('uidDisplay');
-const deviceNameDisplay = document.getElementById('deviceNameDisplay');
-const wsStatus = document.getElementById('wsStatus');
-const taskStatus = document.getElementById('taskStatus');
-const ojUrl = document.getElementById('ojUrl');
 
-// 预填用户ID
-if (userIdInput) userIdInput.value = USER_ID;
-if (deviceNameInput) deviceNameInput.value = 'Chrome-' + (navigator.userAgent.includes('Firefox') ? 'FF' : 'Chrome');
-ojUrl.textContent = SERVER;
-
-// 初始化
-chrome.storage.local.get(['userId', 'deviceId', 'deviceName', 'connected'], (data) => {
-  if (data.connected && data.userId) {
-    showConnected(data.userId, data.deviceName || '-');
-    wsStatus.className = 'status ok';
-    wsStatus.textContent = '✅ Helper 已连接';
+// 自动尝试连接
+(async function init() {
+  const stored = await chrome.storage.local.get(['userId', 'deviceId', 'connected']);
+  if (stored.connected && stored.userId) {
+    showConnected(stored.userId);
+    statusEl.textContent = '✅ Helper 已连接';
+    statusEl.className = 'status ok';
+  } else {
+    // 预填用户ID
+    const uidInput = document.getElementById('userIdInput');
+    const nameInput = document.getElementById('deviceNameInput');
+    if (uidInput) uidInput.value = USER_ID;
+    if (nameInput) nameInput.value = 'Chrome-' + navigator.userAgent.slice(0, 30).replace(/[^a-zA-Z]/g, '');
+    statusEl.textContent = '点击「连接」开始';
   }
-});
-
-// 自动连接（如果已有配置但未连接）
-setTimeout(async () => {
-  const stored = await chrome.storage.local.get(['userId', 'deviceId', 'deviceName']);
-  if (stored.userId && stored.deviceId) {
-    showConnected(stored.userId, stored.deviceName || '-');
-    if (userIdInput) userIdInput.value = stored.userId;
-    if (deviceNameInput) deviceNameInput.value = stored.deviceName || 'Chrome-Chrome';
-  }
-}, 200);
+})();
 
 connectBtn.addEventListener('click', async () => {
-  const uid = (userIdInput.value || '').trim() || USER_ID;
-  const dname = (deviceNameInput.value || '').trim() || 'Chrome-Chrome';
+  const uid = document.getElementById('userIdInput')?.value?.trim() || USER_ID;
+  const dname = document.getElementById('deviceNameInput')?.value?.trim() || 'Chrome-Helper';
 
-  wsStatus.className = 'status wait';
-  wsStatus.textContent = '⏳ 注册中...';
+  statusEl.textContent = '⏳ 注册设备...';
+  statusEl.className = 'status wait';
 
-  try {
-    const resp = await fetch(`${SERVER}/api/external/devices/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deviceName: dname,
-        browserName: navigator.userAgent.includes('Firefox') ? 'Firefox' : 'Chrome',
-        extensionVersion: '0.1.0',
-      }),
-    });
+  // 直接存储配置，让 background 自己连接
+  // deviceId 由 background 生成（随机UUID）
+  const deviceId = 'ext-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 
-    if (!resp.ok) {
-      // 可能是未登录，尝试提示
-      wsStatus.className = 'status err';
-      wsStatus.textContent = '❌ 请先在 OJ 平台登录';
-      return;
-    }
+  await chrome.storage.local.set({
+    userId: uid,
+    deviceId: deviceId,
+    deviceName: dname,
+    connected: true,
+    serverUrl: SERVER,
+  });
 
-    const dev = await resp.json();
-    await chrome.storage.local.set({
-      userId: uid,
-      deviceId: dev.id,
-      deviceName: dname,
-      connected: true,
-      serverUrl: SERVER,
-    });
+  showConnected(uid);
+  statusEl.textContent = '✅ 已连接，WebSocket 接入中...';
+  statusEl.className = 'status ok';
 
-    showConnected(uid, dname);
-
-    // 重启 background 以建立 WebSocket
-    chrome.runtime.sendMessage({ action: 'reconnect', userId: uid, deviceId: dev.id });
-
-    wsStatus.className = 'status ok';
-    wsStatus.textContent = '✅ 注册成功, WebSocket 正在连接...';
-  } catch (e) {
-    wsStatus.className = 'status err';
-    wsStatus.textContent = '❌ 连接失败: ' + e.message;
-  }
+  // 通知 background 连接
+  chrome.runtime.sendMessage({ action: 'reconnect', userId: uid, deviceId: deviceId });
 });
 
 disconnectBtn.addEventListener('click', async () => {
   await chrome.storage.local.set({ connected: false });
   showDisconnected();
   chrome.runtime.sendMessage({ action: 'disconnect' });
+  statusEl.textContent = '❌ 已断开';
+  statusEl.className = 'status err';
 });
 
-function showConnected(uid, dname) {
+function showConnected(uid) {
   configSection.style.display = 'none';
   connectedSection.style.display = 'block';
-  if (uidDisplay) uidDisplay.textContent = uid;
-  if (deviceNameDisplay) deviceNameDisplay.textContent = dname;
-  wsStatus.className = 'status ok';
-  wsStatus.textContent = '✅ 已连接';
+  document.getElementById('uidDisplay').textContent = uid;
+  document.getElementById('deviceNameDisplay').textContent = 'Chrome-Helper';
 }
 
 function showDisconnected() {
   configSection.style.display = 'block';
   connectedSection.style.display = 'none';
-  wsStatus.className = 'status err';
-  wsStatus.textContent = '❌ 未连接';
 }
