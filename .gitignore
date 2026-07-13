@@ -45,3 +45,7 @@ coverage/
 # Temp
 tmp/
 temp/
+
+# Large datasets (downloaded dynamically)
+*.ndjson.gz
+*.gzip
