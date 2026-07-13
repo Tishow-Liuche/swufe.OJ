@@ -1,16 +1,19 @@
 {
   "manifest_version": 3,
   "name": "OJ Remote Submit Helper",
-  "version": "0.8.0",
-  "description": "CF 远程提交",
-  "permissions": ["storage"],
+  "version": "0.9.1",
+  "description": "CF 远程提交 — 全自动 Content Script",
   "host_permissions": [
     "https://codeforces.com/*",
-    "http://127.0.0.1:3000/*"
+    "http://127.0.0.1:3000/*",
+    "http://localhost:3000/*"
   ],
-  "content_scripts": [
-    {"matches": ["http://127.0.0.1:3000/*"],"js": ["content.js"],"run_at":"document_start"},
-    {"matches": ["https://codeforces.com/*"],"js": ["inject.js"],"run_at":"document_start"}
-  ],
-  "action": {"default_title":"OJ Helper"}
+  "content_scripts": [{
+    "matches": [
+      "http://127.0.0.1:3000/*",
+      "http://localhost:3000/*"
+    ],
+    "js": ["content.js"],
+    "run_at": "document_start"
+  }]
 }
