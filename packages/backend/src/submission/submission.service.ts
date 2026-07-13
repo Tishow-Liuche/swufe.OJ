@@ -38,14 +38,14 @@ export class SubmissionService {
       const parts = remotePid.match(/(\d+)([A-Z]\d?)/);
       if (!parts) throw new NotFoundException('CF 题目编号格式错误: ' + remotePid);
 
-      // 直接走服务器端 Node.js https 提交（不走扩展）
-      const contestId = parseInt(parts[1]);
-      const problemIndex = parts[2];
-      await this.cfQueue.add('cf-judge', {
-        submissionId: submission.id, problemId: dto.problemId,
-        contestId, problemIndex,
-        language: dto.language, sourceCode: dto.sourceCode,
-      }, { priority: 1 });
+      // 创建远程任务 → 浏览器扩展 bg.js 轮询 → 自动提交到CF
+      await this.helper.createRemoteTask(submission.id, userId, {
+        platformCode: 'CODEFORCES',
+        externalAccountId: problem.sourceInfo?.id || '',
+        remoteProblemId: remotePid,
+        language: dto.language,
+        sourceCode: dto.sourceCode,
+      });
       await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
       return { id: submission.id, status: 'QUEUING', mode: 'CODEFORCES_HELPER' };
     } else {
