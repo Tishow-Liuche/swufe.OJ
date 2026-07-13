@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "OJ Remote Submit Helper",
+  "version": "0.1.0",
+  "description": "使用你自己的第三方 OJ 账号完成远程提交",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://codeforces.com/*",
+    "https://ac.nowcoder.com/*",
+    "https://qoj.ac/*",
+    "https://www.luogu.com.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "OJ Helper"
+  },
+  "content_scripts": [{
+    "matches": [
+      "https://codeforces.com/*",
+      "https://ac.nowcoder.com/*",
+      "https://qoj.ac/*",
+      "https://www.luogu.com.cn/*"
+    ],
+    "js": ["shared.js"]
+  }]
+}

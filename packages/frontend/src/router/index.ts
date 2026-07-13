@@ -11,6 +11,7 @@ const router = createRouter({
     { path: '/contests', component: () => import('../views/Contests.vue') },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue') },
     { path: '/profile', component: () => import('../views/Profile.vue') },
+    { path: '/external/accounts', component: () => import('../views/external/AccountBind.vue') },
     // 教师
     { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue') },
     // 管理员

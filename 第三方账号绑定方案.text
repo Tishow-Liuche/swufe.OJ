@@ -1,0 +1,1329 @@
+# 多 OJ 用户自有账号绑定与远程提交系统实现要求
+
+## 1. 实现目标
+
+实现一个基于“用户自有第三方 OJ 账号”的远程提交系统。
+
+用户先将 Codeforces、牛客、QOJ、洛谷等第三方 OJ 账号绑定到本平台，然后在本平台填写代码并提交。
+
+实际评测流程为：
+
+```text
+用户在本平台提交代码
+        ↓
+本平台创建远程提交任务
+        ↓
+用户浏览器中的 Helper 扩展获取任务
+        ↓
+Helper 使用用户当前浏览器中已登录的第三方 OJ 会话
+        ↓
+Helper 将代码提交到用户自己的第三方 OJ 账号
+        ↓
+获得第三方 Submission ID
+        ↓
+回传本平台
+        ↓
+本平台查询或接收评测结果
+        ↓
+统一显示 AC、WA、TLE 等结果
+```
+
+该方案仍然属于 Remote Judge，但不使用平台公共机器人账号，而是使用用户自己的第三方 OJ 账号。
+
+---
+
+# 2. 核心设计原则
+
+必须遵守以下原则：
+
+1. 不保存用户第三方 OJ 的明文密码；
+2. 不要求用户向服务器提交完整 Cookie；
+3. 不将第三方 OJ Cookie 上传到本平台服务器；
+4. 第三方 OJ 登录状态保留在用户浏览器中；
+5. 浏览器 Helper 使用用户现有登录会话完成提交；
+6. 服务器只保存第三方用户名、绑定状态和远程提交编号；
+7. 遇到验证码时停止自动提交，要求用户手动处理；
+8. 不实现验证码绕过；
+9. 不绕过 Cloudflare、风控或访问限制；
+10. 不自动提交正在进行的正式 Rated Contest；
+11. 所有平台适配器必须可以单独启用、禁用和降级；
+12. 第三方提交失败不能影响本平台本地评测功能。
+
+---
+
+# 3. 系统组成
+
+系统分为四个主要组件。
+
+## 3.1 核心后端
+
+负责：
+
+* 用户认证；
+* 第三方账号绑定记录；
+* 创建远程提交任务；
+* 保存本地提交记录；
+* 验证 Helper 连接；
+* 接收第三方 Submission ID；
+* 查询评测结果；
+* 状态统一；
+* 超时和异常处理；
+* 操作审计。
+
+## 3.2 Web 前端
+
+负责：
+
+* 展示第三方账号绑定状态；
+* 展示 Helper 连接状态；
+* 在线代码编辑；
+* 创建提交；
+* 展示提交进度；
+* 展示远程评测结果；
+* 引导用户登录第三方 OJ；
+* Helper 不可用时提供原站跳转。
+
+## 3.3 浏览器 Helper 扩展
+
+负责：
+
+* 与本平台建立安全连接；
+* 获取属于当前用户的待提交任务；
+* 检查第三方 OJ 登录状态；
+* 检查当前远程账号；
+* 获取必要的 CSRF 或表单字段；
+* 使用用户浏览器会话提交代码；
+* 获取远程 Submission ID；
+* 回传提交凭证；
+* 遇到验证码时暂停任务；
+* 不上传 Cookie。
+
+## 3.4 平台适配器
+
+每个第三方 OJ 单独实现适配器：
+
+```text
+adapters/
+├── codeforces/
+├── nowcoder/
+├── qoj/
+├── luogu/
+└── shared/
+```
+
+每个平台适配器不得与核心业务代码强耦合。
+
+---
+
+# 4. 账号绑定模式
+
+账号绑定分为三个状态。
+
+```typescript
+export type ExternalAccountStatus =
+  | "IDENTITY_ONLY"
+  | "HELPER_CONNECTED"
+  | "SUBMISSION_READY"
+  | "EXPIRED"
+  | "DISABLED";
+```
+
+含义如下：
+
+| 状态                 | 含义                | 能否远程提交 |
+| ------------------ | ----------------- | -----: |
+| `IDENTITY_ONLY`    | 已填写并验证第三方用户名      |      否 |
+| `HELPER_CONNECTED` | 浏览器 Helper 已连接    |    不一定 |
+| `SUBMISSION_READY` | Helper 确认第三方账号已登录 |      是 |
+| `EXPIRED`          | 第三方登录状态失效         |      否 |
+| `DISABLED`         | 账号绑定被用户或管理员关闭     |      否 |
+
+---
+
+# 5. 账号绑定流程
+
+## 5.1 用户绑定第三方用户名
+
+用户填写：
+
+* 平台；
+* 第三方用户名；
+* 可选备注。
+
+示例：
+
+```json
+{
+  "platform": "CODEFORCES",
+  "remoteUsername": "tourist"
+}
+```
+
+后端检查：
+
+* 平台是否启用；
+* 用户名格式是否合法；
+* 第三方账号是否存在；
+* 当前用户是否已绑定该账号；
+* 同一第三方账号是否允许被多个本地用户绑定。
+
+## 5.2 验证账号归属
+
+账号归属可以使用以下方式：
+
+1. 浏览器 Helper 验证当前登录账号；
+2. 用户在第三方资料页临时填写验证码；
+3. 用户完成一次指定提交；
+4. 管理员人工验证。
+
+第一版优先使用 Helper 验证。
+
+验证成功后记录：
+
+```typescript
+interface ExternalAccountVerification {
+  externalAccountId: string;
+  verificationMethod: "HELPER" | "PROFILE_CODE" | "SUBMISSION" | "MANUAL";
+  verifiedAt: Date;
+  remoteUsername: string;
+}
+```
+
+## 5.3 Helper 验证登录账号
+
+Helper 访问第三方 OJ 页面，解析当前已登录用户名。
+
+必须确认：
+
+```text
+绑定用户名 = 浏览器当前登录用户名
+```
+
+不一致时禁止提交，并提示用户切换第三方账号。
+
+---
+
+# 6. 数据模型
+
+## 6.1 第三方平台
+
+```typescript
+interface ExternalPlatform {
+  id: string;
+
+  code:
+    | "CODEFORCES"
+    | "NOWCODER"
+    | "QOJ"
+    | "LUOGU";
+
+  name: string;
+  baseUrl: string;
+
+  enabled: boolean;
+
+  supportsMetadata: boolean;
+  supportsStatement: boolean;
+  supportsBrowserSubmission: boolean;
+  supportsOfficialSubmissionApi: boolean;
+  supportsOfficialResultApi: boolean;
+
+  allowLiveContestSubmission: boolean;
+  adapterVersion: string;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+## 6.2 用户第三方账号
+
+```typescript
+interface ExternalAccount {
+  id: string;
+  userId: string;
+  platformId: string;
+
+  remoteUsername: string;
+
+  status: ExternalAccountStatus;
+  ownershipVerified: boolean;
+
+  helperConnected: boolean;
+  remoteLoginVerifiedAt: Date | null;
+  lastSuccessfulSubmissionAt: Date | null;
+  lastFailureAt: Date | null;
+  lastFailureReason: string | null;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+禁止保存：
+
+```text
+第三方明文密码
+完整 Cookie
+可直接复用的登录 Session
+浏览器本地存储内容
+```
+
+## 6.3 Helper 设备
+
+```typescript
+interface HelperDevice {
+  id: string;
+  userId: string;
+
+  deviceName: string;
+  browserName: string;
+  extensionVersion: string;
+
+  publicKey: string;
+  status: "ONLINE" | "OFFLINE" | "REVOKED";
+
+  lastSeenAt: Date;
+  createdAt: Date;
+}
+```
+
+## 6.4 本地提交记录
+
+```typescript
+interface Submission {
+  id: string;
+  userId: string;
+  problemId: string;
+
+  judgeMode:
+    | "LOCAL"
+    | "OFFICIAL_API"
+    | "USER_ACCOUNT_REMOTE";
+
+  platformCode: string | null;
+  externalAccountId: string | null;
+
+  language: string;
+  sourceCode: string;
+
+  status: UnifiedJudgeStatus;
+  score: number | null;
+
+  remoteSubmissionId: string | null;
+  remoteRawStatus: string | null;
+
+  createdAt: Date;
+  submittedAt: Date | null;
+  judgedAt: Date | null;
+}
+```
+
+## 6.5 远程提交任务
+
+```typescript
+interface RemoteSubmissionTask {
+  id: string;
+  submissionId: string;
+  userId: string;
+
+  platformCode: string;
+  externalAccountId: string;
+
+  remoteProblemId: string;
+  remoteContestId: string | null;
+  remoteProblemIndex: string | null;
+
+  language: string;
+  sourceCode: string;
+
+  status:
+    | "PENDING"
+    | "ASSIGNED"
+    | "HELPER_PROCESSING"
+    | "REMOTE_SUBMITTED"
+    | "JUDGING"
+    | "COMPLETED"
+    | "FAILED"
+    | "EXPIRED"
+    | "CANCELLED"
+    | "CAPTCHA_REQUIRED"
+    | "LOGIN_REQUIRED";
+
+  assignedHelperDeviceId: string | null;
+
+  expiresAt: Date;
+  attemptCount: number;
+  maximumAttempts: number;
+
+  remoteSubmissionId: string | null;
+  failureCode: string | null;
+  failureMessage: string | null;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+---
+
+# 7. 统一评测状态
+
+```typescript
+export type UnifiedJudgeStatus =
+  | "PENDING"
+  | "QUEUING"
+  | "SUBMITTING"
+  | "JUDGING"
+  | "ACCEPTED"
+  | "WRONG_ANSWER"
+  | "TIME_LIMIT_EXCEEDED"
+  | "MEMORY_LIMIT_EXCEEDED"
+  | "RUNTIME_ERROR"
+  | "COMPILE_ERROR"
+  | "OUTPUT_LIMIT_EXCEEDED"
+  | "PRESENTATION_ERROR"
+  | "PARTIAL_ACCEPTED"
+  | "SYSTEM_ERROR"
+  | "REMOTE_ERROR"
+  | "LOGIN_REQUIRED"
+  | "CAPTCHA_REQUIRED"
+  | "UNSUPPORTED"
+  | "CANCELLED"
+  | "UNKNOWN";
+```
+
+每个平台适配器负责将原始状态映射为统一状态。
+
+---
+
+# 8. 远程提交任务结构
+
+后端发送给 Helper 的任务：
+
+```typescript
+interface SignedRemoteSubmissionTask {
+  taskId: string;
+  submissionId: string;
+
+  userId: string;
+  helperDeviceId: string;
+
+  platform: string;
+  expectedRemoteUsername: string;
+
+  remoteProblemId: string;
+  remoteContestId?: string;
+  remoteProblemIndex?: string;
+
+  language: string;
+  sourceCode: string;
+
+  createdAt: string;
+  expiresAt: string;
+
+  nonce: string;
+  signature: string;
+}
+```
+
+任务必须：
+
+* 绑定用户；
+* 绑定 Helper 设备；
+* 设置短期有效时间；
+* 带随机 nonce；
+* 使用服务端私钥签名；
+* 防止重复执行；
+* 防止任务被篡改。
+
+Helper 执行前必须验证任务签名。
+
+---
+
+# 9. Helper 回执结构
+
+提交成功后，Helper 回传：
+
+```typescript
+interface RemoteSubmissionReceipt {
+  taskId: string;
+  submissionId: string;
+
+  platform: string;
+  remoteUsername: string;
+  remoteSubmissionId: string;
+
+  remoteProblemId: string;
+  remoteLanguage: string;
+
+  submittedAt: string;
+
+  requestFingerprint: string;
+  receiptSignature: string;
+}
+```
+
+Helper 不得回传：
+
+* Cookie；
+* Session；
+* 密码；
+* CSRF Token；
+* 完整响应头；
+* 其他用户隐私信息。
+
+---
+
+# 10. 完整提交流程
+
+## 10.1 用户发起提交
+
+前端提交：
+
+```http
+POST /api/submissions
+```
+
+请求：
+
+```json
+{
+  "problemId": "problem-id",
+  "language": "cpp17",
+  "sourceCode": "...",
+  "externalAccountId": "external-account-id"
+}
+```
+
+后端检查：
+
+1. 用户是否已登录；
+2. 题目是否存在；
+3. 题目是否支持远程提交；
+4. 第三方平台是否启用；
+5. 用户是否绑定该平台账号；
+6. 账号是否已验证；
+7. Helper 是否在线；
+8. 第三方账号是否处于登录状态；
+9. 当前场景是否允许提交；
+10. 是否超过提交频率；
+11. 语言是否支持；
+12. 是否为受限制的比赛题。
+
+## 10.2 创建任务
+
+后端：
+
+1. 创建本地 Submission；
+2. 创建 RemoteSubmissionTask；
+3. 将任务分配给在线 Helper；
+4. 通过 WebSocket 推送任务；
+5. 更新状态为 `ASSIGNED`。
+
+## 10.3 Helper 执行
+
+Helper：
+
+1. 验证签名；
+2. 检查任务是否过期；
+3. 检查当前本平台用户；
+4. 检查目标 OJ 登录状态；
+5. 检查当前远程用户名；
+6. 检查题目是否允许提交；
+7. 获取第三方提交页面；
+8. 获取必要的 CSRF 和表单字段；
+9. 映射编程语言；
+10. 提交代码；
+11. 获取远程 Submission ID；
+12. 回传回执。
+
+## 10.4 后端确认
+
+后端：
+
+1. 验证 Helper 回执签名；
+2. 检查远程用户名；
+3. 检查题号；
+4. 检查任务是否已被处理；
+5. 保存远程 Submission ID；
+6. 更新状态为 `REMOTE_SUBMITTED`；
+7. 开始查询结果。
+
+## 10.5 查询结果
+
+根据平台能力选择：
+
+```text
+官方读取 API
+或
+Helper 查询网页
+或
+服务器低频查询公开提交页面
+```
+
+最终保存：
+
+* 统一评测状态；
+* 原始状态；
+* 得分；
+* 时间；
+* 内存；
+* 编译信息；
+* 完成时间。
+
+---
+
+# 11. 浏览器扩展设计
+
+## 11.1 Manifest 权限
+
+仅申请必要权限。
+
+示例：
+
+```json
+{
+  "manifest_version": 3,
+  "name": "OJ Remote Submit Helper",
+  "version": "0.1.0",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://your-oj.example.com/*",
+    "https://codeforces.com/*",
+    "https://ac.nowcoder.com/*",
+    "https://qoj.ac/*",
+    "https://www.luogu.com.cn/*"
+  ]
+}
+```
+
+不得申请与功能无关的权限。
+
+## 11.2 扩展模块
+
+```text
+extension/
+├── background/
+│   ├── connection.ts
+│   ├── task-runner.ts
+│   └── signature.ts
+├── adapters/
+│   ├── codeforces.ts
+│   ├── nowcoder.ts
+│   ├── qoj.ts
+│   └── luogu.ts
+├── content-scripts/
+├── popup/
+└── shared/
+```
+
+## 11.3 扩展状态
+
+扩展应显示：
+
+* 本平台登录状态；
+* Helper 连接状态；
+* 第三方平台登录状态；
+* 当前第三方用户名；
+* 最近提交任务；
+* 最近错误；
+* 是否需要验证码；
+* 是否需要重新登录。
+
+---
+
+# 12. 平台适配器统一接口
+
+```typescript
+interface BrowserRemoteJudgeAdapter {
+  platformCode: string;
+
+  detectLoginState(): Promise<{
+    loggedIn: boolean;
+    remoteUsername: string | null;
+  }>;
+
+  getCapabilities(): Promise<{
+    supportsSubmission: boolean;
+    supportsResultQuery: boolean;
+    supportsMultipleFiles: boolean;
+    supportsLiveContest: boolean;
+  }>;
+
+  mapLanguage(localLanguage: string): Promise<string>;
+
+  validateProblem(request: {
+    remoteProblemId: string;
+    remoteContestId?: string;
+    remoteProblemIndex?: string;
+  }): Promise<{
+    valid: boolean;
+    reason?: string;
+  }>;
+
+  submit(request: {
+    remoteProblemId: string;
+    remoteContestId?: string;
+    remoteProblemIndex?: string;
+    remoteLanguage: string;
+    sourceCode: string;
+  }): Promise<{
+    remoteSubmissionId: string;
+    submittedAt: string;
+  }>;
+
+  queryResult?(
+    remoteSubmissionId: string,
+  ): Promise<{
+    rawStatus: string;
+    unifiedStatus: UnifiedJudgeStatus;
+    score?: number;
+    timeMs?: number;
+    memoryKb?: number;
+    finished: boolean;
+  }>;
+}
+```
+
+---
+
+# 13. Codeforces 实现要求
+
+## 13.1 题目数据
+
+使用官方 API 同步元数据：
+
+```text
+https://codeforces.com/api/problemset.problems
+```
+
+同步：
+
+* contestId；
+* index；
+* name；
+* rating；
+* tags；
+* points；
+* solvedCount。
+
+完整题面第一版只提供原题跳转或合法缓存。
+
+## 13.2 账号绑定
+
+绑定字段：
+
+* Codeforces Handle；
+* Helper 验证的当前登录 Handle。
+
+必须检查两者一致。
+
+## 13.3 提交
+
+Helper 使用用户浏览器中的 Codeforces 登录状态提交。
+
+第一版仅允许：
+
+* 已结束比赛；
+* Practice；
+* 普通公开题目。
+
+默认禁止：
+
+* 正在进行的 Rated Contest；
+* 无权限的 Gym；
+* 私有 Group；
+* 私有 Mashup。
+
+## 13.4 结果查询
+
+优先使用 Codeforces 官方读取 API查询用户提交记录。
+
+匹配条件：
+
+* remoteUsername；
+* contestId；
+* problemIndex；
+* remoteSubmissionId；
+* 提交时间；
+* 编程语言。
+
+必须集中限流，不得对每个提交高频独立轮询。
+
+---
+
+# 14. 牛客实现要求
+
+## 14.1 题目数据
+
+通过公开题目页面适配器获取：
+
+* 题号；
+* 标题；
+* 时间限制；
+* 内存限制；
+* 题目描述；
+* 输入输出；
+* 样例；
+* 难度。
+
+## 14.2 账号绑定
+
+Helper 检查当前牛客登录用户名，并与绑定账号匹配。
+
+## 14.3 提交
+
+第一版只支持：
+
+* 公共 ACM 题目；
+* 普通单文件代码；
+* 非进行中的正式比赛题。
+
+需要适配：
+
+* 提交页面；
+* 编程语言编号；
+* CSRF 字段；
+* 提交结果页面；
+* Submission ID 提取。
+
+遇到行为验证或验证码时停止任务。
+
+---
+
+# 15. QOJ 实现要求
+
+## 15.1 题目类型
+
+QOJ 包含：
+
+* 普通题；
+* Interactive；
+* Communication；
+* Output Only；
+* 多文件题。
+
+第一版只支持：
+
+```text
+普通单文件程序设计题
+```
+
+以下题型标记为不支持：
+
+* Interactive；
+* Communication；
+* Output Only；
+* 多文件题。
+
+## 15.2 账号绑定
+
+Helper 检查当前 QOJ 登录账号。
+
+## 15.3 提交
+
+需要适配：
+
+* 登录状态；
+* 提交页面；
+* CSRF；
+* 语言映射；
+* 单文件上传；
+* Submission ID；
+* 结果页面。
+
+---
+
+# 16. 洛谷实现要求
+
+优先级如下：
+
+```text
+官方开放平台 API
+    ↓ 不可用
+浏览器 Helper 实验模式
+    ↓ 不可用
+原站跳转
+```
+
+浏览器 Helper 模式必须标记为：
+
+```text
+EXPERIMENTAL
+```
+
+不得将其描述为官方免费 Remote Judge。
+
+第一版可以选择不实现洛谷浏览器代交，只保留接口。
+
+---
+
+# 17. 安全要求
+
+## 17.1 凭据安全
+
+必须保证：
+
+* 服务器不保存第三方密码；
+* 服务器不保存第三方完整 Cookie；
+* 日志不记录 Cookie；
+* 日志不记录 CSRF Token；
+* 日志不记录完整第三方响应头；
+* Helper 不向服务器上传浏览器凭据；
+* Helper 设备可以撤销。
+
+## 17.2 任务安全
+
+每个任务必须：
+
+* 使用 UUID；
+* 带 nonce；
+* 有过期时间；
+* 使用服务器签名；
+* 绑定用户；
+* 绑定 Helper 设备；
+* 只能成功执行一次；
+* 重复回执必须幂等处理。
+
+## 17.3 源代码安全
+
+源代码只允许：
+
+* 当前用户；
+* 有权限的教师；
+* 评测任务；
+* 绑定的 Helper 设备访问。
+
+Helper 完成任务后应清理本地任务数据。
+
+## 17.4 XSS 和网页安全
+
+第三方题面和响应 HTML 必须过滤：
+
+* script；
+* iframe；
+* javascript URL；
+* 事件属性；
+* 危险表单；
+* 未授权跳转。
+
+---
+
+# 18. 验证码和风控处理
+
+禁止实现：
+
+* OCR 自动识别验证码；
+* 验证码绕过；
+* Cloudflare 绕过；
+* 自动规避平台限流；
+* 代理池规避风控；
+* 伪造用户行为。
+
+出现验证码时：
+
+```typescript
+task.status = "CAPTCHA_REQUIRED";
+submission.status = "CAPTCHA_REQUIRED";
+```
+
+前端提示：
+
+```text
+第三方平台要求完成验证。
+请打开第三方平台，在浏览器中手动完成验证后重试。
+```
+
+---
+
+# 19. 降级策略
+
+远程提交失败时按以下顺序降级：
+
+```text
+1. 官方提交 API
+2. 用户浏览器 Helper
+3. 打开第三方提交页面并复制代码
+4. 跳转原题页面
+```
+
+前端必须明确显示当前提交方式：
+
+* 官方接口；
+* 用户账号远程提交；
+* 原站提交；
+* 当前不可用。
+
+---
+
+# 20. API 设计
+
+## 20.1 获取第三方平台
+
+```http
+GET /api/external-platforms
+```
+
+## 20.2 绑定账号
+
+```http
+POST /api/external-accounts
+```
+
+## 20.3 获取绑定账号
+
+```http
+GET /api/external-accounts
+```
+
+## 20.4 删除绑定
+
+```http
+DELETE /api/external-accounts/:id
+```
+
+## 20.5 Helper 验证账号
+
+```http
+POST /api/external-accounts/:id/helper-verify
+```
+
+## 20.6 注册 Helper 设备
+
+```http
+POST /api/helper-devices/register
+```
+
+## 20.7 Helper 心跳
+
+```http
+POST /api/helper-devices/:id/heartbeat
+```
+
+## 20.8 创建提交
+
+```http
+POST /api/submissions
+```
+
+## 20.9 Helper 获取任务
+
+优先使用 WebSocket。
+
+备用接口：
+
+```http
+GET /api/helper/tasks/next
+```
+
+## 20.10 Helper 提交回执
+
+```http
+POST /api/helper/tasks/:taskId/receipt
+```
+
+## 20.11 Helper 报告失败
+
+```http
+POST /api/helper/tasks/:taskId/failure
+```
+
+## 20.12 查询提交状态
+
+```http
+GET /api/submissions/:id
+```
+
+---
+
+# 21. WebSocket 事件
+
+服务器发送：
+
+```text
+helper.task.created
+helper.task.cancelled
+helper.account.verify
+```
+
+Helper 发送：
+
+```text
+helper.connected
+helper.heartbeat
+helper.task.accepted
+helper.task.processing
+helper.task.submitted
+helper.task.failed
+helper.captcha.required
+helper.login.required
+```
+
+---
+
+# 22. 错误码
+
+```typescript
+export type RemoteJudgeErrorCode =
+  | "HELPER_OFFLINE"
+  | "HELPER_VERSION_UNSUPPORTED"
+  | "REMOTE_ACCOUNT_NOT_BOUND"
+  | "REMOTE_ACCOUNT_NOT_VERIFIED"
+  | "REMOTE_ACCOUNT_MISMATCH"
+  | "REMOTE_LOGIN_REQUIRED"
+  | "CAPTCHA_REQUIRED"
+  | "PLATFORM_DISABLED"
+  | "PLATFORM_UNAVAILABLE"
+  | "PROBLEM_UNSUPPORTED"
+  | "LANGUAGE_UNSUPPORTED"
+  | "LIVE_CONTEST_FORBIDDEN"
+  | "SUBMIT_RATE_LIMITED"
+  | "REMOTE_SUBMISSION_FAILED"
+  | "REMOTE_SUBMISSION_ID_NOT_FOUND"
+  | "RESULT_QUERY_FAILED"
+  | "TASK_EXPIRED"
+  | "TASK_ALREADY_PROCESSED"
+  | "INVALID_TASK_SIGNATURE"
+  | "INVALID_RECEIPT_SIGNATURE"
+  | "UNKNOWN_REMOTE_ERROR";
+```
+
+---
+
+# 23. 限流要求
+
+按以下维度限流：
+
+* 单用户每分钟提交数；
+* 单平台每分钟提交数；
+* 单题提交间隔；
+* 单 Helper 并发任务数；
+* 单第三方账号并发任务数；
+* 结果查询频率；
+* 失败重试次数。
+
+建议默认值：
+
+```typescript
+const remoteJudgeLimits = {
+  maxUserConcurrentTasks: 1,
+  maxHelperConcurrentTasks: 1,
+  minimumSubmitIntervalMs: 10_000,
+  maximumSubmitRetries: 1,
+  taskExpireMs: 120_000,
+  helperHeartbeatIntervalMs: 15_000,
+};
+```
+
+具体值应支持后台配置。
+
+---
+
+# 24. 审计日志
+
+必须记录：
+
+* 用户绑定第三方账号；
+* 用户解除绑定；
+* Helper 注册；
+* Helper 撤销；
+* 账号验证；
+* 创建远程提交；
+* Helper 接收任务；
+* 远程提交成功；
+* 远程提交失败；
+* 验证码；
+* 登录失效；
+* Submission ID；
+* 最终评测结果；
+* 管理员启用或禁用适配器。
+
+禁止在审计日志中记录第三方 Cookie、密码和完整源代码。
+
+---
+
+# 25. 前端页面
+
+需要实现以下页面。
+
+## 25.1 第三方账号管理页
+
+显示：
+
+* 平台；
+* 远程用户名；
+* 归属验证状态；
+* Helper 状态；
+* 第三方登录状态；
+* 最近验证时间；
+* 最近提交时间；
+* 重新验证；
+* 解除绑定。
+
+## 25.2 Helper 管理页
+
+显示：
+
+* 是否已安装扩展；
+* 设备名称；
+* 浏览器；
+* 扩展版本；
+* 在线状态；
+* 最近心跳；
+* 撤销设备。
+
+## 25.3 提交页面
+
+显示：
+
+* 题目来源；
+* 当前提交方式；
+* 绑定账号；
+* Helper 状态；
+* 第三方登录账号；
+* 编程语言；
+* 代码编辑器；
+* 提交按钮；
+* 原站打开按钮。
+
+## 25.4 提交状态页
+
+显示：
+
+```text
+等待 Helper
+正在检查登录状态
+正在向第三方 OJ 提交
+远程提交成功
+第三方评测中
+评测完成
+需要登录
+需要验证码
+提交失败
+```
+
+---
+
+# 26. MVP 开发顺序
+
+## 第一阶段
+
+实现：
+
+* 第三方平台数据模型；
+* 用户第三方账号绑定；
+* Helper 设备注册；
+* WebSocket；
+* 签名任务；
+* Helper 回执；
+* 提交状态页面；
+* 模拟适配器。
+
+## 第二阶段
+
+优先实现 Codeforces：
+
+* Handle 绑定；
+* Helper 登录检测；
+* 历史普通题提交；
+* Submission ID 获取；
+* 官方 API 查询结果；
+* 状态映射。
+
+## 第三阶段
+
+实现牛客：
+
+* 账号检测；
+* 公共 ACM 题提交；
+* 语言映射；
+* Submission ID；
+* 结果查询。
+
+## 第四阶段
+
+实现 QOJ：
+
+* 普通单文件题；
+* 登录检测；
+* CSRF；
+* 提交；
+* 结果查询。
+
+## 第五阶段
+
+实现：
+
+* 平台管理后台；
+* 适配器开关；
+* 限流；
+* 健康检查；
+* 错误统计；
+* 自动降级。
+
+---
+
+# 27. MVP 验收标准
+
+系统至少满足：
+
+1. 用户可以绑定 Codeforces 账号；
+2. Helper 可以验证当前登录的 Codeforces Handle；
+3. 用户在本平台提交历史 Codeforces 题目；
+4. 代码使用用户自己的 Codeforces 账号提交；
+5. 服务器不保存 Codeforces Cookie；
+6. 系统能够获得远程 Submission ID；
+7. 系统能够查询并显示评测结果；
+8. 账号不一致时禁止提交；
+9. 未登录时提示登录；
+10. Helper 离线时禁止代交；
+11. 出现验证码时暂停任务；
+12. 正在进行的 Rated Contest 默认禁止提交；
+13. 每个任务只能执行一次；
+14. 任务和回执签名验证有效；
+15. 提交失败时可以降级到原站；
+16. 不同平台适配器可以独立关闭；
+17. 第三方平台异常不影响本地评测；
+18. 所有敏感操作均有审计日志。
+
+---
+
+# 28. 明确禁止事项
+
+实现过程中不得：
+
+* 保存第三方账号明文密码；
+* 保存完整第三方 Cookie；
+* 将 Cookie 上传到服务器；
+* 绕过验证码；
+* 绕过 Cloudflare；
+* 使用代理池规避平台限制；
+* 自动提交正在进行的 Rated Contest；
+* 未经验证使用其他人的第三方账号；
+* 在任务过期后继续提交；
+* 同一任务重复提交；
+* 在日志中输出敏感凭据；
+* 将非官方适配器描述为官方接口。
+
+---
+
+# 29. 最终系统模式
+
+最终提交优先级：
+
+```text
+官方 Remote Judge API
+        ↓
+用户自有账号 + 浏览器 Helper
+        ↓
+原站提交页面
+        ↓
+原题跳转
+```
+
+核心实现思想：
+
+> 用户在本平台管理题目、代码、训练、比赛和学习记录；第三方 OJ 账号及其登录状态保留在用户浏览器中；浏览器 Helper 在用户授权下使用用户自己的第三方账号完成提交；本平台只统一管理任务、Submission ID 和评测结果。

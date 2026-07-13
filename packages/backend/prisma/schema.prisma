@@ -27,6 +27,8 @@ model User {
   assignmentStudents  AssignmentStudent[]
   sessions          UserSession[]
   externalAccounts  ExternalAccount[]
+  helperDevices     HelperDevice[]
+  remoteTasks       RemoteSubmissionTask[]
   skillProfiles     UserSkillProfile[]
   problemMetrics    UserProblemMetric[]
   learningPlans     LearningPlan[]
@@ -77,20 +79,86 @@ model UserSession {
 }
 
 model ExternalAccount {
-  id             String   @id @default(cuid())
-  userId         String
-  platform       String
-  remoteUserId   String
-  remoteUsername String?
-  accessToken    String?
-  refreshToken   String?
-  expiresAt      DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                        String    @id @default(cuid())
+  userId                    String
+  platform                  String
+  remoteUserId              String
+  remoteUsername            String?
+  status                    String    @default("IDENTITY_ONLY")
+  ownershipVerified         Boolean   @default(false)
+  helperConnected           Boolean   @default(false)
+  remoteLoginVerifiedAt     DateTime?
+  lastSuccessfulSubmissionAt DateTime?
+  lastFailureAt             DateTime?
+  lastFailureReason         String?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  user                      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([platform, remoteUserId])
   @@index([userId])
+}
+
+model ExternalPlatform {
+  id                             String   @id @default(cuid())
+  code                           String   @unique
+  name                           String
+  baseUrl                        String
+  enabled                        Boolean  @default(true)
+  supportsMetadata               Boolean  @default(false)
+  supportsStatement              Boolean  @default(false)
+  supportsBrowserSubmission      Boolean  @default(false)
+  supportsOfficialSubmissionApi  Boolean  @default(false)
+  supportsOfficialResultApi      Boolean  @default(false)
+  allowLiveContestSubmission     Boolean  @default(false)
+  adapterVersion                 String   @default("0.0.0")
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
+}
+
+model HelperDevice {
+  id               String   @id @default(cuid())
+  userId           String
+  deviceName       String
+  browserName      String
+  extensionVersion String
+  publicKey        String   @default("")
+  status           String   @default("ONLINE")
+  lastSeenAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model RemoteSubmissionTask {
+  id                    String    @id @default(cuid())
+  submissionId          String    @unique
+  userId                String
+  platformCode          String
+  externalAccountId     String
+  remoteProblemId       String
+  remoteContestId       String?
+  remoteProblemIndex    String?
+  language              String
+  sourceCode            String
+  status                String    @default("PENDING")
+  assignedHelperDeviceId String?
+  expiresAt             DateTime
+  attemptCount          Int       @default(0)
+  maximumAttempts       Int       @default(1)
+  remoteSubmissionId    String?
+  failureCode           String?
+  failureMessage        String?
+  nonce                 String?
+  signature             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([assignedHelperDeviceId])
 }
 
 // ===================== 题库 =====================

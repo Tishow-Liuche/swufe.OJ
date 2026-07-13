@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 300px; padding: 16px; font-family: sans-serif; margin: 0; }
+    h3 { margin: 0 0 12px; font-size: 16px; color: #1a1a2e; }
+    .status { padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 13px; }
+    .status.ok { background: #e8f5e9; color: #2e7d32; }
+    .status.err { background: #fce4ec; color: #c62828; }
+    .status.wait { background: #fff3e0; color: #e65100; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }
+    .row label { color: #666; }
+    .row span { font-weight: 600; color: #1a1a2e; }
+    input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-sizing: border-box; margin-bottom: 8px; }
+    button { width: 100%; padding: 8px; border: none; border-radius: 4px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: #4fc3f7; color: #1a1a2e; }
+    .btn-danger { background: #e74c3c; color: #fff; margin-top: 4px; }
+    .divider { border-top: 1px solid #eee; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h3>🔌 OJ Remote Helper</h3>
+
+  <div id="statusPanel">
+    <div id="wsStatus" class="status wait">⏳ 未连接</div>
+    <div id="taskStatus" class="status wait">等待任务...</div>
+  </div>
+
+  <div class="row"><label>平台:</label><span id="ojUrl">http://localhost:3000</span></div>
+  <div class="row"><label>用户ID:</label><span id="uidDisplay">-</span></div>
+
+  <div class="divider"></div>
+
+  <div id="configSection">
+    <input type="text" id="userIdInput" placeholder="输入你的平台用户 ID" />
+    <input type="text" id="deviceNameInput" placeholder="设备名称 (如: Chrome-Win)" />
+    <button class="btn-primary" id="connectBtn">连接</button>
+  </div>
+
+  <div id="connectedSection" style="display:none">
+    <div class="row"><label>状态:</label><span style="color:#2e7d32">已连接</span></div>
+    <div class="row"><label>设备:</label><span id="deviceNameDisplay">-</span></div>
+    <button class="btn-danger" id="disconnectBtn">断开</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
