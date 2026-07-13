@@ -3,7 +3,7 @@
   "name": "OJ Remote Submit Helper",
   "version": "0.2.0",
   "description": "使用你自己的 CF 账号完成远程提交",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "alarms"],
   "host_permissions": [
     "https://codeforces.com/*",
     "https://www.luogu.com.cn/*",

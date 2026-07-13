@@ -6,10 +6,15 @@ const UID = 'cmrj7k0hm00006eqfpcjxuwgn';
 let pollTimer = null;
 let busy = false;
 
-(async function init() {
-  const d = await chrome.storage.local.get(['connected']);
-  if (d.connected) startPolling();
-})();
+// Auto-start — always poll, no popup needed
+startPolling();
+console.log('[Helper] Auto-started polling');
+
+// Keep Service Worker alive via alarms
+chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener(() => {
+  console.log('[Helper] Keep-alive tick');
+});
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'reconnect') startPolling();
