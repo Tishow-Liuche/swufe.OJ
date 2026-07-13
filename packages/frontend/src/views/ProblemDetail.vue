@@ -154,28 +154,38 @@ function startPolling(id: string) {
 function renderMd(text: string): string {
   if (!text) return '';
   try {
-    // Step 1: 将 Markdown 转 HTML
-    let html = marked.parse(text, { async: false }) as string;
+    // Step 1: 在 raw Markdown 上先渲染 LaTeX，用唯一占位符保护
+    const placeholderMap = new Map<string, string>();
+    let counter = 0;
 
-    // Step 2: 渲染 LaTeX 公式
-    // 处理行内公式 $...$
-    html = html.replace(/\$([^$]+?)\$/g, (_, formula) => {
+    let raw = text;
+    // 先处理块级公式 $$...$$（保护起来避免 marked 破坏 $/$ 符号）
+    raw = raw.replace(/\$\$([\s\S]+?)\$\$/g, (_, formula) => {
+      const key = `[[KATEX:${counter++}]]`;
       try {
-        return katex.renderToString(formula, { throwOnError: false, displayMode: false });
-      } catch { return `<em>${formula}</em>`; }
+        placeholderMap.set(key, katex.renderToString(formula.trim(), { throwOnError: false, displayMode: true }));
+      } catch { placeholderMap.set(key, `<div style="text-align:center"><em>${formula}</em></div>`); }
+      return key;
     });
-    // 处理块公式 $$...$$
-    html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, formula) => {
+    // 再处理行内公式 $...$
+    raw = raw.replace(/\$([^$]+?)\$/g, (_, formula) => {
+      const key = `[[KATEX:${counter++}]]`;
       try {
-        return katex.renderToString(formula, { throwOnError: false, displayMode: true });
-      } catch { return `<div style="text-align:center"><em>${formula}</em></div>`; }
+        placeholderMap.set(key, katex.renderToString(formula.trim(), { throwOnError: false, displayMode: false }));
+      } catch { placeholderMap.set(key, `<em>${formula}</em>`); }
+      return key;
     });
-    // 处理洛谷特殊语法: $a_1$  /  中的 /
-    html = html.replace(/^\/$/gm, '<hr>');
+
+    // Step 2: 用 marked 渲染剩余 Markdown
+    let html = marked.parse(raw, { async: false }) as string;
+
+    // Step 3: 把占位符替换回 KaTeX HTML
+    placeholderMap.forEach((rendered, key) => {
+      html = html.replace(key, rendered);
+    });
 
     return html;
   } catch {
-    // fallback: 简单转义
     return text
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/^## (.+)$/gm, '<h3>$1</h3>')
