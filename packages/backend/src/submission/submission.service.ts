@@ -129,6 +129,17 @@ export class SubmissionService {
     return { items, total, page, pageSize };
   }
 
+  async updateJudgeResult(id: string, data: { status: string; score?: number; timeUsed?: number; memoryUsed?: number; compileMessage?: string }) {
+    return this.prisma.submission.update({
+      where: { id },
+      data: {
+        status: data.status, score: data.score || 0,
+        timeUsed: data.timeUsed, memoryUsed: data.memoryUsed,
+        compileMessage: data.compileMessage, judgedAt: new Date(),
+      },
+    });
+  }
+
   async rejudge(id: string) {
     const sub = await this.prisma.submission.findUnique({ where: { id } });
     if (!sub) throw new NotFoundException('提交不存在');

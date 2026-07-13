@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Req, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Req, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { SubmissionService } from './submission.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -50,5 +50,13 @@ export class SubmissionController {
   @Roles('TEACHER', 'ADMIN')
   rejudge(@Param('id') id: string) {
     return this.submission.rejudge(id);
+  }
+
+  /** Helper 更新评测结果 */
+  @Patch(':id/judge-result')
+  updateJudgeResult(@Param('id') id: string, @Body() data: {
+    status: string; score?: number; timeUsed?: number; memoryUsed?: number; compileMessage?: string;
+  }) {
+    return this.submission.updateJudgeResult(id, data);
   }
 }
