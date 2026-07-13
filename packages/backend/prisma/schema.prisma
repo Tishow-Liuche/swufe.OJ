@@ -147,6 +147,8 @@ model ProblemVersion {
   createdAt    DateTime @default(now())
   problem      Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
   submissions  Submission[]
+  testGroups   TestGroup[]
+  checker      Checker?
 
   @@index([problemId])
 }

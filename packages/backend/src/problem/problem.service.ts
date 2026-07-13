@@ -7,6 +7,7 @@ export class ProblemService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateProblemDto, userId: string) {
+    const tagNames = dto.tags || [];
     const problem = await this.prisma.problem.create({
       data: {
         title: dto.title,
@@ -25,9 +26,9 @@ export class ProblemService {
             hint: dto.hint,
           },
         },
-        tags: dto.tags?.map((name) => ({
-          create: { name, type: 'TAG' },
-        })) || { create: [] },
+        tags: {
+          create: tagNames.map((name) => ({ name, type: 'TAG' })),
+        },
       },
       include: {
         versions: { where: { isCurrent: true }, take: 1 },

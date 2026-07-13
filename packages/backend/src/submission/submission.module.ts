@@ -4,9 +4,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SubmissionService } from './submission.service';
 import { SubmissionController } from './submission.controller';
 import { JudgeProcessor } from './judge.processor';
+import { JudgeModule } from '../judge/judge.module';
 
 @Module({
   imports: [
+    JudgeModule,
     BullModule.registerQueueAsync({
       name: 'judge',
       imports: [ConfigModule],
