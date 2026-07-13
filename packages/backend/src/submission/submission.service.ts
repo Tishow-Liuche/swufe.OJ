@@ -38,42 +38,16 @@ export class SubmissionService {
       const parts = remotePid.match(/(\d+)([A-Z]\d?)/);
       if (!parts) throw new NotFoundException('CF 题目编号格式错误: ' + remotePid);
 
-      // 检查是否有在线 Helper 设备
-      const devices = await this.prisma.helperDevice.findMany({
-        where: { userId, status: 'ONLINE' },
+      // ★ 创建 RemoteSubmissionTask, 浏览器扩展 cf.js 自动处理
+      const task = await this.helper.createRemoteTask(submission.id, userId, {
+        platformCode: 'CODEFORCES',
+        externalAccountId: problem.sourceInfo?.id || '',
+        remoteProblemId: remotePid,
+        language: dto.language,
+        sourceCode: dto.sourceCode,
       });
-
-      if (devices.length > 0) {
-        // ★ 通过浏览器扩展提交（绕过 Cloudflare）
-        const task = await this.helper.createRemoteTask(submission.id, userId, {
-          platformCode: 'CODEFORCES',
-          externalAccountId: problem.sourceInfo?.id || '',
-          remoteProblemId: remotePid,
-          language: dto.language,
-          sourceCode: dto.sourceCode,
-        });
-
-        this.helperGateway.pushTask(userId, {
-          taskId: task.id,
-          submissionId: submission.id,
-          platform: 'CODEFORCES',
-          remoteProblemId: remotePid,
-          language: dto.language,
-          sourceCode: dto.sourceCode,
-        });
-        await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
-        return { id: submission.id, status: 'QUEUING', mode: 'CODEFORCES_HELPER' };
-      } else {
-        // 降级：服务器端代理（需 Linux 环境）
-        const contestId = parseInt(parts[1]);
-        const problemIndex = parts[2];
-        await this.cfQueue.add('cf-judge', {
-          submissionId: submission.id, problemId: dto.problemId, contestId, problemIndex,
-          language: dto.language, sourceCode: dto.sourceCode,
-        }, { priority: 1 });
-        await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
-        return { id: submission.id, status: 'QUEUING', mode: 'CODEFORCES_SERVER' };
-      }
+      await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
+      return { id: submission.id, status: 'QUEUING', mode: 'CODEFORCES_HELPER' };
     } else {
       // ===== 本地评测（原创+洛谷） =====
       const tc = await this.prisma.problemTestCase.count({ where: { problemVersionId: cv.id } });
