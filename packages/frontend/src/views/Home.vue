@@ -53,20 +53,15 @@ onMounted(async () => {
           <h3>题库</h3>
           <p>本地原创 + 第三方 OJ 题目统一管理，支持搜索、筛选、标签</p>
         </div>
-        <div class="feature-card" @click="router.push('/submissions')">
-          <div class="card-icon icon-submit">⚡</div>
-          <h3>提交记录</h3>
-          <p>C++ / Python / Java 多语言实时评测，显示每个测试点详情</p>
+        <div class="feature-card" @click="router.push('/profile')">
+          <div class="card-icon icon-submit">📊</div>
+          <h3>个人中心</h3>
+          <p>提交记录 · 热力图 · 统计概览 · 语言分布 · 难度分析 · 连续打卡</p>
         </div>
         <div class="feature-card" @click="router.push('/admin/create-problem')">
           <div class="card-icon icon-create">✍️</div>
           <h3>录题</h3>
           <p>Markdown 编辑器 + ZIP 测试数据上传，支持 Special Judge</p>
-        </div>
-        <div class="feature-card" @click="router.push('/profile')">
-          <div class="card-icon icon-me">👤</div>
-          <h3>个人中心</h3>
-          <p>提交热力图 · 统计概览 · 语言分布 · 难度分析 · 连续打卡</p>
         </div>
         <div class="feature-card disabled">
           <div class="card-icon icon-list">📋</div>
