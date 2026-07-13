@@ -10,8 +10,8 @@ async function handleCF(t){
   let m=t.remoteProblemId.match(/^(\d+)([A-Z]\d?)$/);if(!m)return;
   let cid=+m[1],pidx=m[2];
   try{
-    let tab=await chrome.tabs.create({url:'https://codeforces.com/problemset/submit/'+cid+'/'+pidx,active:false});
-    await sleep(5000);
+    let tab=await chrome.tabs.create({url:'https://codeforces.com/problemset/submit/'+cid+'/'+pidx,active:true});
+    await sleep(8000);
     let [r]=await chrome.scripting.executeScript({target:{tabId:tab.id},func:doSubmit,args:[{cid,pidx,lang:t.language,code:t.sourceCode}]});
     if(r&&r.result&&r.result.sid){
       let sid=r.result.sid; post(t.submissionId,'JUDGING',0,sid);

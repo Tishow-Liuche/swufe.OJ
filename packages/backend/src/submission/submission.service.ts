@@ -92,11 +92,10 @@ export class SubmissionService {
 
   /** 回填第三方评测结果（无需 JWT，验证 owner） */
   async fillExternalResultUnsafe(submissionId: string, userId: string, data: {
-    status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string;
+    status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string; compileMessage?: string;
   }) {
     const sub = await this.prisma.submission.findUnique({ where: { id: submissionId } });
     if (!sub) throw new NotFoundException('提交不存在');
-    // 宽松验证：有 userId 则校验，无则不校验（Helper 场景）
     if (userId && sub.userId !== userId) throw new NotFoundException('提交不属于该用户');
 
     await this.prisma.submissionCase.create({
@@ -114,12 +113,13 @@ export class SubmissionService {
     return this.prisma.submission.update({
       where: { id: submissionId },
       data: { status: data.status, score: data.score || 0,
-        timeUsed: data.timeUsed, memoryUsed: data.memoryUsed, judgedAt: new Date() },
+        timeUsed: data.timeUsed, memoryUsed: data.memoryUsed, judgedAt: new Date(),
+        compileMessage: data.compileMessage || null },
     });
   }
 
   async fillExternalResult(submissionId: string, userId: string, data: {
-    status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string;
+    status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string; compileMessage?: string;
   }) {
     const sub = await this.prisma.submission.findUnique({ where: { id: submissionId } });
     if (!sub || sub.userId !== userId) throw new NotFoundException('提交不存在');
@@ -139,7 +139,8 @@ export class SubmissionService {
     return this.prisma.submission.update({
       where: { id: submissionId },
       data: { status: data.status, score: data.score || 0,
-        timeUsed: data.timeUsed, memoryUsed: data.memoryUsed, judgedAt: new Date() },
+        timeUsed: data.timeUsed, memoryUsed: data.memoryUsed, judgedAt: new Date(),
+        compileMessage: data.compileMessage || null },
     });
   }
 
