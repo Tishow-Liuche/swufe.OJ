@@ -105,6 +105,35 @@ export class UpdateProblemDto {
   status?: string;
 }
 
+export class ImportProblemDto {
+  @IsString()
+  title: string;
+
+  @IsString()
+  description: string;
+
+  @IsOptional()
+  @IsString()
+  difficulty?: string;
+
+  @IsOptional()
+  @IsInt()
+  timeLimit?: number;
+
+  @IsOptional()
+  @IsInt()
+  memoryLimit?: number;
+
+  @IsOptional()
+  @IsArray()
+  tags?: string[];
+}
+
+export class BatchImportDto {
+  @IsArray()
+  problems: ImportProblemDto[];
+}
+
 export class QueryProblemDto {
   @IsOptional()
   @IsString()

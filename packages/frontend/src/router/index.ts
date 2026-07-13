@@ -27,6 +27,10 @@ const router = createRouter({
       path: '/submissions/:id',
       component: () => import('../views/SubmissionDetail.vue'),
     },
+    {
+      path: '/admin/import',
+      component: () => import('../views/ImportProblems.vue'),
+    },
   ],
 });
 

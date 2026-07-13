@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateProblemDto, UpdateProblemDto, QueryProblemDto } from './dto';
+import { CreateProblemDto, UpdateProblemDto, QueryProblemDto, BatchImportDto } from './dto';
 
 @Injectable()
 export class ProblemService {
@@ -142,5 +142,41 @@ export class ProblemService {
       where: { id },
       data: { status },
     });
+  }
+
+  async batchImport(dto: BatchImportDto, userId: string) {
+    const results: any[] = [];
+    for (const p of dto.problems) {
+      const existing = await this.prisma.problem.findFirst({
+        where: { title: p.title },
+      });
+      if (existing) {
+        results.push({ title: p.title, status: 'skipped', id: existing.id });
+        continue;
+      }
+      const tagNames = p.tags || [];
+      const problem = await this.prisma.problem.create({
+        data: {
+          title: p.title,
+          source: 'LOCAL',
+          difficulty: p.difficulty || 'POPULAR',
+          timeLimit: p.timeLimit || 1000,
+          memoryLimit: p.memoryLimit || 256,
+          status: 'PUBLISHED',
+          versions: {
+            create: {
+              description: p.description,
+              version: 1,
+            },
+          },
+          tags: {
+            create: tagNames.map((name) => ({ name, type: 'TAG' })),
+          },
+        },
+      });
+      results.push({ title: p.title, status: 'created', id: problem.id });
+    }
+    const total = await this.prisma.problem.count();
+    return { imported: results.filter((r) => r.status === 'created').length, skipped: results.filter((r) => r.status === 'skipped').length, results, total };
   }
 }

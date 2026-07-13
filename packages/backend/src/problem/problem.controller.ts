@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ProblemService } from './problem.service';
-import { CreateProblemDto, UpdateProblemDto, QueryProblemDto } from './dto';
+import { CreateProblemDto, UpdateProblemDto, QueryProblemDto, BatchImportDto } from './dto';
 
 @Controller('api/problems')
 export class ProblemController {
@@ -14,6 +14,12 @@ export class ProblemController {
   @UseGuards(AuthGuard('jwt'))
   create(@Body() dto: CreateProblemDto, @Req() req: any) {
     return this.problem.create(dto, req.user.id);
+  }
+
+  @Post('import')
+  @UseGuards(AuthGuard('jwt'))
+  batchImport(@Body() dto: BatchImportDto, @Req() req: any) {
+    return this.problem.batchImport(dto, req.user.id);
   }
 
   @Get()
