@@ -22,19 +22,12 @@ export class SubmissionService {
     const currentVersion = problem.versions[0];
     if (!currentVersion) throw new NotFoundException('题目版本不存在');
 
-    // 无测试用例时自动生成默认测试点
+    // 检查题目是否有测试用例
     const testCaseCount = await this.prisma.problemTestCase.count({
       where: { problemVersionId: currentVersion.id },
     });
     if (testCaseCount === 0) {
-      await this.prisma.problemTestCase.create({
-        data: {
-          problemVersionId: currentVersion.id,
-          input: '1 2\n',
-          expectedOutput: '3\n',
-          score: 100, order: 1, isSample: true,
-        },
-      });
+      throw new NotFoundException('该题目尚未配置测试数据，请联系管理员');
     }
 
     // 创建提交记录
