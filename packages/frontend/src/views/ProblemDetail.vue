@@ -166,7 +166,7 @@ function renderMd(text: string): string {
                 <option value="cpp">C++</option>
                 <option value="c">C</option>
                 <option value="python">Python</option>
-                <option value="java" disabled>Java (需安装 JDK)</option>
+                <option value="java">Java</option>
               </select>
               <button class="btn-submit" @click="submitCode" :disabled="submitting">
                 {{ submitting ? '提交中...' : '🚀 提交评测' }}

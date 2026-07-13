@@ -39,8 +39,8 @@ const LANGUAGE_CONFIG: Record<string, { extension: string; compileCmd: string; r
   },
   java: {
     extension: 'java',
-    compileCmd: 'javac Main.java',
-    runCmd: 'java Main',
+    compileCmd: '"C:/Program Files/Eclipse Adoptium/jdk-21.0.11.10-hotspot/bin/javac" Main.java',
+    runCmd: '"C:/Program Files/Eclipse Adoptium/jdk-21.0.11.10-hotspot/bin/java" Main',
     compileTimeout: 30000,
   },
 };
@@ -86,6 +86,7 @@ export class NativeJudgeService {
       const result = execSync(cmd, {
         timeout: config.compileTimeout,
         stdio: 'pipe',
+        cwd: language === 'java' ? this.workDir : undefined,
         shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
       });
       return {
@@ -134,6 +135,7 @@ export class NativeJudgeService {
         timeout: timeLimitMs + 5000,
         maxBuffer: 10 * 1024 * 1024,
         stdio: 'pipe',
+        cwd: language === 'java' ? compileFileId : undefined,
         shell,
       }).toString();
 
