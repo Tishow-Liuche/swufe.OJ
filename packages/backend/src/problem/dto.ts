@@ -32,6 +32,12 @@ export class CreateProblemDto {
   memoryLimit?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(4)
+  @Max(1024)
+  outputLimit?: number;
+
+  @IsOptional()
   @IsArray()
   allowLanguages?: string[];
 
@@ -54,6 +60,14 @@ export class CreateProblemDto {
   @IsOptional()
   @IsString()
   hint?: string;
+
+  @IsOptional()
+  @IsString()
+  dataRange?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 
   @IsOptional()
   @IsArray()

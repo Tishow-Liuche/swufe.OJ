@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { ProblemModule } from './problem/problem.module';
 import { SubmissionModule } from './submission/submission.module';
 import { UserModule } from './user/user.module';
+import { FileUploadModule } from './common/file-upload.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { UserModule } from './user/user.module';
       isGlobal: true,
       envFilePath: ['.env', '../../config/.env'],
     }),
+    FileUploadModule,
     PrismaModule,
     AuthModule,
     ProblemModule,

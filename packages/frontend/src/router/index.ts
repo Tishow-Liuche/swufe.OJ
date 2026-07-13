@@ -35,6 +35,10 @@ const router = createRouter({
       path: '/profile',
       component: () => import('../views/Profile.vue'),
     },
+    {
+      path: '/admin/create-problem',
+      component: () => import('../views/admin/CreateProblem.vue'),
+    },
   ],
 });
 
