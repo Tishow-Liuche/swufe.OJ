@@ -1,26 +1,17 @@
 {
   "manifest_version": 3,
   "name": "OJ Remote Submit Helper",
-  "version": "0.2.0",
-  "description": "使用你自己的 CF 账号完成远程提交",
-  "permissions": ["storage", "scripting", "alarms"],
+  "version": "0.4.0",
+  "description": "CF 远程提交助手—Content Script 模式",
+  "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://codeforces.com/*",
-    "https://www.luogu.com.cn/*",
-    "http://127.0.0.1:3000/*",
-    "http://localhost:3000/*"
+    "http://127.0.0.1:3000/*"
   ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "OJ Helper"
-  },
+  "background": { "service_worker": "background.js" },
   "content_scripts": [{
-    "matches": [
-      "https://codeforces.com/*"
-    ],
-    "js": ["cf-adapter.js"]
+    "matches": ["http://127.0.0.1:3000/*", "http://localhost:3000/*"],
+    "js": ["content.js"],
+    "run_at": "document_start"
   }]
 }
