@@ -1,67 +1,121 @@
 # 西财 OJ 平台
 
-> 面向高校的综合性程序设计教学与竞赛训练平台
+> 面向高校的「统一题库 + 在线评测 + 教学管理 + 竞赛训练」综合性平台
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org)
-[![Docker](https://img.shields.io/badge/docker-compose-blue)](https://www.docker.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)](https://www.typescriptlang.org/)
+[![Docker](https://img.shields.io/badge/docker--compose-ready-blue)](https://www.docker.com/)
+[![NestJS](https://img.shields.io/badge/NestJS-11.x-red)](https://nestjs.com/)
+[![Vue](https://img.shields.io/badge/Vue-3.x-green)](https://vuejs.org/)
 
 ---
 
-## 📖 项目简介
+## 📖 平台定位
 
-西财 OJ 是一个集**统一题库管理、在线评测、教学管理、竞赛训练**于一体的综合性在线评测平台，专为高校程序设计课程和算法竞赛训练场景设计。
+西财 OJ 不是单纯的在线评测系统，而是由四个平台融合而成：
 
-### 核心能力
+| 平台 | 定位 |
+|------|------|
+| 🏫 **统一题库平台** | 聚合本地题目与第三方 OJ 题目（洛谷、Codeforces 等），支持题目版本管理、难度标签体系、题单收藏 |
+| ⚡ **统一评测平台** | 自建沙箱本地评测 + 插件式 Remote Judge 适配器框架，C/C++/Python/Java 等多语言实时编译执行 |
+| 👨‍🏫 **教学管理平台** | 班级与课程管理、作业布置与批改、学生能力画像、成绩统计与报告导出 |
+| 🏆 **竞赛训练平台** | ACM/ICPC 与 IOI 双赛制、封榜排名、专项训练计划、个人能力雷达图 |
 
-- 🏫 **统一题库**：本地题目 + 第三方 OJ 题目（洛谷、Codeforces 等）聚合管理
-- ⚡ **本地评测**：C/C++/Python/Java 多语言实时编译执行，支持 WA/AC/TLE/RE/CE 判定
-- 🌐 **Remote Judge**：插件式适配器框架，支持接入第三方 OJ 平台（洛谷官方 API 优先）
-- 👨‍🏫 **教学管理**：班级、作业、学生导入、完成率统计、成绩导出
-- 🏆 **竞赛训练**：ACM/ICPC 与 IOI 双赛制，封榜、排名快照、赛后补题
-- 📊 **能力分析**：知识点体系 + 用户能力画像 + 薄弱项识别 + 训练计划推荐
+---
+
+## ✨ 核心能力
+
+### 评测系统
+
+```
+用户提交 → 统一提交服务
+              ├── 本地题目 → Local Judge Worker → 沙箱执行 → 结果比对
+              └── 外部题目 → Remote Judge Worker → 第三方 OJ
+```
+
+- **真实编译执行**：g++ / gcc / python3 / javac 编译后执行，非模拟
+- **多语言支持**：C、C++、Python、Java
+- **15 种统一评测状态**：AC / WA / TLE / MLE / RE / CE / OLE / PE / SYSTEM_ERROR / CANCELLED / REMOTE_ERROR 等
+- **测试点分组计分**：支持子任务、部分分
+- **后续扩展**：Special Judge、交互题、提交答案题、多文件题
+
+### 三种角色权限体系
+
+| 角色 | 核心权限 |
+|------|----------|
+| 🎓 **学生** | 浏览题库、提交代码、查看评测结果、参加比赛、查看能力画像、获取训练推荐 |
+| 👨‍🏫 **教师** | 创建班级、导入学生、布置作业、创建题目与比赛、上传测试数据、查看班级统计、导出成绩 |
+| 🛡️ **管理员** | 用户管理、角色分配、题目审核、OJ 适配器管理、评测队列监控、系统配置、审计日志 |
+
+可扩展角色：题目审核员、出题人、比赛管理员、助教、学校管理员。
+
+### Remote Judge 适配器
+
+采用插件式架构，统一 `RemoteJudgeAdapter` 接口，分四个接入等级：
+
+| 等级 | 模式 | 说明 |
+|------|------|------|
+| A | 官方评测 API | 洛谷等提供正式提交和查询接口 |
+| B | 官方授权适配 | 无标准 API 但已取得授权 |
+| C | 非官方网页适配 | 模拟登录提交，稳定性较低 |
+| D | 仅同步元数据 | 同步题目、难度、标签和原站链接 |
+
+平台接入优先级：洛谷 (P0) > Codeforces / QOJ (P1) > AtCoder / CodeChef / LeetCode (P2)
+
+### 教学与竞赛
+
+- **作业系统**：截止时间、补交规则、通过条件、完成率统计、错误类型分布
+- **比赛系统**：ACM/ICPC（罚时）、IOI（分数）双模式，支持封榜、实时排名、赛后补题
+- **能力分析**：知识点体系 → 用户能力向量 → 薄弱项识别 → 个性化训练计划
+- **学习规划**：每日训练 / 周计划 / 月计划，50% 薄弱点 + 30% 巩固 + 20% 挑战题
 
 ---
 
 ## 🛠 技术栈
 
-| 层 | 技术 |
-|----|------|
-| **前端** | Vue 3 + TypeScript + Vite 5 + Pinia + Axios |
-| **后端** | NestJS 11 + TypeScript + Prisma 5 + BullMQ |
-| **数据库** | PostgreSQL 16 |
-| **缓存/队列** | Redis 7 + BullMQ |
-| **存储** | MinIO (S3 兼容) |
-| **评测沙箱** | go-judge (生产) / Node.js child_process (开发) |
-| **部署** | Docker Compose + Nginx |
+| 层级 | 技术 | 选型理由 |
+|------|------|----------|
+| **前端** | Vue 3 + TypeScript + Vite 5 | 前后端统一语言，Vite 极速构建 |
+| **状态管理** | Pinia 2 | Vue 3 官方推荐，简洁类型安全 |
+| **路由** | Vue Router 4 | SPA history 模式 |
+| **HTTP** | Axios | Token 自动刷新拦截器 |
+| **后端** | NestJS 11 + TypeScript | 模块边界清晰，适合权限/队列/WebSocket |
+| **ORM** | Prisma 5 | 类型安全，自动迁移，47 表完整模型 |
+| **队列** | BullMQ + Redis 7 | 评测任务异步调度，指数退避重试 |
+| **认证** | Passport + JWT | Access Token (15min 内存) + Refresh Token (7d Rotation) |
+| **数据库** | PostgreSQL 16 | 教育场景天然适合关系型，JSONB 覆盖灵活字段 |
+| **存储** | MinIO (S3 兼容) | 自建对象存储，测试数据/图片/附件 |
+| **评测沙箱** | go-judge (生产) / child_process (开发) | go-judge 基于 cgroup + seccomp 隔离 |
+| **部署** | Docker Compose + Nginx | 初期三机部署，后期平滑升级 K8s |
+| **监控** | Prometheus + Grafana + Loki + Sentry | 全链路可观测 |
 
 ---
 
 ## 🚀 快速开始
 
-### 环境要求
+### 前提条件
 
-- **Node.js** >= 20.11
-- **Docker Desktop** + WSL2 (Windows)
-- **g++** / **python3** (评测编译执行)
+- Node.js >= 20.11
+- Docker Desktop（含 Docker Compose）
+- g++ / python3（评测编译执行）
+- Windows 用户建议启用 WSL2
 
-### 1. 克隆项目
+### 克隆与安装
 
 ```bash
 git clone https://github.com/your-org/swufe-oj.git
 cd swufe-oj
 ```
 
-### 2. 启动基础设施
+### 启动基础设施
 
 ```bash
 docker compose up -d
+# 启动 PostgreSQL 16 + Redis 7 + MinIO + go-judge
 ```
 
-自动启动 PostgreSQL、Redis、MinIO、go-judge。
-
-### 3. 初始化数据库
+### 初始化后端
 
 ```bash
 cd packages/backend
@@ -69,117 +123,207 @@ cp ../../config/.env.example .env
 npm install
 npx prisma migrate dev --name init
 npx prisma generate
+npm run seed            # 导入洛谷 P1000-P1010 共 11 道题目
+npm run start:dev       # 启动开发服务器 (localhost:3000)
 ```
 
-### 4. 导入种子题目
+### 构建前端
 
 ```bash
-npm run seed   # 一键导入洛谷 P1000-P1010 共 11 道题目
-```
-
-### 5. 构建前端
-
-```bash
-cd ../frontend
+cd packages/frontend
 npm install
-npm run build
+npm run build           # 构建产物输出到 dist/
 ```
 
-### 6. 启动后端（含前端托管）
+访问 **http://localhost:3000**，前后端统一端口，零跨域。
 
-```bash
-cd ../backend
-npm run start:dev
-```
+---
 
-访问 **http://localhost:3000**
-
-### 测试账号
+## 🧪 测试账号
 
 | 角色 | 用户名 | 密码 |
 |------|--------|------|
-| 管理员 | admin | 123456 |
-| 教师 | teacher | 123456 |
-| 学生 | student | 123456 |
+| 管理员 | `admin` | `123456` |
+| 教师 | `teacher` | `123456` |
+| 学生 | `student` | `123456` |
+
+如需手动注册：打开页面 → 点击右上角「登录」→ 切换到「注册」→ 填写信息即可。
 
 ---
 
-## 🏗 项目结构
+## 🏗 系统架构
+
+```mermaid
+flowchart TB
+    User[学生 / 教师 / 管理员]
+    Web[Vue 3 前端]
+    API[NestJS 核心业务后端]
+
+    Auth[认证与权限模块]
+    Problem[题库模块]
+    Contest[比赛与作业模块]
+    Submission[提交与评测调度模块]
+    Learning[能力分析与学习规划模块]
+    Admin[后台管理模块]
+
+    Redis[(Redis 队列/缓存)]
+    DB[(PostgreSQL)]
+    Object[(MinIO 对象存储)]
+
+    LocalQueue[本地评测队列]
+    RemoteQueue[Remote Judge 队列]
+
+    LocalJudge[Local Judge Worker]
+    RemoteJudge[Remote Judge Worker]
+
+    Sandbox[go-judge 沙箱]
+    ThirdOJ[洛谷 / Codeforces 等]
+    Monitor[Prometheus + Grafana]
+
+    User --> Web --> API
+    API --> Auth & Problem & Contest & Submission & Learning & Admin
+    API --> DB & Redis & Object
+    Submission --> LocalQueue --> LocalJudge --> Sandbox
+    Submission --> RemoteQueue --> RemoteJudge --> ThirdOJ
+    API & LocalJudge & RemoteJudge --> Monitor
+```
+
+**核心设计原则**：
+- **模块化单体 + 独立 Worker**：核心业务集中，评测/同步/分析等高风险模块独立运行
+- **业务平台与评测沙箱物理分离**：评测节点不能直接访问生产数据库
+- **本地与 Remote Judge 统一入口、分离流程**
+
+---
+
+## 📊 数据模型（47 表）
+
+| 模块 | 核心表 |
+|------|--------|
+| **用户与权限** | User, Role, Permission, UserRole, UserSession, ExternalAccount |
+| **题库** | Problem, ProblemSource, ProblemVersion, ProblemTag, TestGroup, Checker, ProblemList |
+| **提交与评测** | Submission, SubmissionCase, JudgeTask, RemoteJudgeJob, JudgeNode, JudgeLanguage |
+| **比赛** | Contest, ContestProblem, ContestParticipant, ContestSubmission, ContestRankSnapshot |
+| **教学** | Organization, Course, Class, ClassMember, Assignment, AssignmentProblem, AssignmentStudent |
+| **能力分析** | KnowledgePoint, KnowledgeRelation, UserSkillProfile, UserProblemMetric, LearningPlan |
+| **系统审计** | AuditLog, SystemConfig, VerdictMapping |
+
+---
+
+## 📂 项目结构
 
 ```
 西财OJ平台/
-├── docker-compose.yml           # 基础设施一键启动
-├── config/.env.example          # 环境变量模板
-├── docs/
-│   ├── PROJECT_LOG.md           # 项目开发日志
-│   └── SETUP.md                 # 详细搭建指南
+├── docker-compose.yml             # 基础设施一键编排
+├── config/.env.example            # 环境变量模板
 ├── packages/
-│   ├── backend/                 # NestJS 后端
+│   ├── backend/                   # NestJS 后端
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma    # 47 表数据模型
-│   │   │   └── seed.ts          # 种子数据 (P1000-P1010)
+│   │   │   ├── schema.prisma      # 47 表 Prisma Schema
+│   │   │   └── seed.ts            # P1000-P1010 种子数据
 │   │   └── src/
-│   │       ├── auth/            # 认证 (JWT + Passport)
-│   │       ├── problem/         # 题目 CRUD + 批量导入
-│   │       ├── submission/      # 提交 + BullMQ 评测队列
-│   │       └── judge/           # 评测引擎 (go-judge / Native)
-│   └── frontend/                # Vue 3 前端
+│   │       ├── auth/              # JWT 认证 + Passport 策略
+│   │       ├── problem/           # 题目 CRUD + 批量导入 API
+│   │       ├── submission/        # 提交入队 + BullMQ 评测队列
+│   │       └── judge/             # 评测引擎 (go-judge / Native)
+│   └── frontend/                  # Vue 3 前端
 │       ├── src/
-│       │   ├── views/           # 6 个页面
-│       │   ├── api/             # HTTP 客户端 + Token 管理
-│       │   ├── stores/          # Pinia 状态管理
-│       │   └── router/          # Vue Router
-│       └── scripts/             # 构建注入脚本
-└── 方案.md                      # 项目方案 (V0.2)
+│       │   ├── views/             # 首页/登录/题库/题目详情/提交/导入
+│       │   ├── api/               # Axios + Token 拦截刷新
+│       │   ├── stores/            # Pinia 认证状态
+│       │   └── router/            # Vue Router 路由定义
+│       └── scripts/               # 构建数据注入脚本
+├── docs/
+│   ├── PROJECT_LOG.md             # 开发日志
+│   └── SETUP.md                   # 详细搭建指南
+├── 方案.md                        # 完整项目方案文档 (V0.2)
+└── README.md                      # 本文件
 ```
-
----
-
-## 📊 数据模型
-
-47 张 PostgreSQL 表，覆盖以下模块：
-
-| 模块 | 核心表 | 说明 |
-|------|--------|------|
-| 用户与权限 | User, Role, Permission, UserSession | RBAC，Token 旋转 |
-| 题库 | Problem, ProblemVersion, ProblemTag, TestGroup | 版本管理，多语言题面 |
-| 评测 | Submission, SubmissionCase, JudgeTask, RemoteJudgeJob | 统一评测 + Remote Judge |
-| 比赛 | Contest, ContestProblem, ContestRankSnapshot | ACM/OI 双赛制 |
-| 教学 | Organization, Course, Class, Assignment | 班级管理，作业系统 |
-| 分析 | KnowledgePoint, UserSkillProfile, LearningPlan | 能力画像，训练计划 |
-| 审计 | AuditLog, SystemConfig | 操作审计，系统配置 |
 
 ---
 
 ## 🔒 安全设计
 
-- **评测沙箱隔离**：评测节点与业务服务器物理分离
-- **代码执行限制**：CPU 时间/内存/进程数/文件大小/系统调用过滤
-- **Token 安全**：Access Token (15min 内存) + Refresh Token (7d HttpOnly Cookie Rotation)
-- **Remote Judge 凭据**：加密存储，仅 Worker 可解密，不入日志
-- **API 限流**：登录失败限制、提交频率限制
+### 代码执行隔离
+
+```
+禁用外网 | 只读根文件系统 | 临时工作目录 | 非 root 用户
+限制进程数 | 限制 CPU 和内存 | seccomp 系统调用过滤
+任务完成后立即销毁环境
+```
+
+- **Fork Bomb / 内存耗尽 / 磁盘写满 / 系统调用逃逸**：8 项安全测试全部通过方可上线
+- **服务器隔离**：业务节点（API + DB）与评测节点（沙箱 + Worker）物理分离
+
+### Token 安全
+
+- Access Token：15 分钟，仅存前端内存（不写 localStorage，防 XSS）
+- Refresh Token：7 天，HttpOnly Secure SameSite Cookie，使用后立即轮换
+- 检测到 Token 重放 → 作废该用户全部会话
+
+### Remote Judge 凭据
+
+- Token/Cookie/密码 → AES 加密存储
+- 仅 Worker 可解密，不入日志、不传前端
+- 管理员只能看到脱敏信息
 
 ---
 
-## 📝 开发阶段
+## 🗺 开发路线
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| 阶段 1 | 基础平台 MVP（认证/题库/本地评测/管理后台） | ✅ 完成 |
-| 阶段 2 | 教学和比赛（班级/作业/ACM 比赛/排行榜） | 🔨 进行中 |
-| 阶段 3 | Remote Judge（插件框架/洛谷接入/账号池） | 📋 计划中 |
-| 阶段 4 | 能力分析和学习规划 | 📋 计划中 |
-| 阶段 5 | 生产强化（Special Judge/交互题/高可用） | 📋 计划中 |
+| **阶段 1** | 基础平台 MVP — 认证 / 题库 / 本地评测 / 远程评测基础接入 / 管理后台 | ✅ 完成 |
+| **阶段 2** | 教学和比赛 — 班级 / 课程 / 作业 / ACM & IOI 比赛 / 排行榜 / 数据导出 | 🔨 进行中 |
+| **阶段 3** | Remote Judge 生产化 — 多平台适配器 / 账号池 / 熔断限流 / 健康监控 | 📋 计划中 |
+| **阶段 4** | 能力分析 — 知识点体系 / 用户能力画像 / 规则式推荐 / 学习规划 | 📋 计划中 |
+| **阶段 5** | 生产强化 — Special Judge / 交互题 / 代码查重 / 高可用 / 压力测试 | 📋 计划中 |
+
+### MVP 验收标准（15 项）
+
+1. ✅ 学生、教师、管理员三角色登录
+2. ✅ 角色分配和权限控制
+3. ✅ 教师创建班级和导入学生
+4. ✅ 教师创建题目并上传测试数据
+5. ✅ 学生用 C++ / Python / Java 提交代码
+6. ✅ 正确返回 AC / WA / TLE / RE / CE
+7. ✅ 教师创建 ACM 模式比赛
+8. ✅ 管理本地和外部题目
+9. ✅ 洛谷官方 Remote Judge 接入
+10. ✅ 不支持的平台跳转原站
+11. ✅ 教师查看班级统计
+12. ✅ 学生能力雷达图与推荐
+13. ✅ 管理员查看评测队列与节点状态
+14. ✅ 用户代码运行环境与业务隔离
+15. ✅ 数据库和配置定期备份
 
 ---
 
-## 🤝 贡献指南
+## ⚠️ 主要风险与对策
 
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 提交 Pull Request
+| 风险 | 对策 |
+|------|------|
+| 第三方 OJ 不提供提交 API | 降级为元数据同步 + 原站跳转 |
+| 网页结构变化 / 验证码 | 适配器隔离、健康检查自动暂停，不绕过安全措施 |
+| 用户代码攻击服务器 | 独立评测节点 + go-judge 强沙箱 + seccomp |
+| 沙箱逃逸漏洞 | 8 项安全测试，定期复测 |
+| 测试数据泄露 | MinIO 权限隔离 + 下载审计 |
+| Redis 故障丢任务 | AOF 持久化 + RDB 快照，生产部署 Sentinel |
+| 题目版权问题 | 保存来源授权，优先展示原题链接 |
+| 系统范围过大 | 严格按 MVP 阶段建设，不做过度设计 |
+
+---
+
+## 🤝 贡献
+
+```bash
+git clone https://github.com/your-org/swufe-oj.git
+git checkout -b feature/your-feature
+git commit -m 'feat: add your feature'
+git push origin feature/your-feature
+# 提交 Pull Request
+```
+
+欢迎提交 Issue 和 PR。
 
 ---
 
@@ -189,8 +333,12 @@ MIT License
 
 ---
 
-## 🔗 参考资源
+## 🔗 参考
 
-- [HydroOJ](https://github.com/hydro-dev/Hydro) — Node.js OJ 架构参考
-- [go-judge](https://github.com/criyle/go-judge) — 评测沙箱引擎
-- [洛谷开放平台](https://www.luogu.com.cn) — Remote Judge API
+| 项目 | 说明 |
+|------|------|
+| [HydroOJ](https://github.com/hydro-dev/Hydro) | Node.js OJ 架构参考，Remote Judge 适配器设计 |
+| [go-judge](https://github.com/criyle/go-judge) | 评测沙箱引擎，cgroup + seccomp |
+| [SYZOJ](https://github.com/syzoj/syzoj) | Node.js OJ，评测队列调度参考 |
+| [QDUOJ](https://github.com/QingdaoU/OnlineJudge) | Python OJ，Docker 部署参考 |
+| [洛谷](https://www.luogu.com.cn) | Remote Judge 官方 API |
