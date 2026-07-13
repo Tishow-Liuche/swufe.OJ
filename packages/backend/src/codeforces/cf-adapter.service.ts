@@ -1,162 +1,123 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as https from 'https';
+import { execSync } from 'child_process';
 
+/**
+ * Codeforces Adapter v4 — 用 curl 子进程绕过 Cloudflare 403
+ * Node.js 的 https 模块被 CF 拦截，但 curl/MSYS2 可以正常访问
+ */
 @Injectable()
 export class CodeforcesAdapter {
   private readonly logger = new Logger(CodeforcesAdapter.name);
-  private cookies: string[] = [];
-  private loggedIn = false;
+  private cookieFile = '/tmp/cf_cookies_' + Math.random().toString(36).slice(2) + '.txt';
   private handle: string;
   private password: string;
+  private loggedIn = false;
 
   constructor(private config: ConfigService) {
     this.handle = config.get('CF_HANDLE', 'Tishow__Liuche');
     this.password = config.get('CF_PASSWORD', 'alxy1314520');
   }
 
-  private async http(url: string, opts: any = {}): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const u = new URL(url);
-      const req = https.request({
-        hostname: u.hostname, path: u.pathname + u.search,
-        method: opts.method || 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          'Accept': opts.accept || 'text/html,application/json',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Cookie': this.cookies.join('; '),
-          ...(opts.headers || {}),
-        },
-        rejectUnauthorized: false,
-      }, (res) => {
-        let body = '';
-        res.on('data', (c: string) => body += c);
-        res.on('end', () => {
-          const sc = res.headers['set-cookie'];
-          if (sc) {
-            for (const c of sc) {
-              const val = c.split(';')[0];
-              const name = val.split('=')[0];
-              const idx = this.cookies.findIndex((x: string) => x.startsWith(name + '='));
-              if (idx >= 0) this.cookies[idx] = val;
-              else this.cookies.push(val);
-            }
-          }
-          // Handle redirect
-          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && opts.follow !== false) {
-            this.http(res.headers.location.startsWith('http') ? res.headers.location : `https://codeforces.com${res.headers.location}`, { ...opts, follow: false })
-              .then(resolve).catch(reject);
-          } else {
-            resolve(body);
-          }
-        });
-      });
-      req.on('error', reject);
-      req.setTimeout(30000, () => { req.destroy(); reject(new Error('Timeout')); });
-      if (opts.body) req.write(opts.body);
-      req.end();
-    });
+  private curl(url: string, opts: string = ''): string {
+    try {
+      const cmd = 'curl -sL --max-time 20 -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -b ' +
+        this.cookieFile + ' -c ' + this.cookieFile + ' ' + opts + ' "' + url + '"';
+      return execSync(cmd, { encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }).toString();
+    } catch (e: any) {
+      // curl non-200: still return output
+      if (e.stdout) return e.stdout.toString();
+      throw e;
+    }
   }
 
   async login(): Promise<boolean> {
     if (this.loggedIn) return true;
     try {
-      this.cookies = [];
-      // 1. Get CSRF from enter page
-      this.logger.log('Fetching CF enter page...');
-      const enter = await this.http('https://codeforces.com/enter');
+      // 1. GET enter page → extract CSRF
+      const enter = this.curl('https://codeforces.com/enter', '-c ' + this.cookieFile);
       const csrf = (enter.match(/<meta name="X-Csrf-Token" content="([^"]+)"/) || [])[1];
-      if (!csrf) { this.logger.error('No CSRF on enter page'); return false; }
-      this.logger.log('CSRF obtained: ' + csrf.substring(0, 20) + '...');
+      if (!csrf) { this.logger.error('No CSRF from CF enter page'); return false; }
+      this.logger.log('CF CSRF: ' + csrf.substring(0, 20) + '...');
 
       // 2. POST login
       const ftaa = this.randHex(18);
-      const body = new URLSearchParams({
-        csrf_token: csrf, action: 'enter', ftaa,
-        bfaa: 'f1b3f18c715565b589b7823cda7448ce',
-        handleOrEmail: this.handle, password: this.password, remember: 'on', _tta: '176',
-      }).toString();
+      const loginBody = 'csrf_token=' + encodeURIComponent(csrf) +
+        '&action=enter&ftaa=' + ftaa +
+        '&bfaa=f1b3f18c715565b589b7823cda7448ce' +
+        '&handleOrEmail=' + encodeURIComponent(this.handle) +
+        '&password=' + encodeURIComponent(this.password) +
+        '&remember=on&_tta=176';
 
-      this.logger.log('Posting login...');
-      const loginRes = await this.http('https://codeforces.com/enter', {
-        method: 'POST', body,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Origin': 'https://codeforces.com',
-          'Referer': 'https://codeforces.com/enter',
-        },
-      });
+      const loginRes = this.curl('https://codeforces.com/enter',
+        '-c ' + this.cookieFile + ' -b ' + this.cookieFile +
+        ' -H "Content-Type: application/x-www-form-urlencoded"' +
+        ' -H "Origin: https://codeforces.com"' +
+        ' -H "Referer: https://codeforces.com/enter"' +
+        ' --data-raw "' + loginBody + '"');
 
-      this.loggedIn = !loginRes.includes('Invalid handle') && !loginRes.includes('error for__handleOrEmail');
-      this.logger.log('Login result: ' + (this.loggedIn ? 'SUCCESS' : 'FAILED'));
+      this.loggedIn = !loginRes.includes('Invalid handle') && loginRes.length > 100;
+      this.logger.log('CF Login: ' + (this.loggedIn ? 'OK' : 'FAILED'));
       return this.loggedIn;
     } catch (e: any) {
-      this.logger.error('Login error: ' + e.message);
+      this.logger.error('CF Login error: ' + e.message);
       return false;
     }
   }
 
   async submit(contestId: number, problemIndex: string, language: string, code: string) {
-    if (!this.loggedIn) {
-      const ok = await this.login();
-      if (!ok) return { error: 'CF 登录失败: 账号 Tishow__Liuche' };
-    }
+    if (!this.loggedIn) { const ok = await this.login(); if (!ok) return { error: 'CF登录失败' }; }
 
     try {
-      // 1. Get submit page CSRF
-      const submitUrl = `https://codeforces.com/problemset/submit/${contestId}/${problemIndex}`;
-      const page = await this.http(submitUrl);
+      const submitUrl = 'https://codeforces.com/problemset/submit/' + contestId + '/' + problemIndex;
+
+      // Get CSRF from submit page
+      const page = this.curl(submitUrl, '-b ' + this.cookieFile);
       const csrf = (page.match(/<meta name="X-Csrf-Token" content="([^"]+)"/) || [])[1];
       if (!csrf) {
-        // Login may have expired — retry
         this.loggedIn = false;
-        const ok2 = await this.login();
-        if (!ok2) return { error: 'CF 登录失败' };
-        const page2 = await this.http(submitUrl);
+        await this.login();
+        const page2 = this.curl(submitUrl, '-b ' + this.cookieFile);
         const csrf2 = (page2.match(/<meta name="X-Csrf-Token" content="([^"]+)"/) || [])[1];
-        if (!csrf2) return { error: 'CF 提交页面无法获取 CSRF' };
-        return this.submit(contestId, problemIndex, language, code); // retry once
+        if (!csrf2) return { error: 'CF提交页CSRF获取失败' };
+        // Retry once with fresh login
+        const lOk2 = await this.login();
+        if (!lOk2) return { error: 'CF登录重试失败' };
+        const page3 = this.curl(submitUrl, '-b ' + this.cookieFile);
+        const csrf3 = (page3.match(/<meta name="X-Csrf-Token" content="([^"]+)"/) || [])[1];
+        if (!csrf3) return { error: 'CF提交页CSRF失败（已重试）' };
+        return this.submit(contestId, problemIndex, language, code);
       }
 
-      // 2. Map language
       const langMap: any = { cpp: '73', c: '61', python: '70', java: '60' };
       const pt = langMap[language] || '73';
-
-      // 3. POST submit
       const ftaa = this.randHex(18);
-      const body = new URLSearchParams({
-        csrf_token: csrf, ftaa,
-        bfaa: 'f1b3f18c715565b589b7823cda7448ce',
-        action: 'submitSolutionFormSubmitted',
-        submittedProblemIndex: problemIndex,
-        programTypeId: pt,
-        source: code,
-        tabSize: '4',
-        sourceFile: '',
-        _tta: '594',
-      }).toString();
 
-      const result = await this.http(`${submitUrl}?csrf_token=${encodeURIComponent(csrf)}`, {
-        method: 'POST', body,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Origin': 'https://codeforces.com',
-          'Referer': submitUrl,
-        },
-      });
+      const submitBody = 'csrf_token=' + encodeURIComponent(csrf) +
+        '&ftaa=' + ftaa +
+        '&bfaa=f1b3f18c715565b589b7823cda7448ce' +
+        '&action=submitSolutionFormSubmitted' +
+        '&submittedProblemIndex=' + problemIndex +
+        '&programTypeId=' + pt +
+        '&source=' + encodeURIComponent(code) +
+        '&tabSize=4&sourceFile=&_tta=594';
 
-      // 4. Extract submission ID from redirect or body
+      const result = this.curl(submitUrl + '?csrf_token=' + encodeURIComponent(csrf),
+        '-b ' + this.cookieFile + ' -c ' + this.cookieFile +
+        ' -H "Content-Type: application/x-www-form-urlencoded"' +
+        ' -H "Origin: https://codeforces.com"' +
+        ' -H "Referer: ' + submitUrl + '"' +
+        ' --data-raw "' + submitBody + '"');
+
       const sid1 = result.match(/data-submission-id="(\d+)"/);
       if (sid1) return { submissionId: parseInt(sid1[1]) };
 
       const sid2 = result.match(/\/status\/(\d+)\/my/);
       if (sid2) return { submissionId: parseInt(sid2[1]) };
 
-      // 5. Reconciliation via API
-      this.logger.log('No direct SID, reconciling via CF API...');
-      await this.sleep(5000);
-      const api = await this.http('https://codeforces.com/api/user.status?handle=' + this.handle + '&from=1&count=10');
+      // Reconciliation via CF API
+      await this.sleep(6000);
+      const api = this.curl('https://codeforces.com/api/user.status?handle=' + this.handle + '&from=1&count=10');
       const data = JSON.parse(api);
       if (data.status === 'OK') {
         const match = (data.result || []).find((s: any) =>
@@ -167,7 +128,7 @@ export class CodeforcesAdapter {
         if (match) return { submissionId: match.id };
       }
 
-      return { error: '无法获取CF Submission ID' };
+      return { error: '无法提取 Submission ID' };
     } catch (e: any) {
       return { error: e.message };
     }
@@ -175,7 +136,7 @@ export class CodeforcesAdapter {
 
   async queryResult(handle: string): Promise<any[]> {
     try {
-      const api = await this.http('https://codeforces.com/api/user.status?handle=' + handle + '&from=1&count=10');
+      const api = this.curl('https://codeforces.com/api/user.status?handle=' + handle + '&from=1&count=10');
       const data = JSON.parse(api);
       return data.status === 'OK' ? data.result : [];
     } catch { return []; }
