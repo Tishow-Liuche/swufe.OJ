@@ -1,12 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRouter } from 'vue-router';
 import api from '../api/client';
 
-const router = useRouter();
-
-// 洛谷题目 ID 批量拉取
-const luoguIds = ref('');
+// 导入状态
 const importing = ref(false);
 const importResult = ref<any>(null);
 const error = ref('');
@@ -150,10 +146,6 @@ const luoguSeedData = [
     ],
   },
 ];
-
-function selectAll() {
-  luoguIds.value = 'P1000-P1010';
-}
 
 async function importLuogu() {
   importing.value = true;
