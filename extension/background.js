@@ -1,13 +1,12 @@
 /**
- * OJ Helper v3.1 — 在 CF 页面上填写表单+点击提交+反馈结果
+ * OJ Helper v4 — 完全后台，不打开任何标签页
  */
 const SERVER = 'http://127.0.0.1:3000';
-const USER_ID = 'cmrj7k0hm00006eqfpcjxuwgn';
+const UID = 'cmrj7k0hm00006eqfpcjxuwgn';
 let pollTimer = null;
 let busy = false;
 
-// ========== Init ==========
-(async function() {
+(async function init() {
   const d = await chrome.storage.local.get(['connected']);
   if (d.connected) startPolling();
 })();
@@ -19,154 +18,172 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  console.log('[Helper] Polling every 4s');
-  pollTimer = setInterval(checkTask, 4000);
+  pollTimer = setInterval(checkTask, 3000);
 }
 
 async function checkTask() {
   if (busy) return;
   try {
-    const r = await fetch(`${SERVER}/api/helper/tasks/next?userId=${USER_ID}&deviceId=ext-v3`);
+    const r = await fetch(`${SERVER}/api/helper/tasks/next?userId=${UID}&deviceId=bg-v4`);
     if (!r.ok) return;
-    const task = await r.json();
-    if (task && task.taskId && task.platform === 'CODEFORCES') {
+    const t = await r.json();
+    if (t && t.taskId && t.platform === 'CODEFORCES') {
       busy = true;
-      console.log('[Helper] Task:', task.remoteProblemId);
-      await handleCF(task);
+      await handleCF(t);
       busy = false;
     }
   } catch (e) {}
 }
 
-// ========== CF Submit ==========
 async function handleCF(task) {
   const m = task.remoteProblemId.match(/^(\d+)([A-Z]\d?)$/);
   if (!m) { busy = false; return; }
   const cid = parseInt(m[1]), pidx = m[2];
 
-  // Report to user
-  postResult(task.submissionId, 'QUEUING', 0, null, '正在提交到 Codeforces...');
-
   try {
-    const tab = await chrome.tabs.create({
-      url: `https://codeforces.com/problemset/submit/${cid}/${pidx}`,
-      active: true,
+    // ===== 第一步：GET 提交页面，获取 CSRF token =====
+    const pageResp = await fetch(`https://codeforces.com/problemset/submit/${cid}/${pidx}`, {
+      credentials: 'include',
+      headers: { 'Accept': 'text/html' },
     });
-    await sleep(6000);
+    const html = await pageResp.text();
+    const csrfMatch = html.match(/<meta name="X-Csrf-Token" content="([^"]+)"/);
+    if (!csrfMatch) {
+      await postResult(task.submissionId, 'REMOTE_ERROR', 0, null, 'CF 登录已过期，请在 codeforces.com 登录后重试');
+      busy = false; return;
+    }
+    const csrf = csrfMatch[1];
 
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: injectCFSubmit,
-      args: [{cid, pidx, code: task.sourceCode, lang: task.language, subId: task.submissionId, server: SERVER, uid: USER_ID}],
+    // ===== 第二步：POST 提交代码 =====
+    const langMap = { cpp: '73', c: '61', python: '70', java: '60' };
+    const pt = langMap[task.language] || '73';
+    const ftaa = Array.from({ length: 18 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+
+    const formBody = new URLSearchParams({
+      csrf_token: csrf, ftaa,
+      bfaa: 'f1b3f18c715565b589b7823cda7448ce',
+      action: 'submitSolutionFormSubmitted',
+      submittedProblemIndex: pidx,
+      programTypeId: pt,
+      source: task.sourceCode,
+      tabSize: '4',
+      sourceFile: '',
+      _tta: '594',
     });
 
-    const r = results[0]?.result;
-    console.log('[Helper] Result:', JSON.stringify(r));
-  } catch (e) {
-    console.error('[Helper] Error:', e.message);
-    postResult(task.submissionId, 'REMOTE_ERROR', 0, null, e.message);
-  }
-}
-
-// ========== 注入 CF 页面的脚本 ==========
-function injectCFSubmit(args) {
-  return new Promise((resolve) => {
-    const LANG = { cpp: '73', c: '61', python: '70', java: '60' };
-    const langId = LANG[args.lang] || '73';
-    const { cid, pidx, code, subId, server, uid } = args;
-
-    // Notify OJ
-    function notifyOJ(status, score, sid, msg) {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', server + '/api/submissions/' + subId + '/fill-result');
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.send(JSON.stringify({
-        status: status, score: score || 0,
-        remoteSubmissionId: sid ? String(sid) : 'N/A',
-        userId: uid,
-        compileMessage: msg || null,
-        timeUsed: 0, memoryUsed: 0,
-      }));
-    }
-
-    // Check logged in
-    const profile = document.querySelector('a[href*="/profile/"]');
-    if (!profile || profile.textContent.trim() === 'Enter') {
-      notifyOJ('REMOTE_ERROR', 0, null, '请先在 codeforces.com 登录账号再试');
-      return resolve({ error: 'NOT_LOGGED_IN' });
-    }
-
-    function attempt(attemptNum) {
-      const select = document.querySelector('select[name="programTypeId"]');
-      const textarea = document.querySelector('textarea[name="source"]');
-      const btn = document.querySelector('input.submit[type="submit"]');
-
-      if (!select || !textarea || !btn) {
-        if (attemptNum < 15) return setTimeout(() => attempt(attemptNum + 1), 1000);
-        notifyOJ('REMOTE_ERROR', 0, null, 'CF 页面加载超时，请手动提交');
-        return resolve({ error: 'PAGE_LOAD_TIMEOUT' });
+    const submitResp = await fetch(
+      `https://codeforces.com/problemset/submit/${cid}/${pidx}?csrf_token=${encodeURIComponent(csrf)}`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Origin': 'https://codeforces.com',
+          'Referer': `https://codeforces.com/problemset/submit/${cid}/${pidx}`,
+        },
+        body: formBody.toString(),
+        redirect: 'manual',
       }
+    );
 
-      // Fill form
-      select.value = langId;
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-
-      textarea.value = code;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      textarea.dispatchEvent(new Event('change', { bubbles: true }));
-
-      console.log('[CF-Inject] Filled, clicking submit...');
-
-      setTimeout(() => {
-        btn.click();
-        console.log('[CF-Inject] Submit clicked!');
-
-        // Wait for result
-        // Poll: check table for submission-id, check URL
-        let count = 0;
-        const iv = setInterval(() => {
-          count++;
-          // Look for submission ID in status table
-          const row = document.querySelector('tr[data-submission-id]');
-          if (row) {
-            const sid = parseInt(row.getAttribute('data-submission-id'));
-            clearInterval(iv);
-            notifyOJ('JUDGING', 0, sid, '已提交到 CF，等待评测...');
-            console.log('[CF-Inject] SID from table:', sid);
-            return resolve({ sid });
-          }
-
-          // Check URL redirect
-          const m2 = window.location.href.match(/\/status\/(\d+)/);
-          if (m2) {
-            const sid2 = parseInt(m2[1]);
-            clearInterval(iv);
-            notifyOJ('JUDGING', 0, sid2, '已提交到 CF，等待评测...');
-            console.log('[CF-Inject] SID from URL:', sid2);
-            return resolve({ sid: sid2 });
-          }
-
-          if (count > 25) {
-            clearInterval(iv);
-            notifyOJ('JUDGING', 0, null, '已提交但未获取到 ID，请检查 CF');
-            resolve({ sid: null });
-          }
-        }, 1200);
-      }, 2000);
+    // ===== 第三步：获取 Submission ID =====
+    // 方案A：从重定向头获取
+    const location = submitResp.headers.get('Location') || '';
+    const sidFromLoc = location.match(/\/status\/(\d+)\/my/);
+    if (sidFromLoc) {
+      const sid = parseInt(sidFromLoc[1]);
+      console.log('[Helper] SID from redirect:', sid);
+      await postResult(task.submissionId, 'JUDGING', 0, sid, '已在 CF 提交成功，等待评测');
+      await pollCFVerdict(task.submissionId, sid);
+      busy = false; return;
     }
 
-    attempt(1);
-  });
+    // 方案B：从响应体获取
+    const respBody = await submitResp.text();
+    const sidFromBody = respBody.match(/data-submission-id="(\d+)"/);
+    if (sidFromBody) {
+      const sid = parseInt(sidFromBody[1]);
+      console.log('[Helper] SID from body:', sid);
+      await postResult(task.submissionId, 'JUDGING', 0, sid, '已在 CF 提交成功，等待评测');
+      await pollCFVerdict(task.submissionId, sid);
+      busy = false; return;
+    }
+
+    // 方案C：等 5 秒后对账 API
+    console.log('[Helper] No direct SID, reconciling...');
+    await postResult(task.submissionId, 'JUDGING', 0, null, '已提交，正在确认 Submission ID');
+    await sleep(5000);
+
+    // 查询最新提交记录来对账
+    const apiResp = await fetch('https://codeforces.com/api/user.status?handle=Tishow__Liuche&from=1&count=5');
+    const apiData = await apiResp.json();
+    if (apiData.status === 'OK') {
+      const subs = apiData.result;
+      const match = subs.find(s =>
+        s.problem?.contestId === cid &&
+        s.problem?.index === pidx &&
+        (new Date().getTime() / 1000 - s.creationTimeSeconds) < 120
+      );
+      if (match) {
+        console.log('[Helper] Reconciled SID:', match.id);
+        await postResult(task.submissionId, 'JUDGING', 0, match.id, '已确认提交');
+        await pollCFVerdict(task.submissionId, match.id);
+        busy = false; return;
+      }
+    }
+
+    console.log('[Helper] Submit succeeded but no SID found');
+    await postResult(task.submissionId, 'JUDGING', 0, null, '已提交，请检查 CF 提交记录');
+
+  } catch (e) {
+    console.error('[Helper]', e.message);
+    await postResult(task.submissionId, 'REMOTE_ERROR', 0, null, e.message);
+  }
+  busy = false;
 }
 
-async function postResult(subId, status, score, sid, msg) {
-  try {
-    await fetch(`${SERVER}/api/submissions/${subId}/fill-result`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, score: score || 0, remoteSubmissionId: sid ? String(sid) : 'N/A', userId: USER_ID, compileMessage: msg || null, timeUsed: 0, memoryUsed: 0 }),
-    });
-  } catch (e) {}
+// ===== 轮询 CF 评测结果（后台，不弹窗口） =====
+async function pollCFVerdict(submissionId, sid) {
+  for (let i = 0; i < 20; i++) {
+    await sleep(3000);
+    try {
+      const resp = await fetch(`https://codeforces.com/api/user.status?handle=Tishow__Liuche&from=1&count=10`);
+      const data = await resp.json();
+      if (data.status !== 'OK') continue;
+
+      const sub = data.result.find(s => s.id === sid);
+      if (!sub) continue;
+
+      const verdict = sub.verdict; // null = 评测中, OK, WRONG_ANSWER, etc.
+      if (!verdict || verdict === 'TESTING') continue; // 还在评测
+
+      const vMap = {
+        OK: 'ACCEPTED', WRONG_ANSWER: 'WRONG_ANSWER', TIME_LIMIT_EXCEEDED: 'TIME_LIMIT_EXCEEDED',
+        MEMORY_LIMIT_EXCEEDED: 'MEMORY_LIMIT_EXCEEDED', RUNTIME_ERROR: 'RUNTIME_ERROR',
+        COMPILATION_ERROR: 'COMPILE_ERROR', SKIPPED: 'CANCELLED',
+      };
+      const sv = vMap[verdict] || verdict;
+
+      console.log(`[Helper] Verdict: ${sv} (${sub.timeConsumedMillis}ms)`);
+      await postResult(submissionId, sv, sv === 'ACCEPTED' ? 100 : 0, sid, null, sub.timeConsumedMillis || 0, sub.memoryConsumedBytes ? Math.round(sub.memoryConsumedBytes / 1024) : 0);
+      return;
+    } catch (e) {}
+  }
+  console.log('[Helper] Polling timeout for', sid);
+}
+
+async function postResult(subId, status, score, sid, msg, time, mem) {
+  await fetch(`${SERVER}/api/submissions/${subId}/fill-result`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      status, score: score || 0,
+      remoteSubmissionId: sid ? String(sid) : 'N/A',
+      userId: UID,
+      compileMessage: msg || null,
+      timeUsed: time || 0,
+      memoryUsed: mem || 0,
+    }),
+  });
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
