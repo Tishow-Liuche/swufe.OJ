@@ -11,7 +11,7 @@ export class SubmissionService {
   ) {}
 
   async submit(userId: string, dto: { problemId: string; language: string; sourceCode: string }) {
-    // Verify problem exists
+    // Verify problem exists and has test cases
     const problem = await this.prisma.problem.findUnique({
       where: { id: dto.problemId },
       include: { versions: { where: { isCurrent: true }, take: 1 } },
@@ -21,6 +21,15 @@ export class SubmissionService {
     }
 
     const currentVersion = problem.versions[0];
+    if (!currentVersion) throw new NotFoundException('题目版本不存在');
+
+    // 检查是否有测试用例
+    const testCaseCount = await this.prisma.problemTestCase.count({
+      where: { problemVersionId: currentVersion.id },
+    });
+    if (testCaseCount === 0 && problem.source === 'LOCAL') {
+      throw new NotFoundException('题目尚未配置测试数据，无法提交');
+    }
 
     // Create submission record
     const submission = await this.prisma.submission.create({
@@ -112,5 +121,38 @@ export class SubmissionService {
     ]);
 
     return { items, total, page, pageSize };
+  }
+
+  async rejudge(id: string) {
+    const sub = await this.prisma.submission.findUnique({ where: { id } });
+    if (!sub) throw new NotFoundException('提交不存在');
+
+    // 清除旧测试点
+    await this.prisma.submissionCase.deleteMany({ where: { submissionId: id } });
+
+    // 重置状态并重新入队
+    await this.prisma.submission.update({
+      where: { id },
+      data: { status: 'PENDING', score: 0, timeUsed: null, memoryUsed: null, judgedAt: null },
+    });
+
+    await this.prisma.judgeTask.upsert({
+      where: { submissionId: id },
+      create: { submissionId: id },
+      update: { retryCount: 0, startedAt: null, finishedAt: null },
+    });
+
+    const problem = await this.prisma.problem.findUnique({
+      where: { id: sub.problemId },
+      select: { timeLimit: true, memoryLimit: true },
+    });
+
+    await this.judgeQueue.add('local-judge', {
+      submissionId: id, problemId: sub.problemId,
+      language: sub.language, sourceCode: sub.sourceCode,
+      timeLimit: problem?.timeLimit || 1000, memoryLimit: problem?.memoryLimit || 256,
+    }, { priority: 2 });
+
+    return { id, status: 'QUEUING' };
   }
 }

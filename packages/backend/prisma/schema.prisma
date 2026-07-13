@@ -148,6 +148,7 @@ model ProblemVersion {
   problem      Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
   submissions  Submission[]
   testGroups   TestGroup[]
+  testCases    ProblemTestCase[]
   checker      Checker?
 
   @@index([problemId])
@@ -194,6 +195,22 @@ model Checker {
   sourceCode        String?
   language          String?
   problemVersion    ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
+}
+
+model ProblemTestCase {
+  id                String         @id @default(cuid())
+  problemVersionId  String
+  input             String         @default("")
+  expectedOutput    String         @default("")
+  score             Int            @default(10)
+  order             Int            @default(0)
+  isSample          Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  problemVersion    ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
+
+  @@index([problemVersionId])
+  @@index([problemVersionId, order])
 }
 
 // ===================== 提交与评测 =====================

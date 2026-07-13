@@ -141,7 +141,8 @@ export class ProblemService {
 
   async findAll(query: any) {
     const { keyword, source, difficulty, status, tag, page = 1, pageSize = 20 } = query;
-    const where: any = { status: 'PUBLISHED' };
+    const where: any = {};
+    where.status = status || 'PUBLISHED'; // 默认只返回已发布，教师可传入草稿
     if (keyword) where.title = { contains: keyword, mode: 'insensitive' };
     if (source) where.source = source;
     if (difficulty) where.difficulty = difficulty;
