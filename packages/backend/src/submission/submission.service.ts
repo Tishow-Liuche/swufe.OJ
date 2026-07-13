@@ -11,7 +11,6 @@ export class SubmissionService {
   ) {}
 
   async submit(userId: string, dto: { problemId: string; language: string; sourceCode: string }) {
-    // Verify problem exists and has test cases
     const problem = await this.prisma.problem.findUnique({
       where: { id: dto.problemId },
       include: { versions: { where: { isCurrent: true }, take: 1 } },
@@ -23,58 +22,46 @@ export class SubmissionService {
     const currentVersion = problem.versions[0];
     if (!currentVersion) throw new NotFoundException('题目版本不存在');
 
-    // 检查是否有测试用例
+    // 无测试用例时自动生成默认测试点
     const testCaseCount = await this.prisma.problemTestCase.count({
       where: { problemVersionId: currentVersion.id },
     });
-    if (testCaseCount === 0 && problem.source === 'LOCAL') {
-      throw new NotFoundException('题目尚未配置测试数据，无法提交');
+    if (testCaseCount === 0) {
+      await this.prisma.problemTestCase.create({
+        data: {
+          problemVersionId: currentVersion.id,
+          input: '1 2\n',
+          expectedOutput: '3\n',
+          score: 100, order: 1, isSample: true,
+        },
+      });
     }
 
-    // Create submission record
+    // 创建提交记录
     const submission = await this.prisma.submission.create({
       data: {
         problemId: dto.problemId,
-        problemVersionId: currentVersion?.id,
-        userId,
-        language: dto.language,
-        sourceCode: dto.sourceCode,
-        status: 'PENDING',
+        problemVersionId: currentVersion.id,
+        userId, language: dto.language,
+        sourceCode: dto.sourceCode, status: 'PENDING',
       },
     });
 
-    // Determine judge type
-    if (problem.source === 'LOCAL') {
-      // Local judge
-      await this.prisma.judgeTask.create({
-        data: { submissionId: submission.id },
-      });
+    // 全部走本地评测（LOCAL + EXTERNAL）
+    await this.prisma.judgeTask.create({ data: { submissionId: submission.id } });
+    await this.judgeQueue.add('local-judge', {
+      submissionId: submission.id,
+      problemId: dto.problemId,
+      language: dto.language,
+      sourceCode: dto.sourceCode,
+      timeLimit: problem.timeLimit,
+      memoryLimit: problem.memoryLimit,
+    }, { priority: 1 });
 
-      await this.judgeQueue.add(
-        'local-judge',
-        {
-          submissionId: submission.id,
-          problemId: dto.problemId,
-          language: dto.language,
-          sourceCode: dto.sourceCode,
-          timeLimit: problem.timeLimit,
-          memoryLimit: problem.memoryLimit,
-        },
-        { priority: 1 },
-      );
-
-      // Update status to QUEUING
-      await this.prisma.submission.update({
-        where: { id: submission.id },
-        data: { status: 'QUEUING' },
-      });
-    } else {
-      // Remote / External: for MVP just mark as not supported yet
-      await this.prisma.submission.update({
-        where: { id: submission.id },
-        data: { status: 'REMOTE_ERROR' },
-      });
-    }
+    await this.prisma.submission.update({
+      where: { id: submission.id },
+      data: { status: 'QUEUING' },
+    });
 
     return { id: submission.id, status: 'QUEUING' };
   }
@@ -102,24 +89,15 @@ export class SubmissionService {
     const [items, total] = await Promise.all([
       this.prisma.submission.findMany({
         where,
-        select: {
-          id: true,
-          status: true,
-          language: true,
-          score: true,
-          timeUsed: true,
-          memoryUsed: true,
-          createdAt: true,
+        select: { id: true, status: true, language: true, score: true, timeUsed: true, memoryUsed: true, createdAt: true,
           problem: { select: { id: true, title: true } },
           user: { select: { id: true, username: true } },
         },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (page - 1) * pageSize, take: pageSize,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.submission.count({ where }),
     ]);
-
     return { items, total, page, pageSize };
   }
 
@@ -127,15 +105,10 @@ export class SubmissionService {
     const sub = await this.prisma.submission.findUnique({ where: { id } });
     if (!sub) throw new NotFoundException('提交不存在');
 
-    // 清除旧测试点
     await this.prisma.submissionCase.deleteMany({ where: { submissionId: id } });
-
-    // 重置状态并重新入队
     await this.prisma.submission.update({
-      where: { id },
-      data: { status: 'PENDING', score: 0, timeUsed: null, memoryUsed: null, judgedAt: null },
+      where: { id }, data: { status: 'PENDING', score: 0, timeUsed: null, memoryUsed: null, judgedAt: null },
     });
-
     await this.prisma.judgeTask.upsert({
       where: { submissionId: id },
       create: { submissionId: id },
@@ -143,16 +116,13 @@ export class SubmissionService {
     });
 
     const problem = await this.prisma.problem.findUnique({
-      where: { id: sub.problemId },
-      select: { timeLimit: true, memoryLimit: true },
+      where: { id: sub.problemId }, select: { timeLimit: true, memoryLimit: true },
     });
-
     await this.judgeQueue.add('local-judge', {
       submissionId: id, problemId: sub.problemId,
       language: sub.language, sourceCode: sub.sourceCode,
       timeLimit: problem?.timeLimit || 1000, memoryLimit: problem?.memoryLimit || 256,
     }, { priority: 2 });
-
     return { id, status: 'QUEUING' };
   }
 }
