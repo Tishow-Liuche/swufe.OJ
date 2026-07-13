@@ -44,6 +44,15 @@ export class SubmissionController {
     return sub;
   }
 
+  /** 回填第三方评测结果 */
+  @Post(':id/fill-result')
+  @UseGuards(AuthGuard('jwt'))
+  fillResult(@Param('id') id: string, @Req() req: any, @Body() data: {
+    status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string;
+  }) {
+    return this.submission.fillExternalResult(id, req.user.id, data);
+  }
+
   /** 重判（教师/管理员） */
   @Post(':id/rejudge')
   @UseGuards(AuthGuard('jwt'))

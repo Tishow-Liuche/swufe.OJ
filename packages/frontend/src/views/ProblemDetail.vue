@@ -21,6 +21,9 @@ const result = ref<any>(null);
 const submitting = ref(false);
 const errorMsg = ref('');
 const showAllCases = ref(false);
+const isExternal = ref(false);
+const submitUrl = ref('');
+const fillForm = ref({ status: 'ACCEPTED', score: 100, timeUsed: 0, memoryUsed: 0, remoteSubmissionId: '' });
 let cmView: EditorView | null = null;
 let pollTimer: any = null;
 const editorHost = ref<HTMLElement | null>(null);
@@ -117,18 +120,37 @@ async function submitCode() {
   submitting.value = true;
   errorMsg.value = '';
   result.value = null;
+  isExternal.value = false;
   try {
     const { data } = await api.post('/api/submissions', {
       problemId: problem.value.id,
       language: language.value,
       sourceCode: code.value,
     });
-    result.value = { id: data.id, status: 'QUEUING' };
-    startPolling(data.id);
+    if (data.mode === 'EXTERNAL') {
+      isExternal.value = true;
+      submitUrl.value = data.submitUrl || '';
+      result.value = { id: data.id, status: 'PENDING', mode: 'EXTERNAL', submitUrl: data.submitUrl, remoteProblemId: data.remoteProblemId };
+    } else {
+      result.value = { id: data.id, status: 'QUEUING', mode: 'LOCAL' };
+      startPolling(data.id);
+    }
   } catch (e: any) {
     errorMsg.value = e.response?.data?.message || '提交失败';
   } finally {
     submitting.value = false;
+  }
+}
+
+async function fillExternalResult() {
+  if (!result.value) return;
+  try {
+    await api.post(`/api/submissions/${result.value.id}/fill-result`, fillForm.value);
+    result.value = { ...result.value, status: fillForm.value.status, score: fillForm.value.score,
+      timeUsed: fillForm.value.timeUsed, memoryUsed: fillForm.value.memoryUsed };
+    isExternal.value = false;
+  } catch (e: any) {
+    errorMsg.value = e.response?.data?.message || '回填失败';
   }
 }
 
@@ -232,7 +254,35 @@ function renderMd(text: string): string {
             <div ref="editorHost" class="cm-editor-host"></div>
           </div>
 
-          <div v-if="result" class="card result-card">
+          <!-- External submission card -->
+          <div v-if="isExternal && result" class="card external-card">
+            <h3>🔗 第三方平台提交</h3>
+            <p>该题目需要在 <strong>{{ problem.source === 'EXTERNAL' ? '洛谷' : problem.source }}</strong> 上提交评测。</p>
+            <a :href="result.submitUrl" target="_blank" class="luogu-link">📋 在洛谷上打开 P{{ result.remoteProblemId }}</a>
+            <p class="tip">将右侧代码复制到洛谷提交页面，<br>提交成功后回到这里填写结果。</p>
+
+            <div class="fill-form">
+              <h4>回填评测结果</h4>
+              <div class="fill-row">
+                <select v-model="fillForm.status">
+                  <option value="ACCEPTED">ACCEPTED</option>
+                  <option value="WRONG_ANSWER">WRONG_ANSWER</option>
+                  <option value="TIME_LIMIT_EXCEEDED">TLE</option>
+                  <option value="RUNTIME_ERROR">RUNTIME_ERROR</option>
+                  <option value="COMPILE_ERROR">COMPILE_ERROR</option>
+                  <option value="MEMORY_LIMIT_EXCEEDED">MLE</option>
+                </select>
+                <input v-model.number="fillForm.score" type="number" placeholder="分数 (0-100)" min="0" max="100" />
+                <input v-model.number="fillForm.timeUsed" type="number" placeholder="用时(ms)" />
+                <input v-model.number="fillForm.memoryUsed" type="number" placeholder="内存(KB)" />
+                <input v-model="fillForm.remoteSubmissionId" placeholder="洛谷提交ID (可选)" />
+                <button @click="fillExternalResult" class="btn-fill">确认结果</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Local result card -->
+          <div v-if="!isExternal && result" class="card result-card">
             <div class="result-header">
               <span class="result-badge" :style="{ background: statusColors[result.status] || '#999' }">
                 {{ statusLabels[result.status] || result.status }}
@@ -318,5 +368,20 @@ function renderMd(text: string): string {
 .case-dot.wa { background: #e74c3c; }
 .error-msg, .error-card { color: #e74c3c; padding: 20px; text-align: center; }
 .error-card { background: #fce4ec; }
+
+.external-card { border-left: 4px solid #e67e22; background: #fff8e1; }
+.external-card h3 { color: #e65100; margin-bottom: 8px; }
+.external-card p { margin: 4px 0 10px; font-size: 14px; color: #666; }
+.luogu-link { display: inline-block; padding: 8px 16px; background: #3498db; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; margin: 8px 0; }
+.luogu-link:hover { background: #2980b9; }
+.tip { font-size: 12px; color: #888; margin: 8px 0; }
+.fill-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid #ffe0b2; }
+.fill-form h4 { margin: 0 0 8px; font-size: 14px; }
+.fill-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fill-row select, .fill-row input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 120px; }
+.fill-row input[placeholder] { width: 110px; }
+.btn-fill { padding: 6px 16px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.btn-fill:hover { background: #219a52; }
+
 @media (max-width: 1000px) { .content-split { grid-template-columns: 1fr; } }
 </style>
