@@ -289,7 +289,6 @@ function renderMd(text: string): string {
 /* KaTeX overlay fix */
 .desc :deep(.katex) { font-size: 1.05em; }
 .desc :deep(.katex-display) { margin: 12px 0; text-align: center; }
-.desc :deep(.katex-html) { display: none; }
 /* handle overflow for wide formulas */
 .desc :deep(.katex-display > .katex) { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 
