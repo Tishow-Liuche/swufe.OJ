@@ -6,6 +6,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateProblemDto {
   @IsString()
@@ -156,10 +157,12 @@ export class QueryProblemDto {
   tag?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   page?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   pageSize?: number;
 }
