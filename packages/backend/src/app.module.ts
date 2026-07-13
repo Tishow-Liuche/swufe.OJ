@@ -6,6 +6,7 @@ import { ProblemModule } from './problem/problem.module';
 import { SubmissionModule } from './submission/submission.module';
 import { UserModule } from './user/user.module';
 import { FileUploadModule } from './common/file-upload.module';
+import { PublicModule } from './public/public.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { FileUploadModule } from './common/file-upload.module';
     ProblemModule,
     SubmissionModule,
     UserModule,
+    PublicModule,
   ],
 })
 export class AppModule {}
