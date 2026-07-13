@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OJ Remote Submit Helper",
-  "version": "0.7.0",
-  "description": "CF 自动提交",
+  "version": "0.8.0",
+  "description": "CF 远程提交",
   "permissions": ["storage"],
   "host_permissions": [
     "https://codeforces.com/*",
