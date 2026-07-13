@@ -122,7 +122,6 @@ export class HelperService {
       where: {
         userId,
         status: 'PENDING',
-        expiresAt: { gt: new Date() },
       },
       orderBy: { createdAt: 'asc' },
     });

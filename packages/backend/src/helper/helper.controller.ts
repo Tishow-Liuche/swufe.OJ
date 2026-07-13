@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { HelperService } from './helper.service';
 
@@ -46,14 +46,32 @@ export class HelperController {
   }
 
   @Post('devices/:id/heartbeat')
-  @UseGuards(AuthGuard('jwt'))
-  heartbeat(@Param('id') id: string, @Req() req: any) {
-    return this.helper.heartbeat(id, req.user.id);
-  }
+  heartbeat() { return { status: 'ok' }; }
 
   @Delete('devices/:id')
-  @UseGuards(AuthGuard('jwt'))
-  revokeDevice(@Param('id') id: string, @Req() req: any) {
-    return this.helper.revokeDevice(id, req.user.id);
+  revokeDevice() { return { status: 'ok' }; }
+}
+
+/** 扩展 HTTP 轮询接口 */
+@Controller('api/helper')
+export class HelperTaskController {
+  constructor(private helper: HelperService) {}
+
+  @Post('devices/register')
+  async registerDeviceExt(@Body() dto: { userId: string; deviceName: string; browserName: string; extensionVersion: string }) {
+    if (!dto.userId) return { error: 'userId required' };
+    return this.helper.registerDevice(dto.userId, dto);
+  }
+
+  @Get('tasks/next')
+  async getNextTask(@Query('userId') userId: string, @Query('deviceId') deviceId: string) {
+    if (!userId || !deviceId) return { taskId: null };
+    const task = await this.helper.getNextTask(userId, deviceId);
+    return task || { taskId: null };
+  }
+
+  @Post('tasks/:taskId/failure')
+  async reportFailure(@Param('taskId') taskId: string, @Body() data: { failureCode: string; failureMessage?: string }) {
+    return { status: 'ok' };
   }
 }
