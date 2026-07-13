@@ -8,6 +8,7 @@ export class SubmissionService {
   constructor(
     private prisma: PrismaService,
     @InjectQueue('judge') private judgeQueue: Queue,
+    @InjectQueue('remote-judge') private remoteQueue: Queue,
   ) {}
 
   async submit(userId: string, dto: { problemId: string; language: string; sourceCode: string }) {
@@ -25,7 +26,7 @@ export class SubmissionService {
     });
 
     if (problem.source === 'LOCAL') {
-      // ===== 原创题：本地评测 =====
+      // ===== 原创题 → 本地 g++/python3 评测 =====
       const tc = await this.prisma.problemTestCase.count({ where: { problemVersionId: cv.id } });
       if (tc === 0) throw new NotFoundException('该题目尚未配置测试数据');
 
@@ -38,89 +39,28 @@ export class SubmissionService {
       await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
       return { id: submission.id, status: 'QUEUING', mode: 'LOCAL' };
     } else {
-      // ===== 第三方题：需在第三方平台提交后回填结果 =====
-      const pid = problem.sourceInfo?.remoteProblemId || '';
-      const platform = problem.sourceInfo?.platform || 'LUOGU';
+      // ===== 第三方题 → 洛谷 OpenApp 远程评测 =====
+      const remotePid = problem.sourceInfo?.remoteProblemId;
+      if (!remotePid) throw new NotFoundException('该题目未关联第三方编号');
 
-      // 构造洛谷提交链接
-      let submitUrl = '';
-      if (platform === 'LUOGU') submitUrl = `https://www.luogu.com.cn/problem/${pid}`;
-      else if (platform === 'CODEFORCES') submitUrl = `https://codeforces.com/problemset/submit`;
-      else if (platform === 'NOWCODER') submitUrl = `https://ac.nowcoder.com/acm/problem/${pid}`;
+      await this.remoteQueue.add('remote-judge', {
+        submissionId: submission.id,
+        problemId: dto.problemId,
+        remoteProblemId: remotePid,
+        language: dto.language,
+        sourceCode: dto.sourceCode,
+        platform: problem.sourceInfo?.platform || 'LUOGU',
+      }, { priority: 1 });
 
-      await this.prisma.submission.update({
-        where: { id: submission.id },
-        data: { status: 'PENDING' },
-      });
-
-      return {
-        id: submission.id,
-        status: 'PENDING',
-        mode: 'EXTERNAL',
-        submitUrl,
-        remoteProblemId: pid,
-        platform,
-        instruction: `请在 ${platform} 上提交代码后，点击"回填结果"按钮输入评测结果`,
-      };
+      await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
+      return { id: submission.id, status: 'QUEUING', mode: 'LUOGU_REMOTE' };
     }
-  }
-
-  /** 回填第三方评测结果 */
-  async fillExternalResult(submissionId: string, userId: string, data: {
-    status: string; score?: number; timeUsed?: number; memoryUsed?: number;
-    remoteSubmissionId?: string;
-  }) {
-    const sub = await this.prisma.submission.findUnique({ where: { id: submissionId } });
-    if (!sub || sub.userId !== userId) throw new NotFoundException('提交不存在');
-
-    // 创建一条 SubmissionCase 记录
-    await this.prisma.submissionCase.create({
-      data: {
-        submissionId,
-        caseIndex: 1,
-        status: data.status,
-        timeUsed: data.timeUsed || 0,
-        memoryUsed: data.memoryUsed || 0,
-      },
-    });
-
-    // 更新 RemoteJudgeJob
-    if (data.remoteSubmissionId) {
-      await this.prisma.remoteJudgeJob.upsert({
-        where: { submissionId },
-        create: {
-          submissionId, platform: 'LUOGU',
-          remoteProblemId: sub.problemId,
-          remoteSubmissionId: data.remoteSubmissionId,
-        },
-        update: {
-          remoteSubmissionId: data.remoteSubmissionId,
-          finishedAt: new Date(),
-        },
-      });
-    }
-
-    return this.prisma.submission.update({
-      where: { id: submissionId },
-      data: {
-        status: data.status,
-        score: data.score || 0,
-        timeUsed: data.timeUsed,
-        memoryUsed: data.memoryUsed,
-        judgedAt: new Date(),
-      },
-    });
   }
 
   async findOne(id: string) {
     const s = await this.prisma.submission.findUnique({
       where: { id },
-      include: {
-        cases: { orderBy: { caseIndex: 'asc' } },
-        problem: { select: { id: true, title: true, timeLimit: true, memoryLimit: true, source: true } },
-        user: { select: { id: true, username: true } },
-        remoteJob: true,
-      },
+      include: { cases: { orderBy: { caseIndex: 'asc' } }, problem: { select: { id: true, title: true, timeLimit: true, memoryLimit: true, source: true } }, user: { select: { id: true, username: true } }, remoteJob: true },
     });
     if (!s) throw new NotFoundException('提交不存在');
     return s;
@@ -137,6 +77,17 @@ export class SubmissionService {
       this.prisma.submission.count({ where }),
     ]);
     return { items, total, page, pageSize };
+  }
+
+  /** 手动回填第三方评测结果（备用） */
+  async fillExternalResult(submissionId: string, userId: string, data: { status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string }) {
+    const sub = await this.prisma.submission.findUnique({ where: { id: submissionId } });
+    if (!sub || sub.userId !== userId) throw new NotFoundException('提交不存在');
+    await this.prisma.submissionCase.create({ data: { submissionId, caseIndex: 1, status: data.status, timeUsed: data.timeUsed || 0, memoryUsed: data.memoryUsed || 0 } });
+    if (data.remoteSubmissionId) {
+      await this.prisma.remoteJudgeJob.upsert({ where: { submissionId }, create: { submissionId, platform: 'LUOGU', remoteProblemId: sub.problemId, remoteSubmissionId: data.remoteSubmissionId }, update: { remoteSubmissionId: data.remoteSubmissionId, finishedAt: new Date() } });
+    }
+    return this.prisma.submission.update({ where: { id: submissionId }, data: { status: data.status, score: data.score || 0, timeUsed: data.timeUsed, memoryUsed: data.memoryUsed, judgedAt: new Date() } });
   }
 
   async rejudge(id: string) {

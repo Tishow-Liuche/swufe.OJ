@@ -22,8 +22,6 @@ const submitting = ref(false);
 const errorMsg = ref('');
 const showAllCases = ref(false);
 const isExternal = ref(false);
-const submitUrl = ref('');
-const fillForm = ref({ status: 'ACCEPTED', score: 100, timeUsed: 0, memoryUsed: 0, remoteSubmissionId: '' });
 let cmView: EditorView | null = null;
 let pollTimer: any = null;
 const editorHost = ref<HTMLElement | null>(null);
@@ -127,30 +125,13 @@ async function submitCode() {
       language: language.value,
       sourceCode: code.value,
     });
-    if (data.mode === 'EXTERNAL') {
-      isExternal.value = true;
-      submitUrl.value = data.submitUrl || '';
-      result.value = { id: data.id, status: 'PENDING', mode: 'EXTERNAL', submitUrl: data.submitUrl, remoteProblemId: data.remoteProblemId };
-    } else {
-      result.value = { id: data.id, status: 'QUEUING', mode: 'LOCAL' };
-      startPolling(data.id);
-    }
+    result.value = { id: data.id, status: 'QUEUING', mode: data.mode || 'LOCAL' };
+    // 本地评测和远程评测都自动轮询
+    startPolling(data.id);
   } catch (e: any) {
     errorMsg.value = e.response?.data?.message || '提交失败';
   } finally {
     submitting.value = false;
-  }
-}
-
-async function fillExternalResult() {
-  if (!result.value) return;
-  try {
-    await api.post(`/api/submissions/${result.value.id}/fill-result`, fillForm.value);
-    result.value = { ...result.value, status: fillForm.value.status, score: fillForm.value.score,
-      timeUsed: fillForm.value.timeUsed, memoryUsed: fillForm.value.memoryUsed };
-    isExternal.value = false;
-  } catch (e: any) {
-    errorMsg.value = e.response?.data?.message || '回填失败';
   }
 }
 
@@ -254,35 +235,7 @@ function renderMd(text: string): string {
             <div ref="editorHost" class="cm-editor-host"></div>
           </div>
 
-          <!-- External submission card -->
-          <div v-if="isExternal && result" class="card external-card">
-            <h3>🔗 第三方平台提交</h3>
-            <p>该题目需要在 <strong>{{ problem.source === 'EXTERNAL' ? '洛谷' : problem.source }}</strong> 上提交评测。</p>
-            <a :href="result.submitUrl" target="_blank" class="luogu-link">📋 在洛谷上打开 P{{ result.remoteProblemId }}</a>
-            <p class="tip">将右侧代码复制到洛谷提交页面，<br>提交成功后回到这里填写结果。</p>
-
-            <div class="fill-form">
-              <h4>回填评测结果</h4>
-              <div class="fill-row">
-                <select v-model="fillForm.status">
-                  <option value="ACCEPTED">ACCEPTED</option>
-                  <option value="WRONG_ANSWER">WRONG_ANSWER</option>
-                  <option value="TIME_LIMIT_EXCEEDED">TLE</option>
-                  <option value="RUNTIME_ERROR">RUNTIME_ERROR</option>
-                  <option value="COMPILE_ERROR">COMPILE_ERROR</option>
-                  <option value="MEMORY_LIMIT_EXCEEDED">MLE</option>
-                </select>
-                <input v-model.number="fillForm.score" type="number" placeholder="分数 (0-100)" min="0" max="100" />
-                <input v-model.number="fillForm.timeUsed" type="number" placeholder="用时(ms)" />
-                <input v-model.number="fillForm.memoryUsed" type="number" placeholder="内存(KB)" />
-                <input v-model="fillForm.remoteSubmissionId" placeholder="洛谷提交ID (可选)" />
-                <button @click="fillExternalResult" class="btn-fill">确认结果</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Local result card -->
-          <div v-if="!isExternal && result" class="card result-card">
+          <div v-if="result" class="card result-card">
             <div class="result-header">
               <span class="result-badge" :style="{ background: statusColors[result.status] || '#999' }">
                 {{ statusLabels[result.status] || result.status }}
