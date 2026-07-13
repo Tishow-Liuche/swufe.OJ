@@ -1,109 +1,102 @@
 const S = 'http://127.0.0.1:3000';
 const U = 'cmrj7k0hm00006eqfpcjxuwgn';
+let busy = false;
 
-// Handle messages from content script
-chrome.runtime.onMessage.addListener(async (msg) => {
-  if (msg.action === 'cf-submit' && msg.task) {
-    await handleCF(msg.task);
-  }
-});
+chrome.alarms.create('poll', { periodInMinutes: 0.25 });
+chrome.alarms.onAlarm.addListener(() => { if (!busy) doPoll(); });
+doPoll();
 
-async function handleCF(t) {
-  const m = t.remoteProblemId.match(/^(\d+)([A-Z]\d?)$/);
-  if (!m) return;
-  const cid = parseInt(m[1]), pidx = m[2];
-
+async function doPoll() {
   try {
+    const r = await fetch(`${S}/api/helper/tasks/next?userId=${U}&deviceId=bg`);
+    if (!r.ok) return;
+    const t = await r.json();
+    if (!t || !t.taskId || t.platform !== 'CODEFORCES') return;
+    busy = true;
+    console.log('[BG] Task:', t.remoteProblemId);
+
+    const m = t.remoteProblemId.match(/^(\d+)([A-Z]\d?)$/);
+    if (!m) { busy = false; return; }
+    const cid = parseInt(m[1]), pidx = m[2];
+
     const tab = await chrome.tabs.create({
       url: `https://codeforces.com/problemset/submit/${cid}/${pidx}`,
       active: false
     });
     await sleep(5000);
-    const [r] = await chrome.scripting.executeScript({
+
+    const [r1] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: submitCF,
+      func: injectSubmit,
       args: [{ cid, pidx, lang: t.language, code: t.sourceCode }]
     });
 
-    if (r?.result?.sid) {
-      post(t.submissionId, 'JUDGING', 0, r.result.sid, '已提交');
-      await sleep(4000);
-      for (let i = 0; i < 20; i++) {
+    const result = r1?.result;
+    if (result?.sid) {
+      console.log('[BG] SID:', result.sid);
+      await post(t.submissionId, 'JUDGING', 0, result.sid);
+
+      for (let i = 0; i < 25; i++) {
         await sleep(3000);
-        const [r2] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: checkVerdict,
-          args: [r.result.sid]
-        });
-        if (r2?.result) {
-          post(t.submissionId, r2.result.status, r2.result.score, r.result.sid, null, r2.result.time, r2.result.mem);
-          break;
-        }
+        try {
+          const ar = await fetch(`https://codeforces.com/api/user.status?handle=Tishow__Liuche&from=1&count=10`);
+          const ad = await ar.json();
+          if (ad.status !== 'OK') continue;
+          const sub = ad.result.find(s => s.id === result.sid);
+          if (sub && sub.verdict && sub.verdict !== 'TESTING') {
+            const vm = { OK: 'ACCEPTED', WRONG_ANSWER: 'WRONG_ANSWER', TIME_LIMIT_EXCEEDED: 'TIME_LIMIT_EXCEEDED', MEMORY_LIMIT_EXCEEDED: 'MEMORY_LIMIT_EXCEEDED', RUNTIME_ERROR: 'RUNTIME_ERROR', COMPILATION_ERROR: 'COMPILE_ERROR' };
+            const sv = vm[sub.verdict] || sub.verdict;
+            await post(t.submissionId, sv, sv === 'ACCEPTED' ? 100 : 0, result.sid, null, sub.timeConsumedMillis || 0, (sub.memoryConsumedBytes / 1024) | 0);
+            console.log('[BG] Done:', sv);
+            break;
+          }
+        } catch (e) {}
       }
     } else {
-      post(t.submissionId, 'REMOTE_ERROR', 0, null, (r?.result?.error || '提交失败'));
+      await post(t.submissionId, 'REMOTE_ERROR', 0, null, result?.error || '提交失败');
     }
     try { chrome.tabs.remove(tab.id); } catch (e) {}
-  } catch (e) {
-    post(t.submissionId, 'REMOTE_ERROR', 0, null, e.message);
-  }
+    busy = false;
+  } catch (e) { console.error('[BG]', e.message); busy = false; }
 }
 
-async function post(sid, status, score, cfid, msg, time, mem) {
+async function post(sid, s, sc, cfid, msg, t, m) {
   await fetch(`${S}/api/submissions/${sid}/fill-result`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status, score: score || 0, remoteSubmissionId: cfid ? String(cfid) : 'N/A', userId: U, compileMessage: msg || null, timeUsed: time || 0, memoryUsed: mem || 0 })
+    body: JSON.stringify({ status: s, score: sc || 0, remoteSubmissionId: cfid ? String(cfid) : 'N/A', userId: U, compileMessage: msg || null, timeUsed: t || 0, memoryUsed: m || 0 })
   }).catch(() => {});
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function submitCF(args) {
+function injectSubmit(args) {
+  const L = { cpp: '73', c: '61', python: '70', java: '60' };
+  const pt = L[args.lang] || '73';
   return new Promise(resolve => {
-    const L = { cpp: '73', c: '61', python: '70', java: '60' };
-    const pt = L[args.lang] || '73';
-    function trySubmit(n) {
+    function attempt(n) {
       const sel = document.querySelector('select[name="programTypeId"]');
       const area = document.querySelector('textarea[name="source"]');
       const btn = document.querySelector('input.submit[type="submit"]');
       if (!sel || !area || !btn) {
-        if (n < 15) return setTimeout(() => trySubmit(n + 1), 1000);
-        return resolve({ error: 'CF 页面加载超时，请确认已登录 codeforces.com' });
+        if (n < 18) return setTimeout(() => attempt(n + 1), 800);
+        return resolve({ error: 'CF 页面加载超时，请确认已登录' });
       }
       sel.value = pt; sel.dispatchEvent(new Event('change', { bubbles: true }));
       area.value = args.code; area.dispatchEvent(new Event('input', { bubbles: true }));
+      area.dispatchEvent(new Event('change', { bubbles: true }));
       setTimeout(() => {
         btn.click();
         let c = 0;
         const iv = setInterval(() => {
           c++;
           const el = document.querySelector('tr[data-submission-id]');
-          if (el) { clearInterval(iv); return resolve({ sid: +el.getAttribute('data-submission-id') }); }
+          if (el) { clearInterval(iv); resolve({ sid: +el.getAttribute('data-submission-id') }); return; }
           const m2 = location.href.match(/\/status\/(\d+)/);
-          if (m2) { clearInterval(iv); return resolve({ sid: +m2[1] }); }
-          if (c > 25) { clearInterval(iv); resolve({ error: '无法获取 Submission ID' }); }
-        }, 1200);
+          if (m2) { clearInterval(iv); resolve({ sid: +m2[1] }); return; }
+          if (c > 30) { clearInterval(iv); resolve({ error: '无法获取 Submission ID' }); }
+        }, 1000);
       }, 2000);
     }
-    trySubmit(1);
-  });
-}
-
-function checkVerdict(sid) {
-  return new Promise(resolve => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', '/api/user.status?from=1&count=10');
-    xhr.onload = () => {
-      try {
-        const d = JSON.parse(xhr.responseText);
-        const s = (d.result || []).find(x => x.id === sid);
-        if (s && s.verdict && s.verdict !== 'TESTING') {
-          const m = { OK: 'ACCEPTED', WRONG_ANSWER: 'WRONG_ANSWER', TIME_LIMIT_EXCEEDED: 'TLE', MEMORY_LIMIT_EXCEEDED: 'MLE', RUNTIME_ERROR: 'RE', COMPILATION_ERROR: 'CE' };
-          resolve({ status: m[s.verdict] || s.verdict, score: s.verdict === 'OK' ? 100 : 0, time: s.timeConsumedMillis || 0, mem: s.memoryConsumedBytes ? Math.round(s.memoryConsumedBytes / 1024) : 0 });
-        } else resolve(null);
-      } catch { resolve(null); }
-    };
-    xhr.onerror = () => resolve(null);
-    xhr.send();
+    attempt(1);
   });
 }
