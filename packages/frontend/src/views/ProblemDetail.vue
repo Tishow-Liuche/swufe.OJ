@@ -9,6 +9,9 @@ import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
 import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { marked } from 'marked';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 
 const route = useRoute();
 const problem = ref<any>(null);
@@ -150,14 +153,34 @@ function startPolling(id: string) {
 
 function renderMd(text: string): string {
   if (!text) return '';
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-    .replace(/\n/g, '<br>');
+  try {
+    // Step 1: 将 Markdown 转 HTML
+    let html = marked.parse(text, { async: false }) as string;
+
+    // Step 2: 渲染 LaTeX 公式
+    // 处理行内公式 $...$
+    html = html.replace(/\$([^$]+?)\$/g, (_, formula) => {
+      try {
+        return katex.renderToString(formula, { throwOnError: false, displayMode: false });
+      } catch { return `<em>${formula}</em>`; }
+    });
+    // 处理块公式 $$...$$
+    html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, formula) => {
+      try {
+        return katex.renderToString(formula, { throwOnError: false, displayMode: true });
+      } catch { return `<div style="text-align:center"><em>${formula}</em></div>`; }
+    });
+    // 处理洛谷特殊语法: $a_1$  /  中的 /
+    html = html.replace(/^\/$/gm, '<hr>');
+
+    return html;
+  } catch {
+    // fallback: 简单转义
+    return text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/\n/g, '<br>');
+  }
 }
 </script>
 
@@ -238,13 +261,27 @@ function renderMd(text: string): string {
 .meta-item { font-size: 13px; color: #666; background: #f0f0f0; padding: 3px 10px; border-radius: 4px; }
 .content-split { display: grid; grid-template-columns: 1fr 480px; gap: 20px; align-items: start; }
 .card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
-.desc { line-height: 1.8; color: #333; font-size: 15px; }
+.desc { line-height: 1.8; color: #333; font-size: 15px; overflow-x: auto; }
 .desc :deep(h2) { font-size: 20px; margin: 0 0 12px; }
 .desc :deep(h3) { font-size: 17px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 6px; margin: 20px 0 10px; }
 .desc :deep(h4) { font-size: 15px; margin: 16px 0 6px; }
+.desc :deep(p) { margin: 8px 0; }
 .desc :deep(code) { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
-.desc :deep(pre) { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+.desc :deep(pre) { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; margin: 12px 0; }
 .desc :deep(pre code) { background: none; padding: 0; color: inherit; }
+.desc :deep(ul), .desc :deep(ol) { padding-left: 24px; margin: 8px 0; }
+.desc :deep(li) { margin: 2px 0; }
+.desc :deep(table) { border-collapse: collapse; margin: 12px 0; width: auto; }
+.desc :deep(th), .desc :deep(td) { border: 1px solid #ddd; padding: 6px 12px; text-align: left; }
+.desc :deep(th) { background: #f8f9fa; font-weight: 600; }
+.desc :deep(blockquote) { border-left: 3px solid #4fc3f7; padding: 8px 16px; margin: 12px 0; background: #f5f5f5; border-radius: 0 4px 4px 0; color: #555; }
+.desc :deep(hr) { border: none; border-top: 1px solid #eee; margin: 16px 0; }
+/* KaTeX overlay fix */
+.desc :deep(.katex) { font-size: 1.05em; }
+.desc :deep(.katex-display) { margin: 12px 0; text-align: center; }
+.desc :deep(.katex-html) { display: none; }
+/* handle overflow for wide formulas */
+.desc :deep(.katex-display > .katex) { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 
 .editor-card { padding: 0; overflow: hidden; }
 .editor-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #282c34; border-bottom: 1px solid #333; }
