@@ -5,11 +5,10 @@ import { SubmissionService } from './submission.service';
 import { SubmissionController } from './submission.controller';
 import { JudgeProcessor } from './judge.processor';
 import { JudgeModule } from '../judge/judge.module';
-import { HelperModule } from '../helper/helper.module';
 
 @Module({
   imports: [
-    JudgeModule, HelperModule,
+    JudgeModule,
     BullModule.registerQueueAsync({
       name: 'judge', imports: [ConfigModule], inject: [ConfigService],
       useFactory: (c: ConfigService) => ({
