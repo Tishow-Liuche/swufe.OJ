@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Menu, X } from '@lucide/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
@@ -9,6 +9,7 @@ const route = useRoute();
 const auth = useAuthStore();
 const mobileMenuOpen = ref(false);
 const mobileMenuToggle = ref<HTMLButtonElement | null>(null);
+const isHomeRoute = computed(() => route.path === '/');
 
 watch(() => route.fullPath, closeMobileMenu);
 
@@ -39,7 +40,7 @@ async function logout() {
 
 <template>
   <div class="app-shell">
-    <header class="app-header">
+    <header class="app-header" :class="{ 'home-header': isHomeRoute }">
       <div class="header-left">
         <router-link to="/" class="logo">西财 OJ</router-link>
         <nav class="desktop-nav" aria-label="主导航">
@@ -135,6 +136,41 @@ body {
   background: #171a1f;
   box-shadow: 0 1px 8px rgba(14, 18, 24, 0.22);
   color: #eee;
+}
+
+.app-header.home-header {
+  border-bottom: 1px solid rgba(117, 151, 207, 0.16);
+  background: rgba(253, 254, 255, 0.92);
+  box-shadow: 0 1px 10px rgba(79, 112, 164, 0.08);
+  color: #1c2a43;
+  backdrop-filter: blur(14px);
+}
+
+.home-header .logo { color: #276be8; }
+
+.home-header nav a,
+.home-header .header-right a {
+  color: #53627a;
+}
+
+.home-header nav a:hover,
+.home-header .header-right a:hover {
+  background: #edf4ff;
+  color: #225fd0;
+}
+
+.home-header nav a.router-link-exact-active,
+.home-header .header-right a.router-link-exact-active {
+  background: #e9f1ff;
+  color: #2164dc;
+}
+
+.home-header .mobile-menu-toggle { color: #2f466a; }
+
+.home-header .mobile-menu-toggle:hover,
+.home-header .mobile-menu-toggle:focus-visible {
+  background: #edf4ff;
+  outline-color: #3e7ee6;
 }
 
 .header-left,
@@ -289,6 +325,27 @@ nav a.router-link-exact-active,
     border-color: rgba(105, 198, 255, 0.35);
     background: rgba(105, 198, 255, 0.12);
     color: #69c6ff;
+  }
+
+  .app-shell:has(.home-header) .mobile-navigation {
+    border-top-color: #dce8fb;
+    background: rgba(253, 254, 255, 0.98);
+    box-shadow: 0 8px 20px rgba(67, 102, 158, 0.16);
+  }
+
+  .app-shell:has(.home-header) .mobile-navigation a,
+  .app-shell:has(.home-header) .mobile-navigation button {
+    border-color: #dae5f6;
+    background: #f5f9ff;
+    color: #455a7b;
+  }
+
+  .app-shell:has(.home-header) .mobile-navigation a.router-link-active,
+  .app-shell:has(.home-header) .mobile-navigation a:hover,
+  .app-shell:has(.home-header) .mobile-navigation button:hover {
+    border-color: #a9c7f5;
+    background: #e8f2ff;
+    color: #2164dc;
   }
 }
 
