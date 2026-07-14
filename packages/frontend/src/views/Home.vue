@@ -7,6 +7,15 @@ const router = useRouter();
 const auth = useAuthStore();
 const stats = ref({ problemCount: 0, submissionCount: 0, userCount: 0 });
 
+function openProblemLibrary() {
+  if (auth.isLoggedIn()) {
+    void router.push('/problems');
+    return;
+  }
+
+  void router.push({ path: '/login', query: { redirect: '/problems' } });
+}
+
 onMounted(async () => {
   try {
     const res = await fetch('/api/stats');
@@ -23,7 +32,7 @@ onMounted(async () => {
         <p class="hero-subtitle">面向程序设计与算法竞赛的在线评测训练平台</p>
         <p class="hero-desc">多源题库 · 实时评测 · 教学管理 · 能力分析 · 竞赛训练</p>
         <div class="hero-actions">
-          <button class="btn-primary" @click="router.push('/problems')">进入题库</button>
+          <button class="btn-primary" @click="openProblemLibrary">进入题库</button>
           <button v-if="!auth.isLoggedIn()" class="btn-outline" @click="router.push('/login')">登录 / 注册</button>
           <button v-else class="btn-outline" @click="router.push('/profile')">个人中心</button>
         </div>
@@ -48,7 +57,7 @@ onMounted(async () => {
     <section class="features">
       <h2>平台功能</h2>
       <div class="feature-grid">
-        <div class="feature-card" @click="router.push('/problems')">
+        <div class="feature-card" @click="openProblemLibrary">
           <div class="card-icon icon-bank">📚</div>
           <h3>题库</h3>
           <p>本地原创 + 第三方 OJ 题目统一管理，支持搜索、筛选、标签</p>

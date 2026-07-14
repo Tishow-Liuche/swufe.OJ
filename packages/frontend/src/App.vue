@@ -19,6 +19,11 @@ function closeMobileMenu() {
   mobileMenuOpen.value = false;
 }
 
+function protectedNavigation(path: string) {
+  if (auth.isLoggedIn()) return path;
+  return { path: '/login', query: { redirect: path } };
+}
+
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || !mobileMenuOpen.value) return;
   closeMobileMenu();
@@ -38,10 +43,10 @@ async function logout() {
       <div class="header-left">
         <router-link to="/" class="logo">西财 OJ</router-link>
         <nav class="desktop-nav" aria-label="主导航">
-          <router-link to="/problems">题库</router-link>
-          <router-link to="/leaderboard">排行榜</router-link>
-          <router-link to="/contests">比赛</router-link>
-          <router-link to="/problem-lists">题单</router-link>
+          <router-link :to="protectedNavigation('/problems')">题库</router-link>
+          <router-link :to="protectedNavigation('/leaderboard')">排行榜</router-link>
+          <router-link :to="protectedNavigation('/contests')">比赛</router-link>
+          <router-link :to="protectedNavigation('/problem-lists')">题单</router-link>
           <router-link v-if="auth.isTeacher()" to="/teacher/classes">班级</router-link>
         </nav>
       </div>
@@ -72,10 +77,10 @@ async function logout() {
 
     <Transition name="mobile-nav">
       <nav v-if="mobileMenuOpen" id="mobile-navigation" class="mobile-navigation" aria-label="移动端导航">
-        <router-link to="/problems" @click="closeMobileMenu">题库</router-link>
-        <router-link to="/leaderboard" @click="closeMobileMenu">排行榜</router-link>
-        <router-link to="/contests" @click="closeMobileMenu">比赛</router-link>
-        <router-link to="/problem-lists" @click="closeMobileMenu">题单</router-link>
+        <router-link :to="protectedNavigation('/problems')" @click="closeMobileMenu">题库</router-link>
+        <router-link :to="protectedNavigation('/leaderboard')" @click="closeMobileMenu">排行榜</router-link>
+        <router-link :to="protectedNavigation('/contests')" @click="closeMobileMenu">比赛</router-link>
+        <router-link :to="protectedNavigation('/problem-lists')" @click="closeMobileMenu">题单</router-link>
         <router-link v-if="auth.isTeacher()" to="/teacher/classes" @click="closeMobileMenu">班级</router-link>
         <template v-if="auth.isLoggedIn()">
           <router-link v-if="auth.isAdmin()" to="/admin/create-problem" class="admin-link" @click="closeMobileMenu">录题</router-link>

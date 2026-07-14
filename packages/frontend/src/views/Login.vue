@@ -17,7 +17,7 @@ import {
 } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
 import { useAuthStore } from '../stores/auth';
@@ -26,6 +26,7 @@ type AuthMode = 'login' | 'register';
 type RequestedRole = 'STUDENT' | 'TEACHER';
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const mode = ref<AuthMode>('login');
 const submitting = ref(false);
@@ -101,6 +102,14 @@ function errorMessage(reason: any) {
   return message || (mode.value === 'register' ? '注册失败，请稍后重试' : '登录失败，请稍后重试');
 }
 
+function postAuthPath() {
+  const redirect = route.query.redirect;
+  if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')) {
+    return redirect;
+  }
+  return '/problems';
+}
+
 async function submit() {
   error.value = '';
 
@@ -132,7 +141,7 @@ async function submit() {
     const { data } = await api.post(`/api/auth/${mode.value}`, payload);
     const remember = mode.value === 'register' ? true : loginForm.value.remember;
     await auth.setAuth(data.accessToken, data.refreshToken, remember);
-    await router.push('/problems');
+    await router.push(postAuthPath());
   } catch (reason: any) {
     error.value = errorMessage(reason);
   } finally {
@@ -180,7 +189,7 @@ async function submit() {
             <GraduationCap v-else :size="22" />
           </span>
           <div>
-            <h1 id="auth-heading">{{ mode === 'login' ? '登录训练账号' : '创建校园账号' }}</h1>
+            <h1 id="auth-heading">{{ mode === 'login' ? '登录账号' : '创建校园账号' }}</h1>
           </div>
         </header>
 

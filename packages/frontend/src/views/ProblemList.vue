@@ -28,6 +28,7 @@ import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import api from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
+import { useAuthStore } from '../stores/auth';
 
 interface ProblemTag {
   name: string;
@@ -72,6 +73,7 @@ const sourceOptions = [
 
 const router = useRouter();
 const route = useRoute();
+const auth = useAuthStore();
 const sidebarCollapsed = useStorage('swufe-oj:problem-sidebar-collapsed', false);
 
 function queryValue(key: string) {
@@ -348,6 +350,10 @@ function sourceLabel(value: string) {
 function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('zh-CN').format(value || 0);
 }
+
+function requireLogin(redirect: string) {
+  void router.push({ path: '/login', query: { redirect } });
+}
 </script>
 
 <template>
@@ -391,6 +397,7 @@ function formatNumber(value: number | undefined) {
           <span class="sidebar-section-label">个人题库</span>
 
           <router-link
+            v-if="auth.isLoggedIn()"
             to="/problem-lists"
             class="sidebar-link"
             aria-label="我的题单"
@@ -402,6 +409,33 @@ function formatNumber(value: number | undefined) {
           </router-link>
 
           <button
+            v-else
+            type="button"
+            class="sidebar-link"
+            aria-label="登录后查看我的题单"
+            :title="sidebarCollapsed ? '登录后查看我的题单' : undefined"
+            @click="requireLogin('/problem-lists')"
+          >
+            <BookOpen :size="18" aria-hidden="true" />
+            <span class="sidebar-link-label">我的题单</span>
+            <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
+          </button>
+
+          <button
+            v-if="!auth.isLoggedIn()"
+            type="button"
+            class="sidebar-link"
+            aria-label="登录后查看我的收藏"
+            :title="sidebarCollapsed ? '登录后查看我的收藏' : undefined"
+            @click="requireLogin('/profile')"
+          >
+            <Star :size="18" aria-hidden="true" />
+            <span class="sidebar-link-label">我的收藏</span>
+            <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
+          </button>
+
+          <button
+            v-else
             type="button"
             class="sidebar-link sidebar-link-disabled"
             disabled
