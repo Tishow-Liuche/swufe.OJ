@@ -107,9 +107,14 @@ function tooltip(day: HeatDay) { return day && day.count > 0 ? day.date + '  |  
         <div class="user-info">
           <h2>{{ profile.nickname || profile.username }}</h2>
           <p class="username">@{{ profile.username }}</p>
-          <span class="role-badge" :class="profile.role?.toLowerCase()">
-            {{ profile.role === 'ADMIN' ? '管理员' : profile.role === 'TEACHER' ? '教师' : '学生' }}
-          </span>
+          <div class="identity-row">
+            <span class="role-badge" :class="profile.role?.toLowerCase()">
+              {{ profile.role === 'ADMIN' ? '管理员' : profile.role === 'TEACHER' ? '教师' : '学生' }}
+            </span>
+            <span v-if="profile.school" class="school-name">{{ profile.school }}</span>
+            <span v-if="profile.teacherApplicationStatus === 'PENDING'" class="application-badge">教师申请待审核</span>
+            <span v-else-if="profile.teacherApplicationStatus === 'REJECTED'" class="application-badge rejected">教师申请未通过</span>
+          </div>
           <p class="join-date">加入于 {{ new Date(profile.createdAt).toLocaleDateString('zh-CN') }}</p>
         </div>
       </div>
@@ -279,6 +284,10 @@ function tooltip(day: HeatDay) { return day && day.count > 0 ? day.date + '  |  
 .role-badge.admin { background: #fce4ec; color: #c62828; }
 .role-badge.teacher { background: #e3f2fd; color: #1565c0; }
 .role-badge.student { background: #e8f5e9; color: #2e7d32; }
+.identity-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.school-name { color: #66717e; font-size: 12px; }
+.application-badge { padding: 2px 8px; border-radius: 3px; background: #fff3df; color: #9b5d08; font-size: 11px; font-weight: 600; }
+.application-badge.rejected { background: #fdebea; color: #a5352d; }
 .join-date { color: #aaa; font-size: 13px; margin-top: 6px; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }

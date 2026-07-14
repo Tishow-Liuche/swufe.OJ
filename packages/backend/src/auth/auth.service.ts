@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   UnauthorizedException,
   ConflictException,
@@ -21,37 +22,67 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const existing = await this.prisma.user.findFirst({
       where: {
-        OR: [{ username: dto.username }, { email: dto.email }],
+        OR: [
+          { username: { equals: dto.username, mode: 'insensitive' } },
+          { email: { equals: dto.email, mode: 'insensitive' } },
+        ],
       },
+      select: { username: true, email: true },
     });
     if (existing) {
-      throw new ConflictException('用户名或邮箱已存在');
+      if (existing.username.toLowerCase() === dto.username.toLowerCase()) {
+        throw new ConflictException('该用户名已被使用');
+      }
+      throw new ConflictException('该邮箱已注册');
     }
 
     const password = await bcrypt.hash(dto.password, 10);
+    const teacherRequested = dto.requestedRole === 'TEACHER';
     const user = await this.prisma.user.create({
       data: {
         username: dto.username,
         email: dto.email,
         password,
         nickname: dto.nickname,
+        school: dto.school,
+        role: 'STUDENT',
+        requestedRole: dto.requestedRole,
+        teacherApplicationStatus: teacherRequested ? 'PENDING' : 'NOT_REQUIRED',
       },
     });
 
-    return this.generateTokens(user.id);
+    const tokens = await this.generateTokens(user.id);
+    return {
+      ...tokens,
+      registration: {
+        role: user.role,
+        requestedRole: user.requestedRole,
+        teacherApplicationStatus: user.teacherApplicationStatus,
+      },
+    };
   }
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { username: dto.username },
+    const account = (dto.account || dto.username || '').trim();
+    if (!account) {
+      throw new BadRequestException('请输入用户名或邮箱');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: account, mode: 'insensitive' } },
+          { email: { equals: account, mode: 'insensitive' } },
+        ],
+      },
     });
     if (!user) {
-      throw new UnauthorizedException('用户名或密码错误');
+      throw new UnauthorizedException('账号或密码错误');
     }
 
     const valid = await bcrypt.compare(dto.password, user.password);
     if (!valid) {
-      throw new UnauthorizedException('用户名或密码错误');
+      throw new UnauthorizedException('账号或密码错误');
     }
 
     return this.generateTokens(user.id);
@@ -90,6 +121,9 @@ export class AuthService {
         nickname: true,
         avatar: true,
         role: true,
+        school: true,
+        requestedRole: true,
+        teacherApplicationStatus: true,
         createdAt: true,
       },
     });

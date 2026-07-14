@@ -25,8 +25,8 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   void nextTick(() => mobileMenuToggle.value?.focus());
 }
 
-function logout() {
-  auth.clearAuth();
+async function logout() {
+  await auth.logout();
   closeMobileMenu();
   void router.push('/');
 }

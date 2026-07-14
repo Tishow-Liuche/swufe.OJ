@@ -42,6 +42,13 @@ export class UserController {
     return this.userService.setRole(id, role);
   }
 
+  @Patch('admin/:id/teacher-application')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  reviewTeacherApplication(@Param('id') id: string, @Body('status') status: string) {
+    return this.userService.reviewTeacherApplication(id, status);
+  }
+
   @Post('admin/:id/reset-password')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')

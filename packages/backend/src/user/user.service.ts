@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -10,7 +10,8 @@ export class UserService {
       where: { id: userId },
       select: {
         id: true, username: true, email: true, nickname: true,
-        avatar: true, role: true, createdAt: true,
+        avatar: true, role: true, school: true, requestedRole: true,
+        teacherApplicationStatus: true, createdAt: true,
       },
     });
   }
@@ -146,7 +147,8 @@ export class UserService {
     return this.prisma.user.findMany({
       select: {
         id: true, username: true, email: true, nickname: true,
-        role: true, createdAt: true,
+        role: true, school: true, requestedRole: true,
+        teacherApplicationStatus: true, createdAt: true,
         _count: { select: { submissions: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -155,17 +157,48 @@ export class UserService {
 
   async setRole(userId: string, role: string) {
     if (!['STUDENT', 'TEACHER', 'ADMIN'].includes(role)) {
-      throw new Error('无效的角色: ' + role);
+      throw new BadRequestException('无效的角色: ' + role);
+    }
+    const applicationData = role === 'TEACHER'
+      ? { requestedRole: 'TEACHER', teacherApplicationStatus: 'APPROVED' }
+      : { requestedRole: 'STUDENT', teacherApplicationStatus: 'NOT_REQUIRED' };
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { role, ...applicationData },
+      select: {
+        id: true, username: true, role: true, requestedRole: true,
+        teacherApplicationStatus: true,
+      },
+    });
+  }
+
+  async reviewTeacherApplication(userId: string, status: string) {
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      throw new BadRequestException('审核状态只能是 APPROVED 或 REJECTED');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { requestedRole: true },
+    });
+    if (!user) throw new NotFoundException('用户不存在');
+    if (user.requestedRole !== 'TEACHER') {
+      throw new BadRequestException('该用户没有提交教师身份申请');
     }
     return this.prisma.user.update({
       where: { id: userId },
-      data: { role },
-      select: { id: true, username: true, role: true },
+      data: {
+        role: status === 'APPROVED' ? 'TEACHER' : 'STUDENT',
+        teacherApplicationStatus: status,
+      },
+      select: {
+        id: true, username: true, role: true, requestedRole: true,
+        teacherApplicationStatus: true,
+      },
     });
   }
 
   async resetPassword(userId: string, password: string) {
-    if (!password || password.length < 6) throw new Error('密码至少 6 位');
+    if (!password || password.length < 8) throw new BadRequestException('密码至少 8 位');
     const bcrypt = require('bcryptjs');
     const hashed = await bcrypt.hash(password, 10);
     await this.prisma.user.update({ where: { id: userId }, data: { password: hashed } });
