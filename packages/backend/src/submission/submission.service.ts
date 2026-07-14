@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -26,6 +26,11 @@ export class SubmissionService {
 
     // Codeforces remote judge path — no local test data needed
     const platform = problem.sourceInfo?.platform;
+    if (platform === 'ATCODER') {
+      throw new BadRequestException(
+        'AtCoder 当前仅支持元数据与原题跳转，请在 AtCoder 原站完成提交',
+      );
+    }
     if (platform === 'CODEFORCES') {
       this.log.log(`CF route: problem=${dto.problemId} user=${userId}`);
       return this.cfSubmission.createTask(userId, dto.problemId, dto.language, dto.sourceCode);

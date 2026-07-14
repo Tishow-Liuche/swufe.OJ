@@ -117,20 +117,25 @@ model ExternalAccount {
 }
 
 model ExternalPlatform {
-  id                             String   @id @default(cuid())
-  code                           String   @unique
+  id                             String    @id @default(cuid())
+  code                           String    @unique
   name                           String
   baseUrl                        String
-  enabled                        Boolean  @default(true)
-  supportsMetadata               Boolean  @default(false)
-  supportsStatement              Boolean  @default(false)
-  supportsBrowserSubmission      Boolean  @default(false)
-  supportsOfficialSubmissionApi  Boolean  @default(false)
-  supportsOfficialResultApi      Boolean  @default(false)
-  allowLiveContestSubmission     Boolean  @default(false)
-  adapterVersion                 String   @default("0.0.0")
-  createdAt                      DateTime @default(now())
-  updatedAt                      DateTime @updatedAt
+  enabled                        Boolean   @default(true)
+  readOnly                       Boolean   @default(true)
+  allowAutoSubmit                Boolean   @default(false)
+  requireUserConfirmation        Boolean   @default(true)
+  supportsMetadata               Boolean   @default(false)
+  supportsStatement              Boolean   @default(false)
+  supportsBrowserSubmission      Boolean   @default(false)
+  supportsOfficialSubmissionApi  Boolean   @default(false)
+  supportsOfficialResultApi      Boolean   @default(false)
+  allowLiveContestSubmission     Boolean   @default(false)
+  adapterVersion                 String    @default("0.0.0")
+  circuitOpenedAt                DateTime?
+  killSwitchReason               String?
+  createdAt                      DateTime  @default(now())
+  updatedAt                      DateTime  @updatedAt
 }
 
 model HelperDevice {
@@ -214,14 +219,22 @@ model Problem {
 }
 
 model ProblemSource {
-  id              String    @id @default(cuid())
-  problemId       String    @unique
-  platform        String
-  remoteProblemId String
-  remoteUrl       String?
-  syncStatus      String    @default("IDLE")
-  lastSyncAt      DateTime?
-  problem         Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  id                   String    @id @default(cuid())
+  problemId            String    @unique
+  platform             String
+  remoteProblemId      String
+  remoteUrl            String?
+  remoteContestId      String?
+  remoteTaskScreenName String?
+  remoteProblemIndex   String?
+  metadataHash         String?
+  capabilityJson       Json?
+  syncStatus           String    @default("IDLE")
+  lastSyncAt           DateTime?
+  lastErrorCode        String?
+  problem              Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([platform, remoteProblemId])
 }
 
 model ProblemVersion {

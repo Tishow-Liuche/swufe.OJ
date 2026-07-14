@@ -16,6 +16,14 @@ export class HelperService {
       { code: 'LUOGU', name: '洛谷', baseUrl: 'https://www.luogu.com.cn', supportsMetadata: true, supportsBrowserSubmission: true },
       { code: 'NOWCODER', name: '牛客', baseUrl: 'https://ac.nowcoder.com', supportsMetadata: true, supportsBrowserSubmission: true },
       { code: 'QOJ', name: 'QOJ', baseUrl: 'https://qoj.ac', supportsMetadata: true, supportsBrowserSubmission: false },
+      {
+        code: 'ATCODER', name: 'AtCoder', baseUrl: 'https://atcoder.jp',
+        supportsMetadata: true, supportsStatement: false,
+        supportsBrowserSubmission: false, supportsOfficialSubmissionApi: false,
+        supportsOfficialResultApi: false, allowLiveContestSubmission: false,
+        readOnly: true, allowAutoSubmit: false, requireUserConfirmation: true,
+        adapterVersion: 'readonly-1.0.0',
+      },
     ];
     for (const p of platforms) {
       await this.prisma.externalPlatform.upsert({
