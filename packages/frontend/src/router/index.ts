@@ -16,6 +16,7 @@ const router = createRouter({
     { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue') },
     // 管理员
     { path: '/admin/create-problem', component: () => import('../views/admin/CreateProblem.vue') },
+    { path: '/admin/import-atcoder', component: () => import('../views/admin/AtCoderImport.vue') },
     { path: '/admin/users', component: () => import('../views/admin/UserManage.vue') },
   ],
 });

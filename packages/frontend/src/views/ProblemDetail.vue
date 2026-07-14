@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../api/client';
 import { basicSetup } from 'codemirror';
@@ -21,7 +21,7 @@ const result = ref<any>(null);
 const submitting = ref(false);
 const errorMsg = ref('');
 const showAllCases = ref(false);
-const isExternal = ref(false);
+const isAtCoder = computed(() => problem.value?.sourceInfo?.platform === 'ATCODER');
 let cmView: EditorView | null = null;
 let pollTimer: any = null;
 const editorHost = ref<HTMLElement | null>(null);
@@ -60,7 +60,7 @@ onMounted(async () => {
     errorMsg.value = '题目加载失败';
   }
   await nextTick();
-  createEditor();
+  if (!isAtCoder.value) createEditor();
 });
 
 onUnmounted(() => {
@@ -118,7 +118,6 @@ async function submitCode() {
   submitting.value = true;
   errorMsg.value = '';
   result.value = null;
-  isExternal.value = false;
   try {
     const { data } = await api.post('/api/submissions', {
       problemId: problem.value.id,
@@ -209,6 +208,7 @@ function renderMd(text: string): string {
           <span class="meta-item">📦 {{ problem.memoryLimit }}MB</span>
           <span class="meta-item">🎯 {{ problem.difficulty || '-' }}</span>
           <span class="meta-item">📝 {{ (problem.tags || []).map((t: any) => t.name).join(', ') || '-' }}</span>
+          <span v-if="isAtCoder" class="meta-item source-atcoder">来源 AtCoder</span>
         </div>
       </div>
 
@@ -220,7 +220,25 @@ function renderMd(text: string): string {
         </div>
 
         <div class="editor-panel">
-          <div class="card editor-card">
+          <div v-if="isAtCoder" class="card external-card">
+            <div class="source-name">AtCoder</div>
+            <h3>{{ problem.sourceInfo?.remoteProblemId }}</h3>
+            <p>当前为只读接入，仅保存最小元数据；代码提交和评测请在原站完成。</p>
+            <dl class="source-details">
+              <div><dt>比赛</dt><dd>{{ problem.sourceInfo?.remoteContestId || '-' }}</dd></div>
+              <div><dt>题号</dt><dd>{{ problem.sourceInfo?.remoteProblemIndex || '-' }}</dd></div>
+              <div><dt>同步状态</dt><dd>{{ problem.sourceInfo?.syncStatus || '-' }}</dd></div>
+            </dl>
+            <a
+              class="atcoder-link"
+              :href="problem.sourceInfo?.remoteUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              打开 AtCoder 原题
+            </a>
+          </div>
+          <div v-else class="card editor-card">
             <div class="editor-toolbar">
               <select v-model="language" class="lang-select">
                 <option value="cpp">C++</option>
@@ -272,6 +290,7 @@ function renderMd(text: string): string {
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
 .problem-meta { display: flex; gap: 16px; flex-wrap: wrap; }
 .meta-item { font-size: 13px; color: #666; background: #f0f0f0; padding: 3px 10px; border-radius: 4px; }
+.source-atcoder { color: #7a1f1f; background: #fff0f0; }
 .content-split { display: grid; grid-template-columns: 1fr 480px; gap: 20px; align-items: start; }
 .card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
 .desc { line-height: 1.8; color: #333; font-size: 15px; overflow-x: auto; }
@@ -322,19 +341,16 @@ function renderMd(text: string): string {
 .error-msg, .error-card { color: #e74c3c; padding: 20px; text-align: center; }
 .error-card { background: #fce4ec; }
 
-.external-card { border-left: 4px solid #e67e22; background: #fff8e1; }
-.external-card h3 { color: #e65100; margin-bottom: 8px; }
-.external-card p { margin: 4px 0 10px; font-size: 14px; color: #666; }
-.luogu-link { display: inline-block; padding: 8px 16px; background: #3498db; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; margin: 8px 0; }
-.luogu-link:hover { background: #2980b9; }
-.tip { font-size: 12px; color: #888; margin: 8px 0; }
-.fill-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid #ffe0b2; }
-.fill-form h4 { margin: 0 0 8px; font-size: 14px; }
-.fill-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.fill-row select, .fill-row input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 120px; }
-.fill-row input[placeholder] { width: 110px; }
-.btn-fill { padding: 6px 16px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
-.btn-fill:hover { background: #219a52; }
+.external-card { border-top: 4px solid #a51d1d; background: #fff; }
+.source-name { color: #a51d1d; font-size: 13px; font-weight: 800; text-transform: uppercase; }
+.external-card h3 { margin: 6px 0 10px; color: #20242a; font-size: 18px; }
+.external-card p { margin: 0 0 16px; font-size: 14px; color: #5f6772; line-height: 1.6; }
+.source-details { margin: 0 0 18px; border-top: 1px solid #eceff2; }
+.source-details div { display: grid; grid-template-columns: 72px 1fr; padding: 8px 0; border-bottom: 1px solid #eceff2; font-size: 13px; }
+.source-details dt { color: #7b8490; }
+.source-details dd { margin: 0; color: #252b33; overflow-wrap: anywhere; }
+.atcoder-link { display: block; padding: 10px 14px; background: #a51d1d; color: #fff; border-radius: 6px; text-align: center; text-decoration: none; font-size: 14px; font-weight: 700; }
+.atcoder-link:hover { background: #861818; }
 
 @media (max-width: 1000px) { .content-split { grid-template-columns: 1fr; } }
 </style>

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,12 +25,18 @@ export class SubmissionService {
     const cv = problem.versions[0];
     if (!cv) throw new NotFoundException('题目版本不存在');
 
+    const platform = problem.sourceInfo?.platform || 'LOCAL';
+
+    if (platform === 'ATCODER') {
+      throw new BadRequestException(
+        'AtCoder 当前仅支持元数据与原题跳转，请在 AtCoder 原站完成提交',
+      );
+    }
+
     const submission = await this.prisma.submission.create({
       data: { problemId: dto.problemId, problemVersionId: cv.id, userId,
         language: dto.language, sourceCode: dto.sourceCode, status: 'PENDING' },
     });
-
-    const platform = problem.sourceInfo?.platform || 'LOCAL';
 
     if (platform === 'CODEFORCES') {
       // ===== CF：优先浏览器扩展 → 降级为服务器端 =====

@@ -64,8 +64,13 @@ async function revokeDevice(id: string) {
         <h3>绑定新账号</h3>
         <div class="bind-row">
           <select v-model="newBind.platform" class="input">
-            <option v-for="p in platforms" :key="p.code" :value="p.code" :disabled="!p.enabled">
-              {{ p.name }} {{ p.enabled ? '' : '(暂停)' }}
+            <option
+              v-for="p in platforms"
+              :key="p.code"
+              :value="p.code"
+              :disabled="!p.enabled || !p.supportsBrowserSubmission"
+            >
+              {{ p.name }} {{ !p.enabled ? '(暂停)' : !p.supportsBrowserSubmission ? '(只读)' : '' }}
             </option>
           </select>
           <input v-model="newBind.remoteUsername" placeholder="第三方用户名" class="input" />

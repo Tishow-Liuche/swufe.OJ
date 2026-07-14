@@ -63,6 +63,20 @@
 
 平台接入优先级：洛谷 (P0) > Codeforces / QOJ (P1) > AtCoder / CodeChef / LeetCode (P2)
 
+#### AtCoder 当前实现
+
+AtCoder 按只读 C 级能力接入：管理员可在 `/admin/import-atcoder` 按单个公开题目 URL 导入标题、时间限制、内存限制和远程标识，题目详情始终提供规范化原站链接。平台不复制完整题面，不保存 AtCoder Cookie/CSRF/密码，也不执行远程提交或结果轮询。
+
+自动提交在数据库平台配置和提交服务中均强制关闭。启用更高等级前，必须先取得 AtCoder 对教育项目自动提交与结果读取的明确许可，并完成 Helper 签名、幂等和竞赛限制验收。完整边界见 [`docs/vjudge-platforms/03-atcoder.md`](docs/vjudge-platforms/03-atcoder.md)。
+
+拉取本次更新后执行：
+
+```bash
+cd packages/backend
+npx prisma db push
+npx prisma generate
+```
+
 ### 教学与竞赛
 
 - **作业系统**：截止时间、补交规则、通过条件、完成率统计、错误类型分布

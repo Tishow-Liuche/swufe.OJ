@@ -29,6 +29,7 @@ function logout() {
         <template v-if="auth.isLoggedIn()">
           <!-- 仅管理员可见 -->
           <router-link v-if="auth.isAdmin()" to="/admin/create-problem" class="admin-link">录题</router-link>
+          <router-link v-if="auth.isAdmin()" to="/admin/import-atcoder" class="admin-link">AtCoder</router-link>
           <router-link v-if="auth.isAdmin()" to="/admin/users" class="admin-link">管理</router-link>
           <router-link to="/profile">个人中心</router-link>
           <button class="btn-logout" @click="logout">退出</button>
