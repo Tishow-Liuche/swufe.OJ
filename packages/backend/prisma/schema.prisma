@@ -16,6 +16,10 @@ model User {
   password     String
   nickname     String?
   avatar       String?
+  studentId    String?  @unique
+  college      String?
+  phone        String?
+  mustChangePassword Boolean @default(false)
   role         String   @default("STUDENT")
   school       String?
   requestedRole String  @default("STUDENT")
@@ -398,6 +402,7 @@ model VerdictMapping {
 
 model Contest {
   id             String   @id @default(cuid())
+  contestNo      Int      @unique @default(autoincrement())
   title          String
   description    String?
   mode           String   @default("ACM")
@@ -411,6 +416,8 @@ model Contest {
   allowUpsolve   Boolean  @default(true)
   maxSubmissions Int?
   penaltyTime    Int      @default(20)
+  teamMode       Boolean  @default(false)
+  isRated        Boolean  @default(false)
   createdBy      String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -494,6 +501,9 @@ model Class {
   courseId  String?
   name      String
   teacherId String
+  status    String   @default("PENDING")
+  reviewNote String?
+  approvedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   course    Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)

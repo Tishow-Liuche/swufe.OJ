@@ -39,16 +39,31 @@ export class ContestService {
     return 'RUNNING';
   }
 
+  private async withOrganizers(contests: any[]) {
+    const organizerIds = [...new Set(contests.map((contest) => contest.createdBy))];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: organizerIds } },
+      select: { id: true, username: true, nickname: true },
+    });
+    const byId = new Map(users.map((user) => [user.id, user]));
+    return contests.map((contest) => ({
+      ...contest,
+      organizer: byId.get(contest.createdBy)
+        ? { id: contest.createdBy, name: byId.get(contest.createdBy)!.nickname || byId.get(contest.createdBy)!.username }
+        : { id: contest.createdBy, name: '平台赛事组' },
+    }));
+  }
+
   async listPublic() {
     const contests = await this.prisma.contest.findMany({
       where: { visibility: 'PUBLIC' },
       include: this.contestInclude,
       orderBy: { startTime: 'desc' },
     });
-    return contests.map((contest) => ({
+    return this.withOrganizers(contests.map((contest) => ({
       ...contest,
       state: this.stateOf(contest),
-    }));
+    })));
   }
 
   async listMine(viewer: Viewer) {
@@ -66,14 +81,14 @@ export class ContestService {
       },
       orderBy: { startTime: 'desc' },
     });
-    return contests.map((contest: any) => {
+    return this.withOrganizers(contests.map((contest: any) => {
       const participant = contest.participants[0];
       return {
         ...contest,
         participant: participant || null,
         state: this.stateOf(contest, participant),
       };
-    });
+    }));
   }
 
   async getContest(id: string, viewer?: Viewer) {
@@ -92,11 +107,11 @@ export class ContestService {
       throw new ForbiddenException('无权查看该比赛');
     }
 
-    return {
+    return (await this.withOrganizers([{
       ...contest,
       participant: participant || null,
       state: this.stateOf(contest, participant),
-    };
+    }]))[0];
   }
 
   async register(id: string, viewer: Viewer, password?: string) {

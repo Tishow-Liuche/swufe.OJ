@@ -45,6 +45,7 @@ export class AuthService {
         password,
         nickname: dto.nickname,
         school: dto.school,
+        college: dto.college,
         role: 'STUDENT',
         requestedRole: dto.requestedRole,
         teacherApplicationStatus: teacherRequested ? 'PENDING' : 'NOT_REQUIRED',
@@ -85,7 +86,7 @@ export class AuthService {
       throw new UnauthorizedException('账号或密码错误');
     }
 
-    return this.generateTokens(user.id);
+    return this.generateTokens(user.id, user.mustChangePassword);
   }
 
   async refresh(refreshToken: string) {
@@ -122,6 +123,10 @@ export class AuthService {
         avatar: true,
         role: true,
         school: true,
+        studentId: true,
+        college: true,
+        phone: true,
+        mustChangePassword: true,
         requestedRole: true,
         teacherApplicationStatus: true,
         createdAt: true,
@@ -130,7 +135,7 @@ export class AuthService {
     return user;
   }
 
-  private async generateTokens(userId: string) {
+  private async generateTokens(userId: string, mustChangePassword = false) {
     const accessToken = this.jwt.sign({ sub: userId });
 
     const refreshToken = randomBytes(32).toString('hex');
@@ -145,7 +150,7 @@ export class AuthService {
       },
     });
 
-    return { accessToken, refreshToken, expiresIn };
+    return { accessToken, refreshToken, expiresIn, mustChangePassword };
   }
 
   private parseExpires(expires: string): number {

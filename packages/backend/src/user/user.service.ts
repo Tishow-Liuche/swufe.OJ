@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UserService {
@@ -10,8 +11,8 @@ export class UserService {
       where: { id: userId },
       select: {
         id: true, username: true, email: true, nickname: true,
-        avatar: true, role: true, school: true, requestedRole: true,
-        teacherApplicationStatus: true, createdAt: true,
+        avatar: true, role: true, school: true, studentId: true, college: true, phone: true,
+        mustChangePassword: true, requestedRole: true, teacherApplicationStatus: true, createdAt: true,
       },
     });
   }
@@ -21,6 +22,18 @@ export class UserService {
       where: { id: userId }, data,
       select: { id: true, username: true, nickname: true, avatar: true, role: true },
     });
+  }
+
+  async changeOwnPassword(userId: string, password: string) {
+    if (!password || password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      throw new BadRequestException('新密码至少 8 位，且必须同时包含字母和数字');
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashed, mustChangePassword: false },
+    });
+    return { success: true };
   }
 
   async getStats(userId: string) {
@@ -147,8 +160,8 @@ export class UserService {
     return this.prisma.user.findMany({
       select: {
         id: true, username: true, email: true, nickname: true,
-        role: true, school: true, requestedRole: true,
-        teacherApplicationStatus: true, createdAt: true,
+        role: true, school: true, studentId: true, college: true, phone: true,
+        mustChangePassword: true, requestedRole: true, teacherApplicationStatus: true, createdAt: true,
         _count: { select: { submissions: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -199,9 +212,37 @@ export class UserService {
 
   async resetPassword(userId: string, password: string) {
     if (!password || password.length < 8) throw new BadRequestException('密码至少 8 位');
-    const bcrypt = require('bcryptjs');
     const hashed = await bcrypt.hash(password, 10);
-    await this.prisma.user.update({ where: { id: userId }, data: { password: hashed } });
+    await this.prisma.user.update({ where: { id: userId }, data: { password: hashed, mustChangePassword: true } });
     return { success: true };
+  }
+
+  async listClassApplications() {
+    const classes = await this.prisma.class.findMany({
+      include: { course: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const teachers = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(classes.map((item) => item.teacherId))] } },
+      select: { id: true, username: true, nickname: true, email: true },
+    });
+    const byId = new Map(teachers.map((teacher) => [teacher.id, teacher]));
+    return classes.map((item) => ({ ...item, teacher: byId.get(item.teacherId) || null }));
+  }
+
+  async reviewClassApplication(classId: string, status: string, reviewNote?: string) {
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      throw new BadRequestException('审核状态只能是 APPROVED 或 REJECTED');
+    }
+    const classroom = await this.prisma.class.findUnique({ where: { id: classId } });
+    if (!classroom) throw new NotFoundException('班级申请不存在');
+    return this.prisma.class.update({
+      where: { id: classId },
+      data: {
+        status,
+        reviewNote: reviewNote?.trim() || null,
+        approvedAt: status === 'APPROVED' ? new Date() : null,
+      },
+    });
   }
 }

@@ -20,8 +20,8 @@ export class TeacherController {
   }
 
   @Post('classes/:id/import')
-  importStudents(@Param('id') id: string, @Req() req: any, @Body() data: { usernames: string[] }) {
-    return this.teacherService.importStudents(id, req.user.id, data.usernames);
+  importStudents(@Param('id') id: string, @Req() req: any, @Body() data: { students: Array<{ studentId: string; name: string; college: string; phone: string; email: string }> }) {
+    return this.teacherService.importStudents(id, req.user.id, data.students);
   }
 
   @Get('classes/:id/members')
@@ -47,7 +47,7 @@ export class TeacherController {
     title: string; description?: string; mode?: string; startTime: string; endTime: string;
     problemIds?: string[]; visibility?: string; registerStart?: string; registerEnd?: string;
     freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
-    penaltyTime?: number; password?: string;
+    penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
   }) {
     return this.teacherService.createContest(req.user.id, data);
   }
