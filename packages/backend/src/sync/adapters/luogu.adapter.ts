@@ -41,14 +41,50 @@ export class LuoguAdapter implements SyncAdapter {
       if (!data?.currentData?.problem) return null;
 
       const p = data.currentData.problem;
+
+      // 构建完整 Markdown 题面
+      const parts: string[] = [];
+      if (p.background) parts.push(p.background);
+      if (p.description) parts.push(p.description);
+      // samples 是 [[input, output], [input, output], ...]
+      if (p.samples?.length) {
+        parts.push('## 样例');
+        p.samples.forEach((s: string[], i: number) => {
+          parts.push(`### 样例 #${i + 1}`);
+          parts.push('```input');
+          parts.push(s[0]?.trim() || '');
+          parts.push('```');
+          parts.push('```output');
+          parts.push(s[1]?.trim() || '');
+          parts.push('```');
+        });
+      }
+      if (p.hint) {
+        parts.push('## 提示');
+        if (Array.isArray(p.hint)) parts.push(p.hint.map(String).join('\n\n'));
+        else parts.push(String(p.hint));
+      }
+      const fullDesc = parts.join('\n\n');
+
+      // 解析 limits
+      const timeMs = (p.limits?.time?.[0] || 1) * 1000;
+      const memMB = p.limits?.memory?.[0] || 256;
+
       return {
         remoteId,
         title: `${remoteId} ${p.title}`,
         difficulty: this.mapDifficulty(p.difficulty),
-        timeLimit: p.limits?.time?.[0] || 1000,
-        memoryLimit: p.limits?.memory?.[0] || 256,
-        tags: (p.tags || []).map((t: any) => t.name),
+        timeLimit: timeMs > 100 ? timeMs : timeMs * 1000, // 洛谷用秒，OJs用毫秒
+        memoryLimit: memMB,
+        tags: (p.tags || []).map((t: any) => typeof t === 'string' ? t : t.name).filter(Boolean),
         url: `${this.baseUrl}/problem/${remoteId}`,
+        description: fullDesc,
+        background: p.background,
+        inputFormat: p.inputFormat,
+        outputFormat: p.outputFormat,
+        samples: (p.samples || []).map((s: string[]) => ({ input: s[0] || '', output: s[1] || '' })),
+        hint: Array.isArray(p.hint) ? p.hint.join('\n\n') : (p.hint || undefined),
+        dataRange: p.dataRange || p.limits ? `Time: ${timeMs}ms, Memory: ${memMB}MB` : undefined,
       };
     } catch {
       return null;

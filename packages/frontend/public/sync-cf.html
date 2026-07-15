@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codeforces 题面同步器</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 860px; margin: 24px auto; padding: 16px; background: #f8f9fa; }
+  h1 { color: #333; font-size: 20px; }
+  .controls { margin: 10px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button { padding: 9px 20px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 600; }
+  .btn-start { background: #27ae60; color: #fff; }
+  .btn-pause { background: #f39c12; color: #fff; }
+  .btn-stop { background: #e74c3c; color: #fff; }
+  select { padding: 7px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+  .stats { display: flex; gap: 12px; margin: 10px 0; flex-wrap: wrap; }
+  .stat { background: #fff; padding: 8px 16px; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .stat .val { font-size: 20px; font-weight: 700; color: #2c3e50; }
+  .stat .lbl { font-size: 11px; color: #888; }
+  #log { background: #1e1e1e; color: #ccc; font: 12px/1.5 monospace; padding: 10px; border-radius: 6px; height: 420px; overflow-y: auto; white-space: pre-wrap; }
+  .ok { color: #27ae60; } .err { color: #e74c3c; } .warn { color: #f39c12; } .info { color: #6cb6ff; }
+</style>
+</head>
+<body>
+<h1>⚡ Codeforces 题面同步器</h1>
+<p style="font-size:13px;color:#666;margin:4px 0">逐题从 CF 抓取完整题面 → 回传 OJ。已有题面的自动跳过。</p>
+
+<div class="controls">
+  <button class="btn-start" id="btnStart" onclick="start()">▶ 开始同步</button>
+  <button class="btn-pause" id="btnPause" onclick="pause()" disabled>⏸ 暂停</button>
+  <button class="btn-stop" id="btnStop" onclick="stop()" disabled>⏹ 停止</button>
+  <label>每题延迟: <select id="delay">
+    <option value="3000">3s (快)</option>
+    <option value="5000" selected>5s (推荐)</option>
+    <option value="8000">8s (安全)</option>
+  </select></label>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="val" id="ok">0</div><div class="lbl">成功</div></div>
+  <div class="stat"><div class="val" id="skip">0</div><div class="lbl">跳过</div></div>
+  <div class="stat"><div class="val" id="fail">0</div><div class="lbl">失败</div></div>
+  <div class="stat"><div class="val" id="remain">-</div><div class="lbl">剩余</div></div>
+</div>
+
+<div id="log"></div>
+
+<script>
+const API = 'http://localhost:3000';
+var running = false, paused = false;
+var stats = { ok:0, skip:0, fail:0, blocked:0 };
+
+function log(msg, cls) {
+  var el = document.getElementById('log');
+  var t = new Date().toLocaleTimeString();
+  el.innerHTML += '<span class="' + (cls||'') + '">[' + t + '] ' + msg + '</span>\n';
+  el.scrollTop = el.scrollHeight;
+}
+function updateUI() {
+  document.getElementById('ok').textContent = stats.ok;
+  document.getElementById('skip').textContent = stats.skip;
+  document.getElementById('fail').textContent = stats.fail;
+}
+function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+async function start() {
+  if (running) return;
+  running = true; paused = false;
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnPause').disabled = false;
+  document.getElementById('btnStop').disabled = false;
+  log('=== Starting CF statement sync ===', 'info');
+
+  var delay = parseInt(document.getElementById('delay').value) || 5000;
+
+  while (running) {
+    while (paused && running) { await sleep(500); }
+    if (!running) break;
+
+    try {
+      // Get next problem
+      var resp = await fetch(API + '/api/sync/cf-next', { signal: AbortSignal.timeout(10000) });
+      var data = await resp.json();
+
+      if (!resp.ok) { log('Backend error: HTTP ' + resp.status, 'err'); await sleep(5000); continue; }
+      if (data.done) { log('ALL DONE! Every CF problem now has a full statement.', 'ok'); break; }
+
+      document.getElementById('remain').textContent = data.totalRemaining;
+      var pid = data.remoteProblemId;
+      log('[' + data.totalRemaining + ' remain] CF ' + pid + ' ...', 'info');
+
+      await syncOne(pid);
+      updateUI();
+    } catch(e) {
+      log('Next-query error: ' + e.message, 'err');
+      await sleep(5000);
+    }
+
+    await sleep(delay);
+  }
+
+  log('=== Stopped ===', running ? 'ok' : 'warn');
+  reset();
+}
+
+async function syncOne(remoteId) {
+  var m = remoteId.match(/^(\d+)([A-Z]\d?)$/);
+  if (!m) { stats.fail++; log('CF ' + remoteId + ' (- invalid id)', 'err'); return; }
+  var cid = m[1], idx = m[2];
+  var url = 'https://codeforces.com/problemset/problem/' + cid + '/' + idx + '?locale=en';
+
+  try {
+    var resp = await fetch(url, {
+      headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (resp.status === 403 || resp.status === 429) {
+      stats.fail++;
+      log('CF ' + remoteId + ' (- BLOCKED ' + resp.status + ' — waiting 30s)', 'err');
+      await sleep(30000);
+      return;
+    }
+    if (!resp.ok) { stats.fail++; log('CF ' + remoteId + ' (- HTTP ' + resp.status + ')', 'err'); return; }
+
+    var html = await resp.text();
+    if (html.length < 500 || html.includes('Cloudflare') || html.includes('Just a moment')) {
+      stats.fail++;
+      log('CF ' + remoteId + ' (- CF challenge)', 'err');
+      await sleep(30000);
+      return;
+    }
+
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var root = doc.querySelector('.problem-statement');
+    if (!root) { stats.fail++; log('CF ' + remoteId + ' (- .problem-statement not found)', 'err'); return; }
+
+    // Title
+    var titleEl = root.querySelector('.header .title');
+    var title = titleEl ? titleEl.textContent.trim() : remoteId;
+
+    // Time + memory
+    var timeText = (root.querySelector('.header .time-limit') || {}).textContent || '';
+    var memText = (root.querySelector('.header .memory-limit') || {}).textContent || '';
+    var tl = parseTime(timeText);
+    var ml = parseMem(memText);
+
+    // Description
+    var descClone = root.cloneNode(true);
+    ['.header', '.input-specification', '.output-specification', '.sample-tests', '.note'].forEach(function(s) {
+      descClone.querySelectorAll(s).forEach(function(e) { e.remove(); });
+    });
+    var descHtml = descClone.innerHTML.trim();
+
+    // Input / Output / Note
+    var inputHtml = extractSec(root.querySelector('.input-specification'));
+    var outputHtml = extractSec(root.querySelector('.output-specification'));
+    var noteHtml = extractSec(root.querySelector('.note'));
+
+    // Samples
+    var samples = [];
+    root.querySelectorAll('.sample-test').forEach(function(st) {
+      var inp = st.querySelector('.input pre');
+      var outp = st.querySelector('.output pre');
+      samples.push({ input: preText(inp), output: preText(outp) });
+    });
+
+    // Send to backend
+    var postResp = await fetch(API + '/api/sync/cf-statement', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        remoteId: remoteId, title: title, timeLimitMs: tl, memoryLimitMb: ml,
+        descriptionHtml: descHtml, inputHtml: inputHtml, outputHtml: outputHtml,
+        noteHtml: noteHtml, samples: samples, tags: [], difficulty: 3,
+        sourceUrl: url, locale: 'en',
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (postResp.ok) {
+      stats.ok++;
+      log('CF ' + remoteId + ' (+) ' + title.substring(0, 50) + ' [' + descHtml.length + ' chars]', 'ok');
+    } else {
+      stats.fail++;
+      log('CF ' + remoteId + ' (- save failed HTTP ' + postResp.status + ')', 'err');
+    }
+  } catch(e) {
+    stats.fail++;
+    log('CF ' + remoteId + ' (- ' + e.message + ')', 'err');
+  }
+}
+
+function extractSec(el) { if (!el) return null; var c = el.cloneNode(true); var t = c.querySelector('.section-title'); if (t) t.remove(); return c.innerHTML.trim() || null; }
+function preText(el) { return el ? el.textContent.replace(/\r/g, '').trim() : ''; }
+function parseTime(s) { var m = s.match(/\d+/); return m ? parseInt(m[0]) * 1000 : 1000; }
+function parseMem(s)  { var m = s.match(/\d+/); return m ? parseInt(m[0]) : 256; }
+
+function pause() { paused = !paused; document.getElementById('btnPause').textContent = paused ? '▶ 继续' : '⏸ 暂停'; log(paused ? 'PAUSED' : 'RESUMED', 'warn'); }
+function stop() { running = false; paused = false; }
+function reset() {
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnPause').disabled = true;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnPause').textContent = '⏸ 暂停';
+}
+log('Ready. Click Start to begin.', 'info');
+</script>
+</body>
+</html>

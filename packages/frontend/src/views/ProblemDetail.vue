@@ -24,7 +24,9 @@ const showAllCases = ref(false);
 const isExternal = ref(false);
 let cmView: EditorView | null = null;
 let pollTimer: any = null;
+let visibilityCleanupId: any = null;
 const editorHost = ref<HTMLElement | null>(null);
+const pollExhausted = ref(false);
 
 const languageTemplates: Record<string, string> = {
   cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n',
@@ -43,13 +45,17 @@ const langExtensions: Record<string, () => any> = {
 const statusLabels: Record<string, string> = {
   ACCEPTED: 'AC', WRONG_ANSWER: 'WA', TIME_LIMIT_EXCEEDED: 'TLE',
   RUNTIME_ERROR: 'RE', COMPILE_ERROR: 'CE', MEMORY_LIMIT_EXCEEDED: 'MLE',
-  PENDING: '等待中', QUEUING: '排队中', COMPILING: '编译中', RUNNING: '运行中',
+  PENDING: '等待中', QUEUING: '排队中', JUDGING: '评测中',
+  SUBMITTING: '提交中', COMPILING: '编译中', RUNNING: '运行中',
+  SYSTEM_ERROR: '系统错误', REMOTE_ERROR: '远程错误', CANCELLED: '已取消',
 };
 const statusColors: Record<string, string> = {
   ACCEPTED: '#27ae60', WRONG_ANSWER: '#e74c3c', TIME_LIMIT_EXCEEDED: '#f39c12',
   RUNTIME_ERROR: '#9b59b6', COMPILE_ERROR: '#e67e22', MEMORY_LIMIT_EXCEEDED: '#f39c12',
-  PENDING: '#95a5a6', QUEUING: '#3498db', COMPILING: '#3498db', RUNNING: '#3498db',
-  SYSTEM_ERROR: '#e74c3c',
+  CANCELLED: '#95a5a6',
+  PENDING: '#95a5a6', QUEUING: '#3498db', JUDGING: '#3498db',
+  SUBMITTING: '#3498db', COMPILING: '#3498db', RUNNING: '#3498db',
+  SYSTEM_ERROR: '#e74c3c', REMOTE_ERROR: '#e74c3c',
 };
 
 onMounted(async () => {
@@ -66,6 +72,7 @@ onMounted(async () => {
 onUnmounted(() => {
   cmView?.destroy();
   if (pollTimer) clearInterval(pollTimer);
+  if (visibilityCleanupId) clearInterval(visibilityCleanupId);
 });
 
 function createEditor() {
@@ -113,6 +120,35 @@ watch(language, () => {
   code.value = newCode;
 });
 
+const cfDialog = ref(false);
+const cfData = ref<any>(null);
+const copySuccess = ref(false);
+const cfOpenBlocked = ref(false);
+const cfAutoMessage = ref('');
+
+function openExternalUrl(url?: string): boolean {
+  if (!url) return false;
+  const opened = globalThis.window?.open(url, '_blank', 'noopener,noreferrer');
+  return !!opened;
+}
+
+function retryOpenCf() {
+  cfOpenBlocked.value = !openExternalUrl(cfData.value?.url);
+}
+
+async function copyCfCode() {
+  try {
+    await globalThis.navigator?.clipboard?.writeText(cfData.value?.code || '');
+    copySuccess.value = true;
+  } catch {
+    copySuccess.value = false;
+  }
+}
+
+function refreshPage() {
+  globalThis.location?.reload();
+}
+
 async function submitCode() {
   if (submitting.value || !problem.value) return;
   submitting.value = true;
@@ -125,9 +161,29 @@ async function submitCode() {
       language: language.value,
       sourceCode: code.value,
     });
-    result.value = { id: data.id, status: 'QUEUING', mode: data.mode || 'LOCAL' };
-    // 本地评测和远程评测都自动轮询
-    startPolling(data.id);
+    result.value = { id: data.submissionId || data.id, status: 'QUEUING', mode: data.mode || 'LOCAL' };
+
+    // CF 远程提交: 自动复制代码 + 打开 CF 页面
+    if ((data.mode === 'CODEFORCES' && data.cfSubmitUrl) || (data.mode === 'LUOGU' && data.luoguSubmitUrl)) {
+      isExternal.value = true;
+      const langNames: Record<string, string> = { cpp:'GNU G++17', c:'GNU GCC C11', python:'Python 3', java:'Java 11' };
+      const luoguLangNames: Record<string, string> = { cpp:'C++', c:'C', python:'Python 3', java:'Java' };
+      const isLuogu = data.mode === 'LUOGU';
+      cfData.value = {
+        url: isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl,
+        platform: isLuogu ? '洛谷' : 'Codeforces',
+        language: isLuogu ? (luoguLangNames[language.value] || language.value) : (langNames[language.value] || language.value),
+        code: code.value,
+        submissionId: data.submissionId,
+      };
+      cfDialog.value = true;
+      cfAutoMessage.value = '正在打开 Codeforces 并自动提交。完成后标签页会自动关闭，结果会回到这里。';
+      copyCfCode();
+      cfOpenBlocked.value = !openExternalUrl(cfData.value.url);
+      startPolling(data.submissionId);
+    } else {
+      startPolling(data.submissionId || data.id);
+    }
   } catch (e: any) {
     errorMsg.value = e.response?.data?.message || '提交失败';
   } finally {
@@ -137,21 +193,75 @@ async function submitCode() {
 
 function startPolling(id: string) {
   if (pollTimer) clearInterval(pollTimer);
+  if (visibilityCleanupId) clearInterval(visibilityCleanupId);
+  pollExhausted.value = false;
+
   let attempts = 0;
-  pollTimer = setInterval(async () => {
+  let errorCount = 0;
+  // CF: 10 min (400 x 1.5s), local: 45s (30 x 1.5s)
+  const maxAttempts = isExternal.value ? 400 : 30;
+  const maxErrors = isExternal.value ? 60 : 10;
+
+  function doPoll() {
     attempts++;
-    try {
-      const { data } = await api.get(`/api/submissions/${id}`);
+    api.get(`/api/submissions/${id}`).then(({ data }) => {
+      errorCount = 0; // reset on success
+      // Preserve mode from the initial submission response if the poll
+      // response does not include it (raw Prisma data has no mode field)
+      if (!data.mode && result.value?.mode) {
+        data.mode = result.value.mode;
+      }
       result.value = data;
-      const finalStatuses = ['ACCEPTED', 'WRONG_ANSWER', 'TIME_LIMIT_EXCEEDED', 'MEMORY_LIMIT_EXCEEDED', 'RUNTIME_ERROR', 'COMPILE_ERROR', 'SYSTEM_ERROR', 'REMOTE_ERROR'];
-      if (finalStatuses.includes(data.status) || attempts > 30) {
+      const finalStatuses = [
+        'ACCEPTED', 'WRONG_ANSWER', 'TIME_LIMIT_EXCEEDED',
+        'MEMORY_LIMIT_EXCEEDED', 'RUNTIME_ERROR', 'COMPILE_ERROR',
+        'SYSTEM_ERROR', 'REMOTE_ERROR', 'CANCELLED',
+      ];
+      if (finalStatuses.includes(data.status)) {
         clearInterval(pollTimer);
         pollTimer = null;
+        clearInterval(visibilityCleanupId);
+        visibilityCleanupId = null;
+        return;
       }
-    } catch (e) {
-      if (attempts > 10) { clearInterval(pollTimer); pollTimer = null; }
+      if (attempts >= maxAttempts) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        clearInterval(visibilityCleanupId);
+        visibilityCleanupId = null;
+        pollExhausted.value = true;
+      }
+    }).catch(() => {
+      errorCount++;
+      // Don't kill CF polling on transient API errors — the backend
+      // worker may still be processing. Only stop if errors are
+      // persistently high relative to the polling window.
+      if (errorCount >= maxErrors) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        clearInterval(visibilityCleanupId);
+        visibilityCleanupId = null;
+        pollExhausted.value = true;
+      }
+    });
+  }
+
+  doPoll();
+  pollTimer = setInterval(doPoll, 1500);
+
+  // Refresh immediately when the user switches back to this tab
+  const onVisible = () => {
+    if (document.visibilityState === 'visible' && pollTimer) doPoll();
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  // Clean up visibility listener when polling stops
+  visibilityCleanupId = setInterval(() => {
+    if (!pollTimer) {
+      clearInterval(visibilityCleanupId);
+      visibilityCleanupId = null;
+      document.removeEventListener('visibilitychange', onVisible);
     }
-  }, 1500);
+  }, 1000);
 }
 
 function renderMd(text: string): string {
@@ -259,10 +369,61 @@ function renderMd(text: string): string {
             </div>
           </div>
 
+          <div v-if="pollExhausted" class="card exhausted-card" style="border-left:4px solid #f39c12; background:#fff8e1;">
+            <p style="margin:0; color:#e65100; font-size:14px;">
+              Polling stopped — the backend has not returned a result within the time limit.
+              <a href="javascript:void(0)" style="text-decoration:underline; color:#3498db;"
+                 @click="refreshPage">Refresh the page</a> to check the latest status.
+            </p>
+          </div>
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
         </div>
       </div>
     </template>
+
+    <!-- CF 远程提交引导弹窗 -->
+    <div v-if="cfDialog" class="cf-overlay" @click.self="cfDialog = false">
+      <div class="cf-dialog">
+        <div class="cf-dialog-header">
+          <span>🔗 Codeforces 远程提交</span>
+          <button class="cf-close" @click="cfDialog = false">✕</button>
+        </div>
+        <div class="cf-dialog-body">
+          <p style="margin-bottom:12px">{{ cfAutoMessage }}</p>
+          <p v-if="cfOpenBlocked" style="margin:0 0 12px; color:#e65100; font-size:14px;">
+            浏览器拦截了新标签页。点击下方按钮继续同一个提交任务。
+          </p>
+
+          <div class="cf-step">
+            <span class="cf-step-num">1</span>
+            <span class="cf-step-text">Codeforces 页面会自动选择语言: <b>{{ cfData?.language }}</b></span>
+          </div>
+          <div class="cf-step">
+            <span class="cf-step-num">2</span>
+            <span class="cf-step-text">辅助脚本会自动填入代码并点击 Submit</span>
+          </div>
+          <div class="cf-step">
+            <span class="cf-step-num">3</span>
+            <span class="cf-step-text">识别 SID 并回传成功后，Codeforces 标签页会自动关闭</span>
+          </div>
+          <div class="cf-step">
+            <span class="cf-step-num">4</span>
+            <span class="cf-step-text">此页面持续轮询并展示最终评测结果</span>
+          </div>
+          <div class="cf-code-preview">
+            <pre>{{ cfData?.code }}</pre>
+          </div>
+          <div style="margin-top: 12px; display: flex; gap: 8px">
+            <button class="cf-btn cf-btn-primary" @click="copyCfCode">
+              📋 再次复制代码
+            </button>
+            <button class="cf-btn cf-btn-secondary" @click="retryOpenCf">
+              🔗 重新打开 CF 页面
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -335,6 +496,24 @@ function renderMd(text: string): string {
 .fill-row input[placeholder] { width: 110px; }
 .btn-fill { padding: 6px 16px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .btn-fill:hover { background: #219a52; }
+
+/* CF 远程提交弹窗 */
+.cf-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+.cf-dialog { background: #fff; border-radius: 12px; width: 560px; max-width: 90vw; max-height: 85vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.cf-dialog-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #eee; font-size: 16px; font-weight: 600; }
+.cf-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #999; }
+.cf-close:hover { color: #333; }
+.cf-dialog-body { padding: 16px 20px; }
+.cf-step { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 14px; }
+.cf-step-num { width: 24px; height: 24px; border-radius: 50%; background: #3498db; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.cf-step-text { flex: 1; }
+.cf-code-preview { margin-top: 8px; background: #1e1e1e; border-radius: 8px; padding: 12px; max-height: 200px; overflow: auto; }
+.cf-code-preview pre { margin: 0; color: #d4d4d4; font-size: 12px; font-family: Consolas, monospace; white-space: pre-wrap; }
+.cf-btn { padding: 8px 18px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.cf-btn-primary { background: #3498db; color: #fff; }
+.cf-btn-primary:hover { background: #2980b9; }
+.cf-btn-secondary { background: #f0f0f0; color: #333; border: 1px solid #ddd; }
+.cf-btn-secondary:hover { background: #e0e0e0; }
 
 @media (max-width: 1000px) { .content-split { grid-template-columns: 1fr; } }
 </style>

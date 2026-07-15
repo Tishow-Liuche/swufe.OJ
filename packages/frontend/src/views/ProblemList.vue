@@ -38,6 +38,11 @@ interface ProblemItem {
   id: string;
   title: string;
   source: string;
+  sourceInfo?: {
+    platform?: string;
+    remoteProblemId?: string;
+    remoteUrl?: string;
+  } | null;
   difficulty: string | null;
   timeLimit: number;
   memoryLimit: number;
@@ -67,7 +72,8 @@ const difficultyOptions = [
 const sourceOptions = [
   { value: '', label: '全部来源' },
   { value: 'LOCAL', label: '原创' },
-  { value: 'EXTERNAL', label: '洛谷' },
+  { value: 'LUOGU', label: '洛谷' },
+  { value: 'CODEFORCES', label: 'Codeforces' },
   { value: 'REMOTE', label: '远程' },
 ];
 
@@ -166,7 +172,7 @@ const maxDifficultyCount = computed(() => Math.max(
   ...difficultyDistribution.value.map((item) => item.count),
 ));
 
-const sourceCount = computed(() => new Set(metadataProblems.value.map((problem) => problem.source)).size);
+const sourceCount = computed(() => new Set(metadataProblems.value.map((problem) => problemPlatform(problem))).size);
 
 const paginationTokens = computed<PageToken[]>(() => {
   const count = totalPages.value;
@@ -341,6 +347,10 @@ function difficultyLabel(value: string | null) {
 
 function difficultyClass(value: string | null) {
   return value?.toLowerCase() || 'unrated';
+}
+
+function problemPlatform(problem: ProblemItem) {
+  return problem.sourceInfo?.platform || problem.source || 'LOCAL';
 }
 
 function sourceLabel(value: string) {
@@ -617,7 +627,7 @@ function requireLogin(redirect: string) {
                       <router-link :to="`/problems/${problem.id}`" class="problem-title-link">
                         {{ problem.title }}
                       </router-link>
-                      <span class="problem-source">{{ sourceLabel(problem.source) }}</span>
+                      <span class="problem-source">{{ sourceLabel(problemPlatform(problem)) }}</span>
                     </td>
                     <td>
                       <span class="difficulty-badge" :class="difficultyClass(problem.difficulty)">
@@ -668,7 +678,7 @@ function requireLogin(redirect: string) {
                   <span v-if="problem.tags.length > 2" class="tag-chip tag-more">+{{ problem.tags.length - 2 }}</span>
                 </div>
                 <div class="mobile-problem-meta">
-                  <span>{{ sourceLabel(problem.source) }}</span>
+                  <span>{{ sourceLabel(problemPlatform(problem)) }}</span>
                   <span>{{ problem.timeLimit }} ms</span>
                   <span>{{ problem.memoryLimit }} MB</span>
                   <span>{{ formatNumber(problem._count?.submissions) }} 次提交</span>

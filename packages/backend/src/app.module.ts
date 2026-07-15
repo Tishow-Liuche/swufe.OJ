@@ -10,13 +10,14 @@ import { PublicModule } from './public/public.module';
 import { TeacherModule } from './teacher/teacher.module';
 import { SyncModule } from './sync/sync.module';
 import { HelperModule } from './helper/helper.module';
+import { CodeforcesModule } from './codeforces/cf.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', '../../config/.env'] }),
     FileUploadModule, PrismaModule, AuthModule, ProblemModule,
     SubmissionModule, UserModule, TeacherModule, SyncModule,
-    HelperModule, PublicModule,
+    HelperModule, CodeforcesModule, PublicModule,
   ],
 })
 export class AppModule {}

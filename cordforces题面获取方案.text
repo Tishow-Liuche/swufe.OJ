@@ -1,0 +1,689 @@
+可以拉取，但 **Codeforces 没有提供完整题面的官方 JSON API**。官方 `Problem` 对象只包含题号、标题、分值、难度和标签等元数据，不包含题目描述、输入输出格式、样例和 Note。完整题面只能从公开题目网页中解析。([Codeforces][1])
+
+推荐采用：
+
+```text
+官方 API 同步题目元数据
+        +
+按需请求公开题目网页
+        +
+解析 .problem-statement
+        +
+清洗 HTML 并缓存到自己的数据库
+```
+
+Codeforces 的公开题目页目前直接包含标题、时间限制、内存限制、题目正文、输入输出格式、样例和 Note，因此技术上可以解析。([Codeforces][2])
+
+## 一、完整导入流程
+
+```text
+1. 调用 problemset.problems 获取题目列表
+2. 用户或教师选择导入某道题
+3. 构造公开题目地址
+4. 请求 HTML 页面
+5. 解析 .problem-statement
+6. 提取题面、限制、样例和 Note
+7. 转换相对链接
+8. 过滤危险 HTML
+9. 计算内容哈希
+10. 保存到本地数据库
+```
+
+普通题目的地址格式是：
+
+```text
+https://codeforces.com/problemset/problem/{contestId}/{index}?locale=en
+```
+
+例如：
+
+```text
+https://codeforces.com/problemset/problem/4/A?locale=en
+```
+
+## 二、建议的数据结构
+
+```ts
+interface CodeforcesStatement {
+  source: "CODEFORCES";
+
+  remoteId: string;       // 4A
+  contestId: number;      // 4
+  index: string;          // A
+  locale: "en" | "ru";
+
+  title: string;
+
+  timeLimitMs: number | null;
+  memoryLimitMb: number | null;
+
+  descriptionHtml: string;
+  inputHtml: string | null;
+  outputHtml: string | null;
+  noteHtml: string | null;
+
+  samples: Array<{
+    input: string;
+    output: string;
+  }>;
+
+  sourceUrl: string;
+
+  contentHash: string;
+  fetchedAt: Date;
+
+  rawHtml?: string;
+}
+```
+
+数据库使用联合唯一键：
+
+```sql
+UNIQUE (source, contest_id, problem_index, locale)
+```
+
+不要把 `4A` 当成唯一的内部题目 ID，应同时保存 `contestId` 和 `index`。
+
+## 三、Node.js/TypeScript 解析示例
+
+安装依赖：
+
+```bash
+npm install cheerio sanitize-html
+```
+
+实现：
+
+```ts
+import * as cheerio from "cheerio";
+import sanitizeHtml from "sanitize-html";
+import { createHash } from "node:crypto";
+
+interface ParsedCodeforcesProblem {
+  contestId: number;
+  index: string;
+  locale: "en" | "ru";
+
+  title: string;
+  timeLimitMs: number | null;
+  memoryLimitMb: number | null;
+
+  descriptionHtml: string;
+  inputHtml: string | null;
+  outputHtml: string | null;
+  noteHtml: string | null;
+
+  samples: Array<{
+    input: string;
+    output: string;
+  }>;
+
+  sourceUrl: string;
+  contentHash: string;
+  rawHtml: string;
+}
+
+const CODEFORCES_BASE_URL = "https://codeforces.com";
+
+export async function fetchCodeforcesStatement(
+  contestId: number,
+  index: string,
+  locale: "en" | "ru" = "en",
+): Promise<ParsedCodeforcesProblem> {
+  if (!Number.isInteger(contestId) || contestId <= 0) {
+    throw new Error("contestId 不合法");
+  }
+
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(index)) {
+    throw new Error("problem index 不合法");
+  }
+
+  const encodedIndex = encodeURIComponent(index);
+  const sourceUrl =
+    `${CODEFORCES_BASE_URL}/problemset/problem/` +
+    `${contestId}/${encodedIndex}?locale=${locale}`;
+
+  const response = await fetch(sourceUrl, {
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language":
+        locale === "ru" ? "ru,en;q=0.8" : "en,ru;q=0.5",
+
+      // 使用能够识别你项目的 User-Agent。
+      "User-Agent":
+        "YourOJ-ProblemImporter/1.0 (contact: admin@example.com)",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(20_000),
+  });
+
+  if (response.status === 403 || response.status === 429) {
+    throw new Error(
+      `Codeforces 拒绝或限制了请求：HTTP ${response.status}`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `获取 Codeforces 题面失败：HTTP ${response.status}`,
+    );
+  }
+
+  const rawHtml = await response.text();
+
+  if (
+    rawHtml.includes("Cloudflare") ||
+    rawHtml.includes("Attention Required") ||
+    rawHtml.includes("captcha")
+  ) {
+    throw new Error("请求被验证页面拦截，停止抓取");
+  }
+
+  const $ = cheerio.load(rawHtml);
+  const root = $(".problem-statement").first();
+
+  if (root.length === 0) {
+    throw new Error(
+      "没有找到 .problem-statement，页面结构可能已改变",
+    );
+  }
+
+  const title = normalizeText(
+    root.find(".header .title").first().text(),
+  );
+
+  if (!title) {
+    throw new Error("无法解析题目标题");
+  }
+
+  const timeLimitText = normalizeText(
+    root.find(".header .time-limit").first().text(),
+  );
+
+  const memoryLimitText = normalizeText(
+    root.find(".header .memory-limit").first().text(),
+  );
+
+  const inputHtml = extractSectionHtml(
+    $,
+    root.find(".input-specification").first(),
+  );
+
+  const outputHtml = extractSectionHtml(
+    $,
+    root.find(".output-specification").first(),
+  );
+
+  const noteHtml = extractSectionHtml(
+    $,
+    root.find(".note").first(),
+  );
+
+  const descriptionRoot = root.clone();
+
+  descriptionRoot
+    .find(
+      [
+        ".header",
+        ".input-specification",
+        ".output-specification",
+        ".sample-tests",
+        ".note",
+      ].join(","),
+    )
+    .remove();
+
+  const descriptionHtml = cleanRemoteHtml(
+    $,
+    descriptionRoot.html() ?? "",
+  );
+
+  const samples: Array<{ input: string; output: string }> = [];
+
+  root.find(".sample-tests .sample-test").each((_, element) => {
+    const sample = $(element);
+
+    const input = preElementToText(
+      $,
+      sample.find(".input pre").first(),
+    );
+
+    const output = preElementToText(
+      $,
+      sample.find(".output pre").first(),
+    );
+
+    samples.push({ input, output });
+  });
+
+  const normalizedContent = JSON.stringify({
+    contestId,
+    index,
+    locale,
+    title,
+    timeLimitText,
+    memoryLimitText,
+    descriptionHtml,
+    inputHtml,
+    outputHtml,
+    noteHtml,
+    samples,
+  });
+
+  const contentHash = createHash("sha256")
+    .update(normalizedContent)
+    .digest("hex");
+
+  return {
+    contestId,
+    index,
+    locale,
+
+    title,
+    timeLimitMs: parseTimeLimit(timeLimitText),
+    memoryLimitMb: parseMemoryLimit(memoryLimitText),
+
+    descriptionHtml,
+    inputHtml,
+    outputHtml,
+    noteHtml,
+
+    samples,
+    sourceUrl,
+    contentHash,
+    rawHtml,
+  };
+}
+
+function extractSectionHtml(
+  $: cheerio.CheerioAPI,
+  section: cheerio.Cheerio<cheerio.Element>,
+): string | null {
+  if (section.length === 0) {
+    return null;
+  }
+
+  const clone = section.clone();
+
+  // 删除 Input、Output、Note 等标题。
+  clone.children(".section-title").first().remove();
+
+  const html = cleanRemoteHtml($, clone.html() ?? "");
+
+  return html || null;
+}
+
+function cleanRemoteHtml(
+  $: cheerio.CheerioAPI,
+  html: string,
+): string {
+  const fragment = cheerio.load(html, null, false);
+
+  fragment("a[href]").each((_, element) => {
+    const href = fragment(element).attr("href");
+
+    if (!href) {
+      return;
+    }
+
+    fragment(element).attr(
+      "href",
+      new URL(href, CODEFORCES_BASE_URL).toString(),
+    );
+
+    fragment(element).attr("rel", "noopener noreferrer");
+    fragment(element).attr("target", "_blank");
+  });
+
+  fragment("img[src]").each((_, element) => {
+    const src = fragment(element).attr("src");
+
+    if (!src) {
+      return;
+    }
+
+    fragment(element).attr(
+      "src",
+      new URL(src, CODEFORCES_BASE_URL).toString(),
+    );
+  });
+
+  return sanitizeHtml(fragment.html(), {
+    allowedTags: [
+      "p",
+      "div",
+      "span",
+      "pre",
+      "code",
+      "br",
+      "b",
+      "strong",
+      "i",
+      "em",
+      "u",
+      "sub",
+      "sup",
+      "ul",
+      "ol",
+      "li",
+      "table",
+      "thead",
+      "tbody",
+      "tr",
+      "th",
+      "td",
+      "a",
+      "img",
+    ],
+
+    allowedAttributes: {
+      "*": ["class"],
+      a: ["href", "target", "rel"],
+      img: ["src", "alt", "title", "width", "height"],
+    },
+
+    allowedSchemes: ["http", "https"],
+    disallowedTagsMode: "discard",
+  }).trim();
+}
+
+function preElementToText(
+  $: cheerio.CheerioAPI,
+  element: cheerio.Cheerio<cheerio.Element>,
+): string {
+  if (element.length === 0) {
+    return "";
+  }
+
+  const clone = element.clone();
+
+  clone.find("br").replaceWith("\n");
+
+  clone.find("div").each((_, child) => {
+    $(child).append("\n");
+  });
+
+  return clone
+    .text()
+    .replace(/\r/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function parseTimeLimit(value: string): number | null {
+  const normalized = value
+    .toLowerCase()
+    .replace("time limit per test", "")
+    .trim();
+
+  const match = normalized.match(
+    /([\d.]+)\s*(second|seconds|millisecond|milliseconds)/,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+
+  if (!Number.isFinite(amount)) {
+    return null;
+  }
+
+  return unit.startsWith("millisecond")
+    ? Math.round(amount)
+    : Math.round(amount * 1000);
+}
+
+function parseMemoryLimit(value: string): number | null {
+  const normalized = value
+    .toLowerCase()
+    .replace("memory limit per test", "")
+    .trim();
+
+  const match = normalized.match(
+    /([\d.]+)\s*(megabyte|megabytes|mb)/,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+
+  return Number.isFinite(amount) ? amount : null;
+}
+```
+
+调用示例：
+
+```ts
+const problem = await fetchCodeforcesStatement(4, "A", "en");
+
+console.log(problem.title);
+console.log(problem.timeLimitMs);
+console.log(problem.samples);
+```
+
+## 四、题面正文解析需要特别处理
+
+Codeforces 的题面不是简单纯文本，其中可能包含：
+
+* 数学公式；
+* 上标和下标；
+* 表格；
+* 图片；
+* 多段样例；
+* 特殊字符；
+* 链接；
+* HTML 实体。
+
+建议同时保存：
+
+```ts
+{
+  rawHtml,
+  sanitizedHtml,
+  contentHash
+}
+```
+
+不要只保存纯文本，否则公式、表格和格式容易丢失。
+
+渲染时需要：
+
+```text
+HTML Sanitizer
++
+MathJax 或 KaTeX
+```
+
+不要直接执行：
+
+```ts
+container.innerHTML = remoteHtml;
+```
+
+未经清洗的远程 HTML可能带来 XSS 风险。
+
+## 五、建议采用“按需拉取”，不要全量并发抓取
+
+不建议在第一次部署时一次性抓取全部 Codeforces 题面。
+
+推荐：
+
+```text
+官方 API：
+定期同步所有题目的元数据
+
+完整题面：
+教师导入时抓取
+或用户首次访问时进入低速队列
+
+抓取成功后：
+长期缓存到本地数据库
+```
+
+建议内部策略：
+
+```ts
+const statementImportPolicy = {
+  concurrency: 1,
+  minimumIntervalMs: 5000,
+  requestTimeoutMs: 20000,
+  maximumRetries: 1,
+  refreshAfterDays: 30,
+};
+```
+
+这里的 5 秒间隔是保守的项目配置，不是 Codeforces 官方公布的网页抓取额度。
+
+出现以下状态时立即停止，而不是尝试绕过：
+
+```text
+HTTP 403
+HTTP 429
+HTTP 503
+验证码页面
+验证页面
+题目不可访问
+页面结构无法识别
+```
+
+## 六、数据库更新规则
+
+导入时执行 Upsert：
+
+```ts
+await prisma.problemStatement.upsert({
+  where: {
+    source_contestId_index_locale: {
+      source: "CODEFORCES",
+      contestId: problem.contestId,
+      index: problem.index,
+      locale: problem.locale,
+    },
+  },
+
+  create: {
+    source: "CODEFORCES",
+    contestId: problem.contestId,
+    index: problem.index,
+    locale: problem.locale,
+
+    title: problem.title,
+    descriptionHtml: problem.descriptionHtml,
+    inputHtml: problem.inputHtml,
+    outputHtml: problem.outputHtml,
+    noteHtml: problem.noteHtml,
+
+    samples: problem.samples,
+
+    timeLimitMs: problem.timeLimitMs,
+    memoryLimitMb: problem.memoryLimitMb,
+
+    sourceUrl: problem.sourceUrl,
+    contentHash: problem.contentHash,
+    fetchedAt: new Date(),
+
+    rawHtml: problem.rawHtml,
+  },
+
+  update: {
+    title: problem.title,
+    descriptionHtml: problem.descriptionHtml,
+    inputHtml: problem.inputHtml,
+    outputHtml: problem.outputHtml,
+    noteHtml: problem.noteHtml,
+
+    samples: problem.samples,
+
+    timeLimitMs: problem.timeLimitMs,
+    memoryLimitMb: problem.memoryLimitMb,
+
+    sourceUrl: problem.sourceUrl,
+    contentHash: problem.contentHash,
+    fetchedAt: new Date(),
+
+    rawHtml: problem.rawHtml,
+  },
+});
+```
+
+教师修改内容应单独保存：
+
+```ts
+interface ProblemContent {
+  sourceContent: CodeforcesStatement;
+  localContent: TeacherEditedStatement | null;
+}
+```
+
+展示规则：
+
+```ts
+const displayedStatement =
+  problem.localContent ?? problem.sourceContent;
+```
+
+重新同步不得覆盖教师编辑版本。
+
+## 七、必须保留来源信息
+
+题目页面至少显示：
+
+```text
+来源：Codeforces
+原题编号：4A
+原题链接：Codeforces
+题面语言：English
+最后同步时间：……
+```
+
+Codeforces 条款明确限制销售、再许可或以其他方式商业化网站材料，同时禁止以可能损害网站或影响用户访问的方式使用网站。因此，批量复制并公开完整题面，特别是商业项目，应该先向 Codeforces 或相应题目权利方取得明确许可；抓取任务也不应对其服务造成明显负载。([Codeforces][3])
+
+## 八、推荐的最终模式
+
+```text
+题库列表：
+使用 Codeforces 官方 API
+
+完整题面：
+教师按需导入公开历史题目
+
+题面存储：
+清洗 HTML + 本地缓存 + 内容哈希
+
+Remote Judge：
+用户绑定 Codeforces 账号
++
+浏览器 Helper 提交
+
+异常时：
+降级到 Codeforces 原题页面
+```
+
+不要依赖未经公开的 JSON 接口，也不要把网页解析器写进核心业务模块。单独建立：
+
+```text
+adapters/
+└── codeforces/
+    ├── metadata-provider.ts
+    ├── statement-fetcher.ts
+    ├── statement-parser.ts
+    ├── html-sanitizer.ts
+    ├── language-map.ts
+    └── browser-submit-helper.ts
+```
+
+这样 Codeforces 页面结构变化时，只需要更新 `statement-parser.ts`，不会影响题库、用户和比赛模块。
+
+[1]: https://codeforces.com/apiHelp/methods?utm_source=chatgpt.com "Codeforces API"
+[2]: https://codeforces.com/problemset/problem/4/A?locale=en "Problem - 4A - Codeforces"
+[3]: https://codeforces.com/terms "Terms and Conditions - Codeforces"

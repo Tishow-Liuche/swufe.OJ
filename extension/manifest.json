@@ -1,1 +1,0 @@
-{"manifest_version":3,"name":"OJ CF Helper v3","version":"3.0.0","permissions":["storage"],"host_permissions":["https://codeforces.com/*","http://127.0.0.1:3000/*"],"content_scripts":[{"matches":["http://127.0.0.1:3000/*"],"js":["cf.js"],"run_at":"document_idle"},{"matches":["https://codeforces.com/*"],"js":["cf-inject.js"],"run_at":"document_idle"}]}

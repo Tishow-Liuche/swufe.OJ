@@ -9,6 +9,13 @@ export interface RemoteProblemData {
   memoryLimit?: number;
   tags?: string[];
   url?: string;
+  description?: string;
+  background?: string;
+  inputFormat?: string;
+  outputFormat?: string;
+  samples?: Array<{ input: string; output: string }>;
+  hint?: string;
+  dataRange?: string;
 }
 
 export interface SyncAdapter {
@@ -43,12 +50,27 @@ export class SyncService {
     const adapter = this.adapters.get(platform);
     if (!adapter) throw new Error(`No adapter for platform: ${platform}`);
 
-    // 检查是否已存在
+    // 检查是否已存在 — 如果已有题面则跳过，否则拉取完整题面更新
     const existing = await this.prisma.problemSource.findFirst({
       where: { platform, remoteProblemId: remoteId },
-      include: { problem: true },
+      include: { problem: { include: { versions: { where: { isCurrent: true } } } } },
     });
-    if (existing) return existing.problem.id;
+    if (existing) {
+      // 如果已有真实题面（非占位符），跳过
+      const cv = existing.problem.versions[0];
+      if (cv && !cv.description.startsWith('来自 ' + platform)) return existing.problem.id;
+      // 否则刷新题面
+      const data = await adapter.fetchProblem(remoteId);
+      if (data && data.description) {
+        await this.prisma.problemVersion.update({ where: { id: cv!.id }, data: {
+          description: data.description, inputFormat: data.inputFormat, outputFormat: data.outputFormat,
+          sampleInput: data.samples?.map(s => s.input).join('\n---\n'), sampleOutput: data.samples?.map(s => s.output).join('\n---\n'),
+          hint: data.hint, dataRange: data.dataRange,
+        }});
+        this.logger.log('Refreshed description: ' + remoteId);
+      }
+      return existing.problem.id;
+    }
 
     // 获取题目数据
     const data = await adapter.fetchProblem(remoteId);
@@ -64,7 +86,16 @@ export class SyncService {
         memoryLimit: data.memoryLimit || 256,
         status: 'PUBLISHED',
         versions: {
-          create: { version: 1, description: `来自 ${platform} 题库：${data.url || ''}` },
+          create: {
+            version: 1,
+            description: data.description || `来自 ${platform} 题库：${data.url || ''}`,
+            inputFormat: data.inputFormat,
+            outputFormat: data.outputFormat,
+            sampleInput: data.samples?.map(s => s.input).join('\n---\n'),
+            sampleOutput: data.samples?.map(s => s.output).join('\n---\n'),
+            hint: data.hint,
+            dataRange: data.dataRange,
+          },
         },
         tags: { create: (data.tags || []).map(n => ({ name: n, type: 'TAG' })) },
         sourceInfo: {

@@ -142,9 +142,17 @@ export class ProblemService {
   async findAll(query: any) {
     const { keyword, source, difficulty, status, tag, page = 1, pageSize = 20 } = query;
     const where: any = {};
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const currentPageSize = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
     where.status = status || 'PUBLISHED'; // 默认只返回已发布，教师可传入草稿
     if (keyword) where.title = { contains: keyword, mode: 'insensitive' };
-    if (source) where.source = source;
+    if (source) {
+      if (source === 'LUOGU' || source === 'CODEFORCES') {
+        where.sourceInfo = { platform: source };
+      } else {
+        where.source = source;
+      }
+    }
     if (difficulty) where.difficulty = difficulty;
     if (tag) where.tags = { some: { name: tag } };
 
@@ -154,15 +162,22 @@ export class ProblemService {
         select: {
           id: true, title: true, source: true, difficulty: true,
           timeLimit: true, memoryLimit: true, createdAt: true,
+          sourceInfo: {
+            select: {
+              platform: true,
+              remoteProblemId: true,
+              remoteUrl: true,
+            },
+          },
           tags: { select: { name: true } },
           _count: { select: { submissions: true } },
         },
-        skip: (page - 1) * pageSize, take: pageSize,
+        skip: (currentPage - 1) * currentPageSize, take: currentPageSize,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.problem.count({ where }),
     ]);
-    return { items, total, page, pageSize };
+    return { items, total, page: currentPage, pageSize: currentPageSize };
   }
 
   async findOne(id: string) {

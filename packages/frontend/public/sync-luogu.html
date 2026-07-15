@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>洛谷题面批量同步</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 800px; margin: 30px auto; padding: 20px; background: #f8f9fa; }
+  h1 { color: #333; }
+  .controls { margin: 16px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { padding: 10px 24px; border: none; border-radius: 6px; font-size: 15px; cursor: pointer; font-weight: 600; }
+  .btn-start { background: #27ae60; color: #fff; }
+  .btn-start:hover { background: #219a52; }
+  .btn-pause { background: #f39c12; color: #fff; }
+  .btn-stop { background: #e74c3c; color: #fff; }
+  .btn-stop:hover { background: #c0392b; }
+  .stats { display: flex; gap: 20px; margin: 16px 0; flex-wrap: wrap; }
+  .stat { background: #fff; padding: 12px 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .stat .val { font-size: 28px; font-weight: 700; color: #2c3e50; }
+  .stat .lbl { font-size: 12px; color: #888; }
+  #log { background: #1e1e1e; color: #d4d4d4; font: 12px monospace; padding: 12px; border-radius: 6px; height: 400px; overflow-y: auto; white-space: pre-wrap; }
+  .bar { height: 6px; background: #ecf0f1; border-radius: 3px; overflow: hidden; margin: 12px 0; }
+  .bar-inner { height: 100%; background: #3498db; border-radius: 3px; transition: width .3s; }
+</style>
+</head>
+<body>
+<h1>📡 洛谷题面同步器</h1>
+<p>从浏览器端抓取洛谷完整题面，回传到 OJ 平台。</p>
+
+<div class="controls">
+  <button class="btn-start" id="btnStart" onclick="start()">▶ 开始同步</button>
+  <button class="btn-pause" id="btnPause" onclick="pause()" disabled>⏸ 暂停</button>
+  <button class="btn-stop" id="btnStop" onclick="stop()" disabled>⏹ 停止</button>
+  <label style="margin-left:8px">延迟: <select id="delay"><option value="1000">1s</option><option value="1500" selected>1.5s</option><option value="2000">2s</option><option value="3000">3s</option></select></label>
+  <label>范围: <input id="rangeStart" value="1001" size="5"> - <input id="rangeEnd" value="1100" size="5"></label>
+  <label style="font-size:12px;color:#888">(测试先 P1001-P1100 看看效果)</label>
+</div>
+
+<div class="bar"><div class="bar-inner" id="bar" style="width:0%"></div></div>
+
+<div class="stats">
+  <div class="stat"><div class="val" id="total">0</div><div class="lbl">总请求</div></div>
+  <div class="stat"><div class="val" id="ok">0</div><div class="lbl">成功</div></div>
+  <div class="stat"><div class="val" id="skip">0</div><div class="lbl">跳过(已有题面)</div></div>
+  <div class="stat"><div class="val" id="fail">0</div><div class="lbl">失败</div></div>
+  <div class="stat"><div class="val" id="eta">-</div><div class="lbl">预计剩余</div></div>
+</div>
+
+<div id="log">等待开始...</div>
+
+<script>
+const API = 'http://localhost:3000';
+const LUOGU = 'https://www.luogu.com.cn';
+let running = false, paused = false, current = 0, totalCount = 0;
+let stats = { total:0, ok:0, skip:0, fail:0 };
+const startTime = 0;
+
+function log(msg, color) {
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString();
+  const span = document.createElement('span');
+  span.style.color = color || '#d4d4d4';
+  span.textContent = `[${t}] ${msg}\n`;
+  el.appendChild(span);
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateStats() {
+  document.getElementById('total').textContent = stats.total;
+  document.getElementById('ok').textContent = stats.ok;
+  document.getElementById('skip').textContent = stats.skip;
+  document.getElementById('fail').textContent = stats.fail;
+  const pct = totalCount > 0 ? ((current / totalCount) * 100).toFixed(1) : 0;
+  document.getElementById('bar').style.width = pct + '%';
+
+  if (running && stats.total > 0) {
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = stats.total / elapsed;
+    const remain = (totalCount - current) / rate;
+    const mins = Math.floor(remain / 60);
+    const secs = Math.floor(remain % 60);
+    document.getElementById('eta').textContent = mins + 'm' + secs + 's';
+  }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function start() {
+  if (running) return;
+  running = true; paused = false;
+
+  const btnS = document.getElementById('btnStart'); btnS.disabled = true;
+  document.getElementById('btnPause').disabled = false;
+  document.getElementById('btnStop').disabled = false;
+
+  const from = parseInt(document.getElementById('rangeStart').value) || 1001;
+  const to = parseInt(document.getElementById('rangeEnd').value) || 1100;
+  totalCount = to - from + 1;
+
+  log('🚀 开始同步 P' + from + ' ~ P' + to + ' (' + totalCount + ' 题)', '#27ae60');
+
+  for (let i = from; i <= to && running; i++) {
+    while (paused && running) { await sleep(500); }
+    if (!running) break;
+
+    current = i - from + 1;
+    await syncOne('P' + i);
+    updateStats();
+
+    const delay = parseInt(document.getElementById('delay').value) || 1500;
+    await sleep(delay);
+  }
+
+  log(running ? '🎉 同步完成！' : '⏹ 已停止', running ? '#27ae60' : '#f39c12');
+  reset();
+}
+
+// for each: fetch Luogu API → send to OJ
+async function syncOne(pid) {
+  stats.total++;
+  try {
+    // 1. Fetch from Luogu API (works in browser!)
+    const resp = await fetch(LUOGU + '/problem/' + pid + '?_contentOnly=1', {
+      headers: { 'User-Agent': navigator.userAgent, 'Referer': LUOGU + '/' }
+    });
+    if (!resp.ok) { stats.fail++; log(pid + ' HTTP ' + resp.status, '#e74c3c'); return; }
+
+    const data = await resp.json();
+    const p = data?.currentData?.problem;
+    if (!p) { stats.fail++; log(pid + ' 不存在', '#e74c3c'); return; }
+
+    // 2. Build full description
+    const parts = [];
+    if (p.background) parts.push(p.background);
+    if (p.description) parts.push(p.description);
+    if (p.inputFormat) parts.push(p.inputFormat);
+    if (p.outputFormat) parts.push(p.outputFormat);
+
+    if (p.samples?.length) {
+      parts.push('## 样例');
+      p.samples.forEach((s, i) => {
+        parts.push('### 样例 #' + (i+1));
+        parts.push('```input\n' + (s[0]||'').trim() + '\n```');
+        parts.push('```output\n' + (s[1]||'').trim() + '\n```');
+      });
+    }
+    if (p.hint) {
+      parts.push('## 提示');
+      parts.push(Array.isArray(p.hint) ? p.hint.join('\n\n') : String(p.hint));
+    }
+
+    const desc = parts.join('\n\n');
+    const tags = (p.tags || []).map(t => typeof t === 'string' ? t : t.name).filter(Boolean);
+
+    // 3. Send to OJ
+    const r = await fetch(API + '/api/sync/luogu-description', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pid, title: pid + ' ' + (p.title || ''),
+        description: desc,
+        inputFormat: p.inputFormat || '',
+        outputFormat: p.outputFormat || '',
+        samples: (p.samples || []).map(s => ({ input: s[0] || '', output: s[1] || '' })),
+        hint: Array.isArray(p.hint) ? p.hint.join('\n\n') : (p.hint || ''),
+        difficulty: p.difficulty || 0,
+        timeLimit: (p.limits?.time?.[0] || 1) * 1000,
+        memoryLimit: p.limits?.memory?.[0] || 256,
+        tags,
+      }),
+    });
+
+    if (r.ok) {
+      const j = await r.json();
+      if (j.updated) { stats.ok++; log(pid + ' ✅ 已更新 — ' + p.title, '#27ae60'); }
+      else { stats.skip++; log(pid + ' ⏭ 已有完整题面', '#888'); }
+    } else {
+      stats.fail++;
+      log(pid + ' ❌ 保存失败 HTTP ' + r.status, '#e74c3c');
+    }
+  } catch (e) {
+    stats.fail++;
+    log(pid + ' ❌ ' + e.message, '#e74c3c');
+  }
+}
+
+function pause() {
+  paused = !paused;
+  if (paused) {
+    log('⏸ 已暂停', '#f39c12');
+    document.getElementById('btnPause').textContent = '▶ 继续';
+  } else {
+    log('▶ 已继续', '#27ae60');
+    document.getElementById('btnPause').textContent = '⏸ 暂停';
+  }
+}
+
+function stop() {
+  running = false; paused = false;
+  reset();
+}
+
+function reset() {
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnPause').disabled = true;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnPause').textContent = '⏸ 暂停';
+}
+</script>
+</body>
+</html>

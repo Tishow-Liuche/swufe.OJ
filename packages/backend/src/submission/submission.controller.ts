@@ -20,7 +20,7 @@ export class SubmissionController {
   findAll(@Query() query: any, @Req() req: any) {
     const isTeacherOrAdmin = req.user.role === 'TEACHER' || req.user.role === 'ADMIN';
     if (!isTeacherOrAdmin) {
-      query.userId = req.user.id; // 学生强制只看自己
+      query.userId = req.user.id;
     }
     return this.submission.findAll(query);
   }
@@ -35,23 +35,12 @@ export class SubmissionController {
     if (!isOwner && !isTeacherOrAdmin) {
       throw new ForbiddenException('无权查看此提交');
     }
-    // 学生不能看隐藏测试数据
     if (!isTeacherOrAdmin && (sub as any).cases) {
       (sub as any).cases = (sub as any).cases.map((c: any) => ({
         caseIndex: c.caseIndex, status: c.status, timeUsed: c.timeUsed, memoryUsed: c.memoryUsed,
       }));
     }
     return sub;
-  }
-
-  /** 回填第三方评测结果（Helper 扩展调用，无需 JWT） */
-  @Post(':id/fill-result')
-  fillResult(@Param('id') id: string, @Body() data: {
-    status: string; score?: number; timeUsed?: number; memoryUsed?: number; remoteSubmissionId?: string;
-    userId?: string;
-  }) {
-    // 验证提交属于该用户
-    return this.submission.fillExternalResultUnsafe(id, data.userId || '', data);
   }
 
   /** 重判（教师/管理员） */

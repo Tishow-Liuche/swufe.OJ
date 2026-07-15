@@ -13,7 +13,6 @@ export class HelperService {
 
   async seedPlatforms() {
     const platforms = [
-      { code: 'CODEFORCES', name: 'Codeforces', baseUrl: 'https://codeforces.com', supportsMetadata: true, supportsBrowserSubmission: true, supportsOfficialResultApi: true },
       { code: 'LUOGU', name: '洛谷', baseUrl: 'https://www.luogu.com.cn', supportsMetadata: true, supportsBrowserSubmission: true },
       { code: 'NOWCODER', name: '牛客', baseUrl: 'https://ac.nowcoder.com', supportsMetadata: true, supportsBrowserSubmission: true },
       { code: 'QOJ', name: 'QOJ', baseUrl: 'https://qoj.ac', supportsMetadata: true, supportsBrowserSubmission: true },
@@ -101,7 +100,7 @@ export class HelperService {
     language: string; sourceCode: string; remoteContestId?: string; remoteProblemIndex?: string;
   }) {
     const nonce = randomBytes(16).toString('hex');
-    const expiresAt = new Date(Date.now() + 120_000); // 2分钟
+    const expiresAt = new Date(Date.now() + 600_000); // 10分钟
 
     return this.prisma.remoteSubmissionTask.create({
       data: {
@@ -116,26 +115,29 @@ export class HelperService {
     });
   }
 
-  /** 获取下一个待处理任务 */
+  /** 获取下一个待处理任务（不自动分配，防止任务丢失） */
   async getNextTask(userId: string, deviceId: string) {
+    const now = new Date();
     const task = await this.prisma.remoteSubmissionTask.findFirst({
       where: {
         userId,
-        status: 'PENDING',
+        status: { in: ['PENDING', 'ASSIGNED'] },
+        expiresAt: { gt: now },
       },
       orderBy: { createdAt: 'asc' },
     });
     if (!task) return null;
 
-    // 分配任务到设备
-    await this.prisma.remoteSubmissionTask.update({
-      where: { id: task.id },
-      data: {
-        status: 'ASSIGNED',
-        assignedHelperDeviceId: deviceId,
-        attemptCount: { increment: 1 },
-      },
-    });
+    // 仅在首次获取时更新设备信息（不改变状态，由扩展确认后再改）
+    if (task.status === 'PENDING') {
+      await this.prisma.remoteSubmissionTask.update({
+        where: { id: task.id },
+        data: {
+          assignedHelperDeviceId: deviceId,
+          attemptCount: { increment: 1 },
+        },
+      });
+    }
 
     return {
       taskId: task.id,
