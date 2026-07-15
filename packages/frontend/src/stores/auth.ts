@@ -2,24 +2,54 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import api from '../api/client';
 
+interface AuthUser {
+  id: string;
+  username: string;
+  role: string;
+  nickname?: string;
+  school?: string;
+  requestedRole?: 'STUDENT' | 'TEACHER';
+  teacherApplicationStatus?: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED';
+}
+
+function storedValue(key: string) {
+  return localStorage.getItem(key) || sessionStorage.getItem(key) || '';
+}
+
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('accessToken') || '');
-  const user = ref<{ id: string; username: string; role: string; nickname?: string } | null>(null);
+  const token = ref(storedValue('accessToken'));
+  const user = ref<AuthUser | null>(null);
   const loading = ref(false);
 
-  function setAuth(accessToken: string, refreshToken: string) {
+  async function setAuth(accessToken: string, refreshToken: string, remember = true) {
+    clearStoredTokens();
+    const storage = remember ? localStorage : sessionStorage;
     token.value = accessToken;
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
-    // 登录后立即获取用户信息
-    fetchProfile();
+    storage.setItem('accessToken', accessToken);
+    storage.setItem('refreshToken', refreshToken);
+    await fetchProfile();
+  }
+
+  function clearStoredTokens() {
+    for (const storage of [localStorage, sessionStorage]) {
+      storage.removeItem('accessToken');
+      storage.removeItem('refreshToken');
+    }
   }
 
   function clearAuth() {
     token.value = '';
     user.value = null;
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    clearStoredTokens();
+  }
+
+  async function logout() {
+    const refreshToken = storedValue('refreshToken');
+    try {
+      if (refreshToken) await api.post('/api/auth/logout', { refreshToken });
+    } finally {
+      clearAuth();
+    }
   }
 
   async function fetchProfile() {
@@ -43,5 +73,17 @@ export const useAuthStore = defineStore('auth', () => {
   // 启动时如果有 token 就加载 profile
   if (token.value) fetchProfile();
 
-  return { token, user, loading, setAuth, clearAuth, fetchProfile, isLoggedIn, isAdmin, isTeacher, isStudent };
+  return {
+    token,
+    user,
+    loading,
+    setAuth,
+    clearAuth,
+    logout,
+    fetchProfile,
+    isLoggedIn,
+    isAdmin,
+    isTeacher,
+    isStudent,
+  };
 });
