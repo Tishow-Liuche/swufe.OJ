@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { UserService } from './user.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -16,8 +16,50 @@ export class UserController {
 
   @Patch('profile')
   @UseGuards(AuthGuard('jwt'))
-  updateProfile(@Req() req: any, @Body() data: { nickname?: string; avatar?: string }) {
+  updateProfile(
+    @Req() req: any,
+    @Body() data: { nickname?: string | null; avatar?: string | null; email?: string; phone?: string | null },
+  ) {
     return this.userService.updateProfile(req.user.id, data);
+  }
+
+  @Get('settings')
+  @UseGuards(AuthGuard('jwt'))
+  getSettings(@Req() req: any) {
+    return this.userService.getSettings(req.user.id);
+  }
+
+  @Put('external-accounts')
+  @UseGuards(AuthGuard('jwt'))
+  updateExternalAccounts(
+    @Req() req: any,
+    @Body() data: { codeforcesHandle?: string | null; luoguHandle?: string | null },
+  ) {
+    return this.userService.updateExternalAccounts(req.user.id, data);
+  }
+
+  @Get('awards')
+  @UseGuards(AuthGuard('jwt'))
+  listAwards(@Req() req: any) {
+    return this.userService.listAwards(req.user.id);
+  }
+
+  @Post('awards')
+  @UseGuards(AuthGuard('jwt'))
+  createAward(@Req() req: any, @Body() data: any) {
+    return this.userService.createAward(req.user.id, data);
+  }
+
+  @Patch('awards/:id')
+  @UseGuards(AuthGuard('jwt'))
+  updateAward(@Req() req: any, @Param('id') id: string, @Body() data: any) {
+    return this.userService.updateAward(req.user.id, id, data);
+  }
+
+  @Delete('awards/:id')
+  @UseGuards(AuthGuard('jwt'))
+  deleteAward(@Req() req: any, @Param('id') id: string) {
+    return this.userService.deleteAward(req.user.id, id);
   }
 
   @Get('stats')

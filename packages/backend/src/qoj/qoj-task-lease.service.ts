@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { normalizeLuoguStatus, normalizeOptionalMetric } from '../luogu/luogu-task-lease.service';
 
 const LEASE_TTL_MS = 2 * 60 * 1000;
-const OPEN_STATUSES = ['PENDING', 'PROCESSING', 'QUEUING', 'JUDGING'];
 const TERMINAL_STATUSES = new Set([
   'ACCEPTED',
   'WRONG_ANSWER',
@@ -22,7 +22,7 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 @Injectable()
-export class LuoguTaskLeaseService {
+export class QojTaskLeaseService {
   constructor(private readonly prisma: PrismaService) {}
 
   async lookup(problemId: string) {
@@ -30,7 +30,7 @@ export class LuoguTaskLeaseService {
 
     const task = await this.prisma.remoteSubmissionTask.findFirst({
       where: {
-        platformCode: 'LUOGU',
+        platformCode: 'QOJ',
         status: { in: ['PENDING', 'PROCESSING'] },
         remoteProblemId: problemId,
         expiresAt: { gt: new Date() },
@@ -38,9 +38,7 @@ export class LuoguTaskLeaseService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (!task) {
-      throw new NotFoundException('No pending Luogu task for problem ' + problemId);
-    }
+    if (!task) throw new NotFoundException('No pending QOJ task for problem ' + problemId);
 
     const token = task.nonce || randomBytes(16).toString('hex');
     if (!task.nonce) {
@@ -64,17 +62,9 @@ export class LuoguTaskLeaseService {
     const task = await this.loadTask(submissionId, token);
     const now = new Date();
 
-    if (
-      task.leaseNonce &&
-      task.leaseExpiresAt &&
-      task.leaseExpiresAt.getTime() > now.getTime()
-    ) {
+    if (task.leaseNonce && task.leaseExpiresAt && task.leaseExpiresAt.getTime() > now.getTime()) {
       if (replayLeaseNonce && replayLeaseNonce === task.leaseNonce) {
-        return {
-          submissionId,
-          leaseNonce: task.leaseNonce,
-          leaseExpiresAt: task.leaseExpiresAt,
-        };
+        return { submissionId, leaseNonce: task.leaseNonce, leaseExpiresAt: task.leaseExpiresAt };
       }
       return {
         submissionId,
@@ -86,17 +76,10 @@ export class LuoguTaskLeaseService {
 
     const leaseNonce = randomBytes(16).toString('hex');
     const leaseExpiresAt = new Date(now.getTime() + LEASE_TTL_MS);
-
     await this.prisma.remoteSubmissionTask.update({
       where: { submissionId },
-      data: {
-        leaseNonce,
-        leaseExpiresAt,
-        helperStage: 'LEASED',
-        status: 'PROCESSING',
-      },
+      data: { leaseNonce, leaseExpiresAt, helperStage: 'LEASED', status: 'PROCESSING' },
     });
-
     return { submissionId, leaseNonce, leaseExpiresAt };
   }
 
@@ -117,22 +100,11 @@ export class LuoguTaskLeaseService {
     await this.prisma.$transaction(async (tx) => {
       await tx.remoteSubmissionTask.update({
         where: { submissionId },
-        data: {
-          remoteSubmissionId: rid,
-          helperStage: 'REMOTE_ID_REPORTED',
-          status: 'PROCESSING',
-        },
+        data: { remoteSubmissionId: rid, helperStage: 'REMOTE_ID_REPORTED', status: 'PROCESSING' },
       });
-      await tx.remoteJudgeJob.update({
-        where: { submissionId },
-        data: { remoteSubmissionId: rid },
-      });
-      await tx.submission.update({
-        where: { id: submissionId },
-        data: { status: 'JUDGING' },
-      });
+      await tx.remoteJudgeJob.update({ where: { submissionId }, data: { remoteSubmissionId: rid } });
+      await tx.submission.update({ where: { id: submissionId }, data: { status: 'JUDGING' } });
     });
-
     return { ok: true, submissionId, remoteSubmissionId: rid, status: 'JUDGING' };
   }
 
@@ -155,7 +127,7 @@ export class LuoguTaskLeaseService {
       throw new ConflictException('Lease nonce mismatch');
     }
 
-    const status = normalizeLuoguStatus(data.status);
+    const status = normalizeQojStatus(data.status);
     const terminal = TERMINAL_STATUSES.has(status);
     const score = normalizeOptionalMetric(data.score) ?? (status === 'ACCEPTED' ? 100 : 0);
     const timeUsed = normalizeOptionalMetric(data.timeUsed);
@@ -175,9 +147,7 @@ export class LuoguTaskLeaseService {
           judgedAt: terminal ? new Date() : undefined,
         },
       });
-      await tx.submissionCase.deleteMany({
-        where: { submissionId, caseIndex: 1 },
-      });
+      await tx.submissionCase.deleteMany({ where: { submissionId, caseIndex: 1 } });
       await tx.submissionCase.create({
         data: {
           submissionId,
@@ -211,59 +181,17 @@ export class LuoguTaskLeaseService {
   private async loadTask(submissionId: string, token: string) {
     if (!submissionId) throw new BadRequestException('submissionId required');
     if (!token) throw new BadRequestException('token required');
-
-    const task = await this.prisma.remoteSubmissionTask.findUnique({
-      where: { submissionId },
-    });
-
-    if (!task || task.platformCode !== 'LUOGU') {
-      throw new NotFoundException('Task not found');
-    }
-    if (task.nonce && task.nonce !== token) {
-      throw new ConflictException('Task token mismatch');
-    }
+    const task = await this.prisma.remoteSubmissionTask.findUnique({ where: { submissionId } });
+    if (!task || task.platformCode !== 'QOJ') throw new NotFoundException('Task not found');
+    if (task.nonce && task.nonce !== token) throw new ConflictException('Task token mismatch');
     if (task.status === 'COMPLETED' || task.status === 'FAILED') {
       throw new ConflictException('Task is already terminal');
     }
-    if (task.expiresAt.getTime() <= Date.now()) {
-      throw new ConflictException('Task expired');
-    }
-
+    if (task.expiresAt.getTime() <= Date.now()) throw new ConflictException('Task expired');
     return task;
   }
 }
 
-export function normalizeLuoguStatus(raw: string): string {
-  const text = String(raw || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
-  const map: Record<string, string> = {
-    AC: 'ACCEPTED',
-    ACCEPTED: 'ACCEPTED',
-    WA: 'WRONG_ANSWER',
-    WRONG_ANSWER: 'WRONG_ANSWER',
-    TLE: 'TIME_LIMIT_EXCEEDED',
-    TIME_LIMIT_EXCEEDED: 'TIME_LIMIT_EXCEEDED',
-    MLE: 'MEMORY_LIMIT_EXCEEDED',
-    MEMORY_LIMIT_EXCEEDED: 'MEMORY_LIMIT_EXCEEDED',
-    RE: 'RUNTIME_ERROR',
-    RUNTIME_ERROR: 'RUNTIME_ERROR',
-    CE: 'COMPILE_ERROR',
-    COMPILE_ERROR: 'COMPILE_ERROR',
-    OLE: 'SYSTEM_ERROR',
-    UKE: 'SYSTEM_ERROR',
-    JUDGING: 'JUDGING',
-    QUEUING: 'QUEUING',
-    WAITING: 'QUEUING',
-    COMPILING: 'JUDGING',
-    RUNNING: 'JUDGING',
-  };
-  return map[text] || 'SYSTEM_ERROR';
-}
-
-export function normalizeOptionalMetric(raw: unknown): number | undefined {
-  if (raw === null || raw === undefined) return undefined;
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : undefined;
-  const match = String(raw).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
-  if (!match) return undefined;
-  const value = Number(match[0]);
-  return Number.isFinite(value) ? value : undefined;
+export function normalizeQojStatus(raw: string): string {
+  return normalizeLuoguStatus(raw);
 }

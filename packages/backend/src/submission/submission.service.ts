@@ -4,7 +4,7 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CfSubmissionService } from '../codeforces/cf-submission.service';
 import { LuoguSubmissionService } from '../luogu/luogu-submission.service';
-import { LearningService } from '../learning/learning.service';
+import { QojSubmissionService } from '../qoj/qoj-submission.service';
 
 @Injectable()
 export class SubmissionService {
@@ -14,7 +14,7 @@ export class SubmissionService {
     private prisma: PrismaService,
     private cfSubmission: CfSubmissionService,
     private luoguSubmission: LuoguSubmissionService,
-    private learning: LearningService,
+    private qojSubmission: QojSubmissionService,
     @InjectQueue('judge') private judgeQueue: Queue,
   ) {}
 
@@ -40,6 +40,10 @@ export class SubmissionService {
     if (platform === 'LUOGU') {
       this.log.log(`Luogu route: problem=${dto.problemId} user=${userId}`);
       return this.luoguSubmission.createTask(userId, dto.problemId, dto.language, dto.sourceCode);
+    }
+    if (platform === 'QOJ') {
+      this.log.log(`QOJ route: problem=${dto.problemId} user=${userId}`);
+      return this.qojSubmission.createTask(userId, dto.problemId, dto.language, dto.sourceCode);
     }
 
     // Local judge path
@@ -103,9 +107,5 @@ export class SubmissionService {
       sourceCode: sub.sourceCode, timeLimit: problem?.timeLimit || 1000,
       memoryLimit: problem?.memoryLimit || 256 }, { priority: 2 });
     return { id, status: 'QUEUING' };
-  }
-
-  async recordExternalResult(submissionId: string, status: string) {
-    await this.learning.recordSubmissionResult(submissionId, status);
   }
 }

@@ -50,6 +50,9 @@ api.interceptors.response.use(
           clearStoredTokens();
           window.location.href = '/login';
         }
+      } else {
+        clearStoredTokens();
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);

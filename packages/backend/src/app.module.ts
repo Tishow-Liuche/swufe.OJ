@@ -15,6 +15,7 @@ import { ContestModule } from './contest/contest.module';
 import { CommunityModule } from './community/community.module';
 import { AtCoderModule } from './atcoder/atcoder.module';
 import { LearningModule } from './learning/learning.module';
+import { QojModule } from './qoj/qoj.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { LearningModule } from './learning/learning.module';
     SubmissionModule, UserModule, TeacherModule, SyncModule,
     HelperModule, CodeforcesModule, PublicModule,
     ContestModule, CommunityModule, AtCoderModule, LearningModule,
+    QojModule,
   ],
 })
 export class AppModule {}

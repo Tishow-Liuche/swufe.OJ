@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { TeacherService } from './teacher.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -29,13 +29,28 @@ export class TeacherController {
     return this.teacherService.getClassMembers(id, req.user.id);
   }
 
+  @Delete('classes/:id/members/:userId')
+  removeStudent(@Param('id') id: string, @Param('userId') userId: string, @Req() req: any) {
+    return this.teacherService.removeStudent(id, req.user.id, userId);
+  }
+
   // === 作业 ===
   @Get('assignments')
   getAssignments(@Req() req: any) { return this.teacherService.getAssignments(req.user.id); }
 
+  @Get('classes/:id/assignments')
+  getClassAssignments(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.getClassAssignments(req.user.id, id);
+  }
+
   @Post('assignments')
   createAssignment(@Req() req: any, @Body() data: any) {
     return this.teacherService.createAssignment(req.user.id, data);
+  }
+
+  @Get('assignments/:id/report')
+  getAssignmentReport(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.getAssignmentReport(req.user.id, id);
   }
 
   // === 比赛 ===

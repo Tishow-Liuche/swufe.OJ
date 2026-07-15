@@ -17,7 +17,7 @@ const router = createRouter({
     { path: '/change-password', component: () => import('../views/ChangePassword.vue'), meta: { requiresAuth: true } },
     { path: '/external/accounts', component: () => import('../views/external/AccountBind.vue'), meta: { requiresAuth: true } },
     // 教师
-    { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue') },
+    { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue'), meta: { requiresAuth: true, requiresTeacher: true } },
     // 管理员
     { path: '/admin/create-problem', component: () => import('../views/admin/CreateProblem.vue') },
     { path: '/admin/import-atcoder', component: () => import('../views/admin/AtCoderImport.vue') },
@@ -30,7 +30,10 @@ router.beforeEach(async (to) => {
 
   const auth = useAuthStore();
   if (auth.token && !auth.user) await auth.fetchProfile();
-  if (auth.isLoggedIn()) return true;
+  if (auth.isLoggedIn()) {
+    if (to.meta.requiresTeacher && !auth.isTeacher()) return '/problems';
+    return true;
+  }
 
   return {
     path: '/login',

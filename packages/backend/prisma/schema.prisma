@@ -35,6 +35,7 @@ model User {
   assignmentStudents       AssignmentStudent[]
   sessions                 UserSession[]
   externalAccounts         ExternalAccount[]
+  competitionAwards        CompetitionAward[]
   helperDevices            HelperDevice[]
   remoteTasks              RemoteSubmissionTask[]
   skillProfiles            UserSkillProfile[]
@@ -53,6 +54,26 @@ model User {
   reviewedContentReports   ContentReport[]          @relation("ContentReportReviewer")
   problemFeedbacks         ProblemFeedback[]        @relation("ProblemFeedbackReporter")
   reviewedProblemFeedbacks ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
+}
+
+model CompetitionAward {
+  id             String   @id @default(cuid())
+  userId         String
+  competition    String
+  year           Int?
+  season         String?
+  region         String?
+  awardLevel     String
+  teamName       String?
+  rank           Int?
+  certificateUrl String?
+  status         String   @default("PENDING")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([competition, year])
 }
 
 model Role {

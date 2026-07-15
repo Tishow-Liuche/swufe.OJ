@@ -6,15 +6,17 @@ import { SubmissionController } from './submission.controller';
 import { JudgeProcessor } from './judge.processor';
 import { CfHelperController } from './cf-helper.controller';
 import { LuoguHelperController } from '../luogu/luogu-helper.controller';
+import { QojHelperController } from '../qoj/qoj-helper.controller';
 import { JudgeModule } from '../judge/judge.module';
 import { HelperModule } from '../helper/helper.module';
 import { CodeforcesModule } from '../codeforces/cf.module';
 import { LuoguModule } from '../luogu/luogu.module';
 import { LearningModule } from '../learning/learning.module';
+import { QojModule } from '../qoj/qoj.module';
 
 @Module({
   imports: [
-    JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule,
+    JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule, QojModule,
     BullModule.registerQueueAsync({
       name: 'judge', imports: [ConfigModule], inject: [ConfigService],
       useFactory: (c: ConfigService) => ({
@@ -23,7 +25,7 @@ import { LearningModule } from '../learning/learning.module';
       }),
     }),
   ],
-  controllers: [SubmissionController, CfHelperController, LuoguHelperController],
+  controllers: [SubmissionController, CfHelperController, LuoguHelperController, QojHelperController],
   providers: [SubmissionService, JudgeProcessor],
   exports: [SubmissionService],
 })

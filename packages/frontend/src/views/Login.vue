@@ -120,7 +120,11 @@ function switchMode(nextMode: AuthMode) {
 function errorMessage(reason: any) {
   const message = reason.response?.data?.message;
   if (Array.isArray(message)) return message.join('；');
-  return message || (mode.value === 'register' ? '注册失败，请稍后重试' : '登录失败，请稍后重试');
+  if (message) return message;
+  if (reason.code === 'ERR_NETWORK' || !reason.response) {
+    return '无法连接后端服务，请确认 backend 已启动';
+  }
+  return mode.value === 'register' ? '注册失败，请稍后重试' : '登录失败，请稍后重试';
 }
 
 function postAuthPath() {

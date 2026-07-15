@@ -1,4 +1,8 @@
-import { LuoguTaskLeaseService, normalizeLuoguStatus } from './luogu-task-lease.service';
+import {
+  LuoguTaskLeaseService,
+  normalizeLuoguStatus,
+  normalizeOptionalMetric,
+} from './luogu-task-lease.service';
 
 function makePrisma(task: any) {
   const state = { task };
@@ -73,5 +77,19 @@ describe('normalizeLuoguStatus', () => {
 
   it('maps unknown statuses to SYSTEM_ERROR', () => {
     expect(normalizeLuoguStatus('Something strange')).toBe('SYSTEM_ERROR');
+  });
+});
+
+describe('normalizeOptionalMetric', () => {
+  it.each([
+    [46, 46],
+    ['46', 46],
+    ['46 ms', 46],
+    ['9.75 MB', 9.75],
+    ['', undefined],
+    [undefined, undefined],
+    ['--', undefined],
+  ])('normalizes %p to %p', (raw, expected) => {
+    expect(normalizeOptionalMetric(raw)).toBe(expected);
   });
 });

@@ -1,138 +1,384 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Download, FileSpreadsheet, GraduationCap, RefreshCw, UploadCloud, UsersRound } from '@lucide/vue';
-import * as XLSX from 'xlsx';
 import api from '../../api/client';
-import FilterSelect from '../../components/FilterSelect.vue';
 
-type ClassInfo = { id: string; name: string; course?: { name: string } | null; status: 'PENDING' | 'APPROVED' | 'REJECTED'; reviewNote?: string | null; members?: number; _count?: { members: number }; createdAt: string };
-type StudentRow = { studentId: string; college: string; name: string; phone: string; email: string; valid: boolean; reason?: string };
+interface ClassInfo { id: string; name: string; memberCount?: number; createdAt: string; }
+interface ClassMember { user: { id: string; username: string; nickname?: string } }
+interface ProblemItem {
+  id: string; title: string; source?: string; difficulty?: string;
+  sourceInfo?: { platform?: string; remoteProblemId?: string };
+}
+interface AssignmentItem {
+  id: string; title: string; description?: string; startTime: string; endTime: string;
+  problems?: Array<{ problem: ProblemItem }>;
+  _count?: { students: number; problems: number };
+}
+interface AssignmentReport {
+  assignment: { id: string; title: string; startTime: string; endTime: string };
+  problems: ProblemItem[];
+  students: Array<{
+    user: { id: string; username: string; nickname?: string };
+    solvedCount: number; totalProblems: number; completed: boolean;
+    problems: Array<{
+      problemId: string; title: string; status: string; attempts: number;
+      bestSubmissionId?: string | null; score: number;
+      timeUsed?: number | null; memoryUsed?: number | null; submittedAt?: string | null;
+    }>;
+  }>;
+  summary: { studentCount: number; problemCount: number; completedStudents: number };
+}
 
 const classes = ref<ClassInfo[]>([]);
-const loading = ref(true);
-const message = ref('');
-const newClassName = ref('');
-const importClassId = ref('');
-const rows = ref<StudentRow[]>([]);
-const dragging = ref(false);
-const importing = ref(false);
-const fileInput = ref<HTMLInputElement | null>(null);
+const selectedClassId = ref('');
+const members = ref<ClassMember[]>([]);
+const assignments = ref<AssignmentItem[]>([]);
+const selectedAssignmentId = ref('');
+const report = ref<AssignmentReport | null>(null);
+const problemResults = ref<ProblemItem[]>([]);
+const selectedProblems = ref<ProblemItem[]>([]);
 
-const approvedClasses = computed(() => classes.value.filter((item) => item.status === 'APPROVED'));
-const approvedClassOptions = computed(() => [
-  { value: '', label: '选择已审核通过的班级' },
-  ...approvedClasses.value.map((item) => ({ value: item.id, label: item.name })),
-]);
-const invalidRows = computed(() => rows.value.filter((item) => !item.valid));
-const selectedClass = computed(() => approvedClasses.value.find((item) => item.id === importClassId.value));
+const loading = ref(true);
+const membersLoading = ref(false);
+const assignmentsLoading = ref(false);
+const reportLoading = ref(false);
+const problemSearching = ref(false);
+const msg = ref('');
+const newClassName = ref('');
+const importText = ref('');
+const assignmentTitle = ref('');
+const assignmentDescription = ref('');
+const assignmentEndTime = ref('');
+const problemKeyword = ref('');
+
+const selectedClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value));
 
 onMounted(loadClasses);
 
-function statusText(status: ClassInfo['status']) { return ({ PENDING: '等待审核', APPROVED: '已启用', REJECTED: '未通过' } as Record<string, string>)[status]; }
+function showMessage(text: string) { msg.value = text; }
+function parseIdentifiers(text: string) {
+  return text.split(/[\n,，\s]+/).map((item) => item.trim()).filter(Boolean);
+}
+function statusLabel(status: string) {
+  const map: Record<string, string> = {
+    ACCEPTED: '已通过',
+    WRONG_ANSWER: '答案错误',
+    TIME_LIMIT_EXCEEDED: '超时',
+    MEMORY_LIMIT_EXCEEDED: '超内存',
+    COMPILE_ERROR: '编译错误',
+    RUNTIME_ERROR: '运行错误',
+    QUEUING: '排队中',
+    JUDGING: '评测中',
+    PENDING: '等待中',
+    NOT_SUBMITTED: '未提交',
+  };
+  return map[status] || status;
+}
+function statusClass(status: string) {
+  if (status === 'ACCEPTED') return 'ok';
+  if (status === 'NOT_SUBMITTED') return 'muted';
+  if (['QUEUING', 'JUDGING', 'PENDING'].includes(status)) return 'pending';
+  return 'bad';
+}
+function formatImportMessage(data: {
+  added: number; skipped: number; notFound?: string[]; alreadyInClass?: string[]; duplicatedInput?: string[];
+}) {
+  const parts = [`导入完成：成功 ${data.added} 人，跳过 ${data.skipped} 人`];
+  if (data.notFound?.length) parts.push(`未找到：${data.notFound.join('、')}`);
+  if (data.alreadyInClass?.length) parts.push(`已在班级：${data.alreadyInClass.join('、')}`);
+  if (data.duplicatedInput?.length) parts.push(`重复输入：${data.duplicatedInput.join('、')}`);
+  return parts.join('；');
+}
 
 async function loadClasses() {
   loading.value = true;
   try {
     const { data } = await api.get('/api/teacher/classes');
     classes.value = data;
-    if (importClassId.value && !approvedClasses.value.some((item) => item.id === importClassId.value)) importClassId.value = '';
-  } catch (e: any) { message.value = '加载失败：' + (e.response?.data?.message || e.message); }
-  finally { loading.value = false; }
+    if (!selectedClassId.value && classes.value.length) {
+      selectedClassId.value = classes.value[0].id;
+      await loadClassData();
+    }
+  } catch (e: any) {
+    showMessage('加载班级失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    loading.value = false;
+  }
 }
-
+async function loadClassData() {
+  report.value = null;
+  selectedAssignmentId.value = '';
+  await Promise.all([loadMembers(), loadAssignments()]);
+}
 async function createClass() {
   const name = newClassName.value.trim();
-  if (!name) { message.value = '请填写班级名称'; return; }
+  if (!name) return showMessage('请输入班级名称');
   try {
-    await api.post('/api/teacher/classes', { name });
+    const { data } = await api.post('/api/teacher/classes', { name });
     newClassName.value = '';
-    message.value = '班级申请已提交，管理员审核通过后即可导入学生和发布作业。';
+    selectedClassId.value = data.id;
+    showMessage('班级已创建');
     await loadClasses();
-  } catch (e: any) { message.value = '提交失败：' + (e.response?.data?.message || e.message); }
+  } catch (e: any) {
+    showMessage('创建失败：' + (e.response?.data?.message || e.message));
+  }
 }
-
-function normalize(value: unknown) { return String(value ?? '').trim(); }
-function validateRow(raw: Record<string, unknown>): StudentRow {
-  const studentId = normalize(raw['学号']); const college = normalize(raw['学院']); const name = normalize(raw['姓名']); const phone = normalize(raw['手机号']); const email = normalize(raw['邮箱']).toLowerCase();
-  if (!/^\d{8}$/.test(studentId)) return { studentId, college, name, phone, email, valid: false, reason: '学号必须为 8 位数字' };
-  if (!college) return { studentId, college, name, phone, email, valid: false, reason: '学院不能为空' };
-  if (!name) return { studentId, college, name, phone, email, valid: false, reason: '姓名不能为空' };
-  if (!/^1\d{10}$/.test(phone)) return { studentId, college, name, phone, email, valid: false, reason: '手机号须为 11 位大陆号码' };
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { studentId, college, name, phone, email, valid: false, reason: '邮箱格式不正确' };
-  return { studentId, college, name, phone, email, valid: true };
-}
-
-async function readFile(file?: File) {
-  if (!file) return;
-  message.value = '';
-  try {
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
-    const headers = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, range: 0 })[0] || [];
-    const required = ['学号', '学院', '姓名', '手机号', '邮箱'];
-    if (required.some((key) => !headers.includes(key))) throw new Error('表头必须严格包含：学号、学院、姓名、手机号、邮箱');
-    if (!data.length) throw new Error('Excel 中没有可导入的学生数据');
-    const seen = new Set<string>();
-    rows.value = data.map(validateRow).map((row) => {
-      if (row.valid && seen.has(row.studentId)) return { ...row, valid: false, reason: '文件内学号重复' };
-      seen.add(row.studentId); return row;
-    });
-    message.value = `已读取 ${rows.value.length} 行；${invalidRows.value.length ? `${invalidRows.value.length} 行需修正后再导入。` : '字段校验通过，可以一键导入。'}`;
-  } catch (e: any) { rows.value = []; message.value = '文件读取失败：' + (e.message || '请使用 .xlsx、.xls 或 .csv 文件'); }
-  finally { if (fileInput.value) fileInput.value.value = ''; }
-}
-
-function onDrop(event: DragEvent) { dragging.value = false; void readFile(event.dataTransfer?.files?.[0]); }
-function chooseFile() { fileInput.value?.click(); }
-
-function downloadTemplate() {
-  const sheet = XLSX.utils.aoa_to_sheet([['学号', '学院', '姓名', '手机号', '邮箱'], ['xxxxxxxx', '计算机与人工智能学院', '示例同学', '13800000000', 'example@swufe.edu.cn']]);
-  sheet['!cols'] = [{ wch: 13 }, { wch: 30 }, { wch: 14 }, { wch: 16 }, { wch: 30 }];
-  const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '学生名单');
-  XLSX.writeFile(book, '西财OJ_学生导入模板.xlsx');
-}
-
 async function importStudents() {
-  if (!importClassId.value) { message.value = '请先选择已审核通过的班级'; return; }
-  if (!rows.value.length || invalidRows.value.length) { message.value = '请先修正 Excel 中标记为异常的行'; return; }
-  importing.value = true;
+  if (!selectedClassId.value) return showMessage('请先选择班级');
+  const usernames = parseIdentifiers(importText.value);
+  if (!usernames.length) return showMessage('请输入学生用户名或邮箱');
   try {
-    const { data } = await api.post(`/api/teacher/classes/${importClassId.value}/import`, { students: rows.value.map(({ studentId, college, name, phone, email }) => ({ studentId, college, name, phone, email })) });
-    message.value = `导入完成：新增 ${data.added} 人，更新 ${data.updated} 人，跳过 ${data.skipped} 人。仅新建账号的初始密码为学号；已有账号会保留原密码。`;
-    rows.value = [];
+    const { data } = await api.post(`/api/teacher/classes/${selectedClassId.value}/import`, { usernames });
+    importText.value = '';
+    showMessage(formatImportMessage(data));
     await loadClasses();
-  } catch (e: any) { message.value = '导入失败：' + (e.response?.data?.message || e.message); }
-  finally { importing.value = false; }
+    await loadMembers();
+  } catch (e: any) {
+    showMessage('导入失败：' + (e.response?.data?.message || e.message));
+  }
+}
+async function loadMembers() {
+  if (!selectedClassId.value) return;
+  membersLoading.value = true;
+  try {
+    const { data } = await api.get(`/api/teacher/classes/${selectedClassId.value}/members`);
+    members.value = data;
+  } catch (e: any) {
+    showMessage('加载学生名单失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    membersLoading.value = false;
+  }
+}
+async function removeStudent(userId: string, username: string) {
+  if (!selectedClassId.value) return;
+  if (!window.confirm(`确定将 ${username} 移出 ${selectedClass.value?.name || '该班级'} 吗？`)) return;
+  try {
+    await api.delete(`/api/teacher/classes/${selectedClassId.value}/members/${userId}`);
+    showMessage('已移出学生');
+    await loadClasses();
+    await loadMembers();
+  } catch (e: any) {
+    showMessage('移出失败：' + (e.response?.data?.message || e.message));
+  }
+}
+async function searchProblems() {
+  problemSearching.value = true;
+  try {
+    const { data } = await api.get('/api/problems', {
+      params: { keyword: problemKeyword.value.trim(), pageSize: 20, status: 'PUBLISHED' },
+    });
+    problemResults.value = data.items || [];
+  } catch (e: any) {
+    showMessage('搜索题目失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    problemSearching.value = false;
+  }
+}
+function addProblem(problem: ProblemItem) {
+  if (!selectedProblems.value.some((item) => item.id === problem.id)) selectedProblems.value.push(problem);
+}
+function removeProblem(problemId: string) {
+  selectedProblems.value = selectedProblems.value.filter((item) => item.id !== problemId);
+}
+async function createAssignment() {
+  if (!selectedClassId.value) return showMessage('请先选择班级');
+  if (!assignmentTitle.value.trim()) return showMessage('请输入作业标题');
+  if (!selectedProblems.value.length) return showMessage('请至少选择一道题目');
+  try {
+    await api.post('/api/teacher/assignments', {
+      classId: selectedClassId.value,
+      title: assignmentTitle.value.trim(),
+      description: assignmentDescription.value.trim(),
+      endTime: assignmentEndTime.value ? new Date(assignmentEndTime.value).toISOString() : undefined,
+      problemIds: selectedProblems.value.map((item) => item.id),
+    });
+    assignmentTitle.value = '';
+    assignmentDescription.value = '';
+    assignmentEndTime.value = '';
+    selectedProblems.value = [];
+    showMessage('作业已发布');
+    await loadAssignments();
+  } catch (e: any) {
+    showMessage('发布作业失败：' + (e.response?.data?.message || e.message));
+  }
+}
+async function loadAssignments() {
+  if (!selectedClassId.value) return;
+  assignmentsLoading.value = true;
+  try {
+    const { data } = await api.get(`/api/teacher/classes/${selectedClassId.value}/assignments`);
+    assignments.value = data;
+  } catch (e: any) {
+    showMessage('加载作业失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    assignmentsLoading.value = false;
+  }
+}
+async function loadReport(assignmentId = selectedAssignmentId.value) {
+  if (!assignmentId) return;
+  selectedAssignmentId.value = assignmentId;
+  reportLoading.value = true;
+  try {
+    const { data } = await api.get(`/api/teacher/assignments/${assignmentId}/report`);
+    report.value = data;
+  } catch (e: any) {
+    showMessage('加载作业情况失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    reportLoading.value = false;
+  }
 }
 </script>
 
 <template>
-  <main class="class-page">
-    <section class="hero">
-      <div><p>TEACHING WORKSPACE</p><h1>班级管理</h1><span>先申请，后建班；统一学籍字段，让教学名单可追溯。</span></div>
-      <button type="button" @click="loadClasses"><RefreshCw :size="16" aria-hidden="true" />刷新状态</button>
-    </section>
-    <p v-if="message" class="notice">{{ message }}</p>
+  <div class="page">
+    <h2>班级管理</h2>
+    <p class="hint">导入学生、查看班级、发布作业、查看作业情况已经拆成独立区域。</p>
+    <p v-if="msg" class="msg">{{ msg }}</p>
 
-    <section class="create-card">
-      <div class="section-title"><span class="title-icon"><GraduationCap :size="19" /></span><div><h2>申请创建班级</h2><p>提交后由管理员审核；审核通过才可导入学生、布置作业。</p></div></div>
-      <div class="create-row"><input v-model="newClassName" maxlength="80" placeholder="例如：2024级计算机科学与技术1班" @keyup.enter="createClass" /><button type="button" @click="createClass">提交审核</button></div>
-    </section>
-
-    <section class="import-card">
-      <header class="section-title"><span class="title-icon gold"><FileSpreadsheet :size="19" /></span><div><h2>Excel 一键导入学生</h2><p>固定字段：学号、学院、姓名、手机号、邮箱。学号必须为 8 位数字。</p></div><button type="button" class="template" @click="downloadTemplate"><Download :size="15" />下载模板</button></header>
-      <div class="import-toolbar"><FilterSelect v-model="importClassId" class="class-select" :options="approvedClassOptions" label="选择已审核通过的班级"><template #icon><UsersRound :size="16" aria-hidden="true" /></template></FilterSelect><span v-if="selectedClass">将导入至「{{ selectedClass.name }}」</span></div>
-      <div class="drop-zone" :class="{ dragging }" role="button" tabindex="0" @dragenter.prevent="dragging = true" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="onDrop" @click="chooseFile" @keydown.enter.prevent="chooseFile">
-        <UploadCloud :size="31" aria-hidden="true" /><strong>拖拽 Excel 文件到此处</strong><span>或点击选择 .xlsx / .xls / .csv 文件</span><input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" hidden @change="readFile(($event.target as HTMLInputElement).files?.[0])" />
+    <div class="card">
+      <h3>班级选择</h3>
+      <div class="row">
+        <select v-model="selectedClassId" class="input" @change="loadClassData">
+          <option value="">选择班级</option>
+          <option v-for="c in classes" :key="c.id" :value="c.id">{{ c.name }}（{{ c.memberCount ?? 0 }} 人）</option>
+        </select>
+        <input v-model="newClassName" class="input" placeholder="新班级名称，例如：2024 级计算机 1 班" @keyup.enter="createClass" />
+        <button class="btn" @click="createClass">创建班级</button>
       </div>
-      <div v-if="rows.length" class="preview"><div class="preview-head"><strong>导入预览</strong><span>{{ rows.length }} 人 · <b :class="{ bad: invalidRows.length }">{{ invalidRows.length ? `${invalidRows.length} 行异常` : '全部通过' }}</b></span></div><div class="preview-table"><table><thead><tr><th>学号</th><th>学院</th><th>姓名</th><th>手机号</th><th>邮箱</th><th>校验</th></tr></thead><tbody><tr v-for="(row, index) in rows.slice(0, 8)" :key="index" :class="{ invalid: !row.valid }"><td>{{ row.studentId }}</td><td>{{ row.college }}</td><td>{{ row.name }}</td><td>{{ row.phone }}</td><td>{{ row.email }}</td><td>{{ row.valid ? '通过' : row.reason }}</td></tr></tbody></table></div><p v-if="rows.length > 8">仅展示前 8 行，共 {{ rows.length }} 行。</p><button type="button" class="import-button" :disabled="importing || !importClassId || !!invalidRows.length" @click="importStudents"><UsersRound :size="17" />{{ importing ? '正在导入…' : '一键创建学生账号并导入班级' }}</button></div>
+      <p v-if="loading" class="empty small">正在加载班级...</p>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h3>导入学生</h3>
+        <p class="hint small">只负责导入。支持用户名或邮箱，换行、空格、逗号分隔。</p>
+        <textarea v-model="importText" rows="5" class="textarea" placeholder="例如：student001&#10;student002@school.edu"></textarea>
+        <button class="btn btn-blue" :disabled="!selectedClassId" @click="importStudents">导入到当前班级</button>
+      </section>
+
+      <section class="card">
+        <h3>查看班级学生</h3>
+        <button class="btn-sm" :disabled="!selectedClassId || membersLoading" @click="loadMembers">刷新学生名单</button>
+        <p v-if="membersLoading" class="empty small">正在加载学生...</p>
+        <table v-else-if="members.length" class="table compact">
+          <thead><tr><th>用户名</th><th>昵称</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="m in members" :key="m.user.id">
+              <td>{{ m.user.username }}</td>
+              <td>{{ m.user.nickname || '-' }}</td>
+              <td><button class="btn-sm danger" @click="removeStudent(m.user.id, m.user.username)">移出</button></td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="empty small">当前班级暂无学生。</p>
+      </section>
+    </div>
+
+    <section class="card">
+      <h3>发布作业：从题库拉题</h3>
+      <div class="form-grid">
+        <input v-model="assignmentTitle" class="input" placeholder="作业标题，例如：第一周基础练习" />
+        <input v-model="assignmentEndTime" class="input" type="datetime-local" />
+      </div>
+      <textarea v-model="assignmentDescription" rows="2" class="textarea" placeholder="作业说明，可选"></textarea>
+      <div class="row">
+        <input v-model="problemKeyword" class="input" placeholder="搜索题库标题，例如 A+B、P1001、Codeforces" @keyup.enter="searchProblems" />
+        <button class="btn-sm" :disabled="problemSearching" @click="searchProblems">搜索题目</button>
+      </div>
+      <div v-if="problemResults.length" class="problem-list">
+        <button v-for="p in problemResults" :key="p.id" class="problem-pill" @click="addProblem(p)">
+          <span>{{ p.title }}</span><small>{{ p.sourceInfo?.platform || p.source || 'LOCAL' }}</small>
+        </button>
+      </div>
+      <div class="selected-box">
+        <strong>已选题目（{{ selectedProblems.length }}）</strong>
+        <p v-if="!selectedProblems.length" class="empty small">还没有选择题目。</p>
+        <span v-for="p in selectedProblems" :key="p.id" class="selected-pill">
+          {{ p.title }} <button @click="removeProblem(p.id)">×</button>
+        </span>
+      </div>
+      <button class="btn btn-blue" :disabled="!selectedClassId || !selectedProblems.length" @click="createAssignment">发布作业</button>
     </section>
 
-    <section class="classes-card"><header><div><h2>我的班级</h2><p>审核状态与人数实时显示</p></div><strong>{{ classes.length }}</strong></header><div v-if="loading" class="loading">正在加载班级…</div><div v-else-if="classes.length" class="class-grid"><article v-for="item in classes" :key="item.id" class="class-item"><div><span class="status" :class="item.status.toLowerCase()">{{ statusText(item.status) }}</span><h3>{{ item.name }}</h3><p>{{ item.course?.name || '未关联课程' }} · {{ item._count?.members || item.members || 0 }} 名学生</p></div><small>{{ item.status === 'REJECTED' && item.reviewNote ? `审核说明：${item.reviewNote}` : item.createdAt.slice(0, 10) }}</small></article></div><div v-else class="loading">暂无班级申请</div></section>
-  </main>
+    <section class="card">
+      <h3>查看学生作业情况</h3>
+      <div class="row">
+        <select v-model="selectedAssignmentId" class="input">
+          <option value="">选择作业</option>
+          <option v-for="a in assignments" :key="a.id" :value="a.id">
+            {{ a.title }}（{{ a._count?.problems || a.problems?.length || 0 }} 题 / {{ a._count?.students || 0 }} 人）
+          </option>
+        </select>
+        <button class="btn-sm" :disabled="!selectedAssignmentId || reportLoading" @click="loadReport()">查看情况</button>
+        <button class="btn-sm" :disabled="!selectedClassId || assignmentsLoading" @click="loadAssignments">刷新作业</button>
+      </div>
+      <p v-if="assignmentsLoading || reportLoading" class="empty small">正在加载...</p>
+      <div v-if="report" class="report">
+        <p class="summary">{{ report.assignment.title }}：{{ report.summary.completedStudents }}/{{ report.summary.studentCount }} 人完成，共 {{ report.summary.problemCount }} 题</p>
+        <table class="table report-table">
+          <thead>
+            <tr><th>学生</th><th>完成</th><th v-for="p in report.problems" :key="p.id">{{ p.title }}</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in report.students" :key="s.user.id">
+              <td>{{ s.user.nickname || s.user.username }}</td>
+              <td>{{ s.solvedCount }}/{{ s.totalProblems }}</td>
+              <td v-for="p in s.problems" :key="p.problemId">
+                <span class="status" :class="statusClass(p.status)">{{ statusLabel(p.status) }}</span>
+                <small v-if="p.attempts">{{ p.attempts }} 次</small>
+                <small v-if="p.timeUsed !== null && p.timeUsed !== undefined">{{ p.timeUsed }}ms</small>
+                <small v-if="p.memoryUsed !== null && p.memoryUsed !== undefined">{{ p.memoryUsed }}KB</small>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="empty small">请选择一个作业查看学生完成情况。</p>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.class-page { --ink:#1b2a41; --blue:#276ba8; --line:#e1e9f0; max-width:1120px; margin:auto; padding:28px 22px 62px; color:var(--ink); }.hero { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:29px 33px; border-radius:22px; color:#fff; background:linear-gradient(120deg,#163c65,#3479aa); box-shadow:0 15px 32px rgba(25,68,111,.17); }.hero p { margin:0 0 7px; color:#f4c978; font-size:10px; font-weight:900; letter-spacing:.15em; }.hero h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.05em; }.hero span { color:#dbeaf7; font-size:14px; }.hero button,.create-row button,.import-button,.template { display:inline-flex; align-items:center; justify-content:center; gap:7px; border:0; border-radius:9px; font:inherit; font-weight:900; cursor:pointer; }.hero button { padding:10px 14px; color:#e6f2fc; background:rgba(255,255,255,.14); }.notice { margin:16px 0; padding:11px 14px; color:#24597f; border:1px solid #cce1f0; border-radius:10px; background:#edf7ff; font-size:13px; line-height:1.55; }.create-card,.import-card,.classes-card { margin-top:18px; padding:22px; border:1px solid var(--line); border-radius:18px; background:#fff; box-shadow:0 8px 24px rgba(34,66,95,.04); }.section-title { display:flex; align-items:center; gap:11px; }.section-title h2,.classes-card h2 { margin:0; font-size:17px; }.section-title p,.classes-card header p { margin:4px 0 0; color:#8290a1; font-size:12px; }.title-icon { display:grid; width:38px; height:38px; place-items:center; color:#2467a1; border-radius:10px; background:#e5f2fc; }.title-icon.gold { color:#a86d0d; background:#fff2d9; }.create-row { display:flex; gap:10px; margin-top:18px; }.create-row input { min-width:0; flex:1; padding:11px 13px; color:var(--ink); border:1px solid #d9e3eb; border-radius:9px; background:#fff; font:inherit; font-size:13px; }.create-row button { padding:0 18px; color:#fff; background:var(--blue); }.template { margin-left:auto; padding:8px 11px; color:#26669e; background:#edf6fd; font-size:12px; }.import-toolbar { display:flex; align-items:center; gap:12px; margin:20px 0 12px; }.class-select { width:min(330px,100%); --outline:#d9e3eb; --ink:var(--ink); --muted:#6e8297; --primary:#276ba8; --primary-strong:#1b588e; --primary-container:#e8f3fc; --surface:#fff; --surface-low:#f1f7fc; }.import-toolbar span { color:#708298; font-size:12px; }.drop-zone { display:grid; min-height:180px; place-items:center; align-content:center; gap:8px; color:#5c88ad; border:1.5px dashed #a6c9e5; border-radius:14px; background:#f8fcff; cursor:pointer; transition:.18s; }.drop-zone:hover,.drop-zone.dragging { color:#1d639b; border-color:#418bc3; background:#edf8ff; transform:translateY(-1px); }.drop-zone strong { color:#365875; font-size:14px; }.drop-zone span { color:#8a9aab; font-size:12px; }.preview { margin-top:18px; padding:15px; border:1px solid #dfe9f1; border-radius:12px; background:#fcfdff; }.preview-head { display:flex; justify-content:space-between; align-items:center; color:#51677c; font-size:12px; }.preview-head b { color:#178156; }.preview-head b.bad { color:#b14336; }.preview-table { margin-top:11px; overflow:auto; }.preview table { width:100%; min-width:720px; border-collapse:collapse; font-size:12px; }.preview th,.preview td { padding:8px; text-align:left; border-bottom:1px solid #edf1f5; }.preview th { color:#758699; background:#f5f8fb; font-weight:900; }.preview tr.invalid { color:#b44739; background:#fff6f4; }.preview>p { margin:10px 0 0; color:#8d9baa; font-size:11px; }.import-button { margin-top:15px; padding:11px 16px; color:#fff; background:#17669f; }.import-button:disabled { opacity:.45; cursor:not-allowed; }.classes-card header { display:flex; align-items:center; justify-content:space-between; padding-bottom:15px; border-bottom:1px solid var(--line); }.classes-card header strong { color:#24679f; font-size:28px; }.class-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:15px; }.class-item { display:flex; justify-content:space-between; gap:12px; padding:16px; border:1px solid #e4ebf1; border-radius:13px; background:#fcfdff; }.status { display:inline-block; padding:3px 7px; border-radius:5px; background:#eef1f4; color:#758292; font-size:10px; font-weight:900; }.status.approved { color:#13714e; background:#e4f5ec; }.status.pending { color:#98600c; background:#fff2da; }.status.rejected { color:#a13a32; background:#fdeceb; }.class-item h3 { margin:10px 0 5px; font-size:14px; }.class-item p,.class-item small { margin:0; color:#8190a1; font-size:11px; line-height:1.5; }.class-item small { max-width:130px; text-align:right; }.loading { display:grid; min-height:100px; place-items:center; color:#8a98a8; font-size:13px; }@media(max-width:680px){.class-page{padding:18px 13px 44px}.hero,.create-row,.import-toolbar{align-items:stretch;flex-direction:column}.hero h1{font-size:30px}.template{margin-left:auto}.class-select{width:100%}.class-grid{grid-template-columns:1fr}.section-title{align-items:flex-start}.import-card,.create-card,.classes-card{padding:17px}.class-item{flex-direction:column}.class-item small{text-align:left}}
+.page { max-width: 1180px; margin: 0 auto; padding: 24px; }
+h2 { margin-bottom: 8px; }
+h3 { margin: 0 0 12px; font-size: 16px; }
+.hint { color: #667085; font-size: 14px; margin-bottom: 12px; }
+.small { font-size: 13px; }
+.msg { padding: 9px 12px; background: #e8f5e9; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+.card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.form-grid { display: grid; grid-template-columns: 1fr 260px; gap: 10px; margin-bottom: 10px; }
+.input, .textarea { width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+.textarea { resize: vertical; font-family: inherit; margin-bottom: 10px; }
+.btn, .btn-sm { border: none; border-radius: 6px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.btn { padding: 9px 20px; background: #4fc3f7; color: #1a1a2e; }
+.btn-blue { background: #3498db; color: #fff; }
+.btn-sm { padding: 7px 12px; background: #eef6ff; color: #2563eb; }
+.danger { color: #c0392b; background: #fff1f0; }
+button:disabled { opacity: .5; cursor: default; }
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { padding: 9px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; font-size: 14px; vertical-align: top; }
+.table th { background: #f8f9fa; font-weight: 600; color: #666; }
+.compact th, .compact td { padding: 7px 9px; }
+.empty { color: #999; text-align: center; padding: 18px; }
+.problem-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.problem-pill, .selected-pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; border: 1px solid #d8e7ff; background: #f7fbff; padding: 7px 10px; color: #1f4f8f; }
+.problem-pill { cursor: pointer; }
+.problem-pill small { color: #789; }
+.selected-box { min-height: 44px; margin: 12px 0; }
+.selected-pill { margin: 6px 6px 0 0; }
+.selected-pill button { border: 0; background: transparent; color: #c0392b; cursor: pointer; font-weight: bold; }
+.summary { margin: 8px 0 12px; color: #344054; }
+.report-table { min-width: 900px; }
+.report { overflow-x: auto; }
+.status { display: inline-block; padding: 3px 7px; border-radius: 999px; font-size: 12px; margin-right: 5px; }
+.status.ok { background: #e8f8ef; color: #18864b; }
+.status.bad { background: #fff1f0; color: #c0392b; }
+.status.pending { background: #fff8e1; color: #a66b00; }
+.status.muted { background: #f2f4f7; color: #667085; }
+td small { display: block; color: #667085; margin-top: 3px; }
+@media (max-width: 900px) {
+  .grid, .form-grid { grid-template-columns: 1fr; }
+  .row { flex-direction: column; align-items: stretch; }
+}
 </style>

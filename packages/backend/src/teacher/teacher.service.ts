@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 
@@ -10,12 +10,6 @@ type StudentImportRow = {
   email: string;
 };
 
-const SWUFE_COLLEGES = new Set([
-  '金融学院、中国金融研究院', '经济学院', '会计学院', '统计与数据科学学院', '工商管理学院', '财政税务学院', '国际商学院', '经济与管理研究院',
-  '中国西部经济研究院', '管理科学与工程学院', '计算机与人工智能学院', '法学院', '外国语学院', '公共管理学院', '马克思主义学院', '数学学院',
-  '人文与艺术学院', '体育学院', '社会发展研究院', '特拉华数据科学学院', '继续教育学院（西南财经大学培训中心）', '国际教育学院', '北京研究院', '深圳高等研究院', '西部商学院', '出国留学预备学院',
-]);
-
 @Injectable()
 export class TeacherService {
   constructor(private prisma: PrismaService) {}
@@ -23,82 +17,156 @@ export class TeacherService {
   // ========== 班级管理 ==========
 
   async getClasses(teacherId: string) {
-    return this.prisma.class.findMany({
+    const classes = await this.prisma.class.findMany({
       where: { teacherId },
       include: { _count: { select: { members: true } } },
       orderBy: { createdAt: 'desc' },
     });
+    return classes.map(({ _count, ...cls }) => ({
+      ...cls,
+      memberCount: _count?.members ?? 0,
+    }));
   }
 
   async createClass(teacherId: string, data: { name: string; courseId?: string }) {
-    const name = data.name?.trim();
-    if (!name || name.length > 80) throw new BadRequestException('请填写 1 至 80 字的班级名称');
     return this.prisma.class.create({
-      data: { name, teacherId, status: 'PENDING' },
+      data: { name: data.name, teacherId },
     });
   }
 
-  async importStudents(classId: string, teacherId: string, students: StudentImportRow[]) {
+  async importStudents(classId: string, teacherId: string, students: StudentImportRow[] | string[]) {
     const cls = await this.prisma.class.findUnique({ where: { id: classId } });
-    if (!cls) throw new NotFoundException('班级不存在');
-    if (cls.teacherId !== teacherId) throw new ForbiddenException('无权操作此班级');
-    if (cls.status !== 'APPROVED') throw new ForbiddenException('班级尚未通过管理员审核，暂不能导入学生');
-    if (!Array.isArray(students) || !students.length) throw new BadRequestException('请导入至少一名学生');
-    if (students.length > 500) throw new BadRequestException('单次最多导入 500 名学生');
+    if (!cls) throw new NotFoundException('Class not found');
+    if (cls.teacherId !== teacherId) throw new ForbiddenException('No permission for this class');
+    if (!Array.isArray(students) || !students.length) throw new BadRequestException('Import at least one student');
+    if (students.length > 500) throw new BadRequestException('At most 500 students can be imported at a time');
 
-    let added = 0, updated = 0, skipped = 0;
+    if (typeof students[0] === 'string') {
+      let added = 0;
+      const notFound: string[] = [];
+      const alreadyInClass: string[] = [];
+      const duplicatedInput: string[] = [];
+      const seen = new Set<string>();
+
+      for (const rawIdentifier of students as string[]) {
+        const identifier = String(rawIdentifier || '').trim();
+        if (!identifier) continue;
+        const normalized = identifier.toLowerCase();
+        if (seen.has(normalized)) {
+          duplicatedInput.push(identifier);
+          continue;
+        }
+        seen.add(normalized);
+
+        const user = await this.prisma.user.findFirst({
+          where: {
+            OR: [
+              { username: { equals: identifier, mode: 'insensitive' } },
+              { email: { equals: identifier, mode: 'insensitive' } },
+            ],
+          },
+          select: { id: true, username: true, email: true },
+        });
+        if (!user) {
+          notFound.push(identifier);
+          continue;
+        }
+        const existing = await this.prisma.classMember.findUnique({
+          where: { classId_userId: { classId, userId: user.id } },
+        });
+        if (existing) {
+          alreadyInClass.push(identifier);
+          continue;
+        }
+        await this.prisma.classMember.create({ data: { classId, userId: user.id } });
+        added++;
+      }
+      return {
+        added,
+        skipped: notFound.length + alreadyInClass.length + duplicatedInput.length,
+        notFound,
+        alreadyInClass,
+        duplicatedInput,
+      };
+    }
+
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
     const errors: Array<{ row: number; studentId: string; reason: string }> = [];
     const seen = new Set<string>();
-    for (const [index, raw] of students.entries()) {
+
+    const rows = students as StudentImportRow[];
+    for (const [index, raw] of rows.entries()) {
       const row = index + 2;
       const studentId = String(raw.studentId || '').trim();
       const name = String(raw.name || '').trim();
       const college = String(raw.college || '').trim();
       const phone = String(raw.phone || '').trim();
       const email = String(raw.email || '').trim().toLowerCase();
-      if (!/^\d{8}$/.test(studentId)) { errors.push({ row, studentId, reason: '学号必须为 8 位数字' }); skipped++; continue; }
-      if (!name || name.length > 40) { errors.push({ row, studentId, reason: '姓名不能为空且不超过 40 字' }); skipped++; continue; }
-      if (!college || college.length > 80) { errors.push({ row, studentId, reason: '学院不能为空' }); skipped++; continue; }
-      if (!/^1\d{10}$/.test(phone)) { errors.push({ row, studentId, reason: '手机号须为 11 位中国大陆号码' }); skipped++; continue; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push({ row, studentId, reason: '邮箱格式不正确' }); skipped++; continue; }
-      if (seen.has(studentId)) { errors.push({ row, studentId, reason: '文件内学号重复' }); skipped++; continue; }
+
+      if (!/^\d{8}$/.test(studentId)) { errors.push({ row, studentId, reason: 'studentId must be 8 digits' }); skipped++; continue; }
+      if (!name || name.length > 40) { errors.push({ row, studentId, reason: 'name is required and must be <= 40 chars' }); skipped++; continue; }
+      if (!college || college.length > 80) { errors.push({ row, studentId, reason: 'college is required' }); skipped++; continue; }
+      if (!/^1\d{10}$/.test(phone)) { errors.push({ row, studentId, reason: 'phone must be a valid mainland China mobile number' }); skipped++; continue; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push({ row, studentId, reason: 'email format is invalid' }); skipped++; continue; }
+      if (seen.has(studentId)) { errors.push({ row, studentId, reason: 'duplicate studentId in file' }); skipped++; continue; }
       seen.add(studentId);
 
-      const emailOwner = await this.prisma.user.findUnique({ where: { email } });
       const existingUser = await this.prisma.user.findUnique({ where: { username: studentId } });
+      const emailOwner = await this.prisma.user.findUnique({ where: { email } });
       if (emailOwner && emailOwner.id !== existingUser?.id) {
-        errors.push({ row, studentId, reason: '该邮箱已被其他账号使用' }); skipped++; continue;
+        errors.push({ row, studentId, reason: 'email already belongs to another account' }); skipped++; continue;
       }
       if (existingUser && existingUser.role !== 'STUDENT') {
-        errors.push({ row, studentId, reason: '该学号已被非学生账号占用' }); skipped++; continue;
+        errors.push({ row, studentId, reason: 'studentId is occupied by a non-student account' }); skipped++; continue;
       }
 
-      const accountData = { email, nickname: name, studentId, college, phone, school: SWUFE_COLLEGES.has(college) ? '西南财经大学' : '其他学校' };
+      const accountData = { email, nickname: name, studentId, college, phone, school: '西南财经大学' };
       const user = existingUser
-        ? await this.prisma.user.update({
-            where: { id: existingUser.id },
-            // 已有账号只更新教务资料，绝不在批量导入时重置密码或改写登录状态。
-            data: accountData,
-          })
+        ? await this.prisma.user.update({ where: { id: existingUser.id }, data: accountData })
         : await this.prisma.user.create({
-            data: { username: studentId, password: await bcrypt.hash(studentId, 10), role: 'STUDENT', requestedRole: 'STUDENT', mustChangePassword: true, ...accountData },
+            data: {
+              username: studentId,
+              password: await bcrypt.hash(studentId, 10),
+              role: 'STUDENT',
+              requestedRole: 'STUDENT',
+              mustChangePassword: true,
+              ...accountData,
+            },
           });
 
       const member = await this.prisma.classMember.findUnique({ where: { classId_userId: { classId, userId: user.id } } });
       if (!member) { await this.prisma.classMember.create({ data: { classId, userId: user.id } }); added++; }
       else updated++;
     }
+
     return { added, updated, skipped, errors };
   }
-
   async getClassMembers(classId: string, teacherId: string) {
     const cls = await this.prisma.class.findUnique({ where: { id: classId } });
     if (!cls) throw new NotFoundException('班级不存在');
     if (cls.teacherId !== teacherId) throw new ForbiddenException('无权操作此班级');
     return this.prisma.classMember.findMany({
       where: { classId },
-      include: { user: { select: { id: true, username: true, nickname: true, studentId: true, college: true, phone: true, email: true, mustChangePassword: true } } },
+      include: { user: { select: { id: true, username: true, nickname: true } } },
     });
+  }
+
+  async removeStudent(classId: string, teacherId: string, userId: string) {
+    const cls = await this.prisma.class.findUnique({ where: { id: classId } });
+    if (!cls) throw new NotFoundException('班级不存在');
+    if (cls.teacherId !== teacherId) throw new ForbiddenException('无权操作此班级');
+
+    const member = await this.prisma.classMember.findUnique({
+      where: { classId_userId: { classId, userId } },
+    });
+    if (!member) throw new NotFoundException('该学生不在此班级中');
+
+    await this.prisma.classMember.delete({
+      where: { classId_userId: { classId, userId } },
+    });
+    return { removed: true };
   }
 
   // ========== 作业管理 ==========
@@ -106,7 +174,7 @@ export class TeacherService {
   async getAssignments(teacherId: string) {
     // 先获取教师的所有班级 ID
     const classIds = (await this.prisma.class.findMany({
-      where: { teacherId, status: 'APPROVED' },
+      where: { teacherId },
       select: { id: true, name: true },
     }));
     const ids = classIds.map(c => c.id);
@@ -125,30 +193,172 @@ export class TeacherService {
     startTime?: string; endTime?: string; problemIds?: string[];
   }) {
     const cls = await this.prisma.class.findUnique({ where: { id: data.classId } });
-    if (!cls || cls.teacherId !== teacherId || cls.status !== 'APPROVED') throw new ForbiddenException('班级未通过审核或无权操作');
+    if (!cls) throw new NotFoundException('?????');
+    if (cls.teacherId !== teacherId) throw new ForbiddenException('???????');
+
+    const problemIds = [...new Set((data.problemIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    if (!data.title?.trim()) throw new BadRequestException('????????');
+    if (!problemIds.length) throw new BadRequestException('?????????');
+
+    const problems = await this.prisma.problem.findMany({
+      where: { id: { in: problemIds }, status: 'PUBLISHED' },
+      select: { id: true },
+    });
+    if (problems.length !== problemIds.length) {
+      throw new BadRequestException('????????????');
+    }
 
     const assignment = await this.prisma.assignment.create({
       data: {
         classId: data.classId,
-        title: data.title,
+        title: data.title.trim(),
         description: data.description || '',
         startTime: data.startTime ? new Date(data.startTime) : new Date(),
         endTime: data.endTime ? new Date(data.endTime) : new Date(Date.now() + 7 * 86400000),
       },
     });
 
-    if (data.problemIds?.length) {
-      await this.prisma.assignmentProblem.createMany({
-        data: data.problemIds.map((pid, i) => ({
-          assignmentId: assignment.id, problemId: pid, order: i + 1, score: 100,
-        })),
+    await this.prisma.assignmentProblem.createMany({
+      data: problemIds.map((pid, i) => ({
+        assignmentId: assignment.id, problemId: pid, order: i + 1, score: 100,
+      })),
+      skipDuplicates: true,
+    });
+
+    const members = await this.prisma.classMember.findMany({
+      where: { classId: data.classId },
+      select: { userId: true },
+    });
+    if (members.length) {
+      await this.prisma.assignmentStudent.createMany({
+        data: members.map((member) => ({ assignmentId: assignment.id, userId: member.userId })),
+        skipDuplicates: true,
       });
     }
 
     return assignment;
   }
 
-  // ========== 比赛管理 ==========
+  async getClassAssignments(teacherId: string, classId: string) {
+    const cls = await this.prisma.class.findUnique({ where: { id: classId } });
+    if (!cls) throw new NotFoundException('?????');
+    if (cls.teacherId !== teacherId) throw new ForbiddenException('???????');
+
+    return this.prisma.assignment.findMany({
+      where: { classId },
+      include: {
+        problems: {
+          orderBy: { order: 'asc' },
+          include: { problem: { select: { id: true, title: true, source: true, difficulty: true } } },
+        },
+        _count: { select: { students: true, problems: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getAssignmentReport(teacherId: string, assignmentId: string) {
+    const assignment = await this.prisma.assignment.findUnique({
+      where: { id: assignmentId },
+      include: {
+        problems: {
+          orderBy: { order: 'asc' },
+          include: { problem: { select: { id: true, title: true, source: true, difficulty: true } } },
+        },
+      },
+    });
+    if (!assignment) throw new NotFoundException('?????');
+
+    const cls = await this.prisma.class.findUnique({ where: { id: assignment.classId } });
+    if (!cls) throw new NotFoundException('?????');
+    if (cls.teacherId !== teacherId) throw new ForbiddenException('???????');
+
+    const classMembers = await this.prisma.classMember.findMany({
+      where: { classId: assignment.classId },
+      include: { user: { select: { id: true, username: true, nickname: true } } },
+      orderBy: { joinedAt: 'asc' },
+    });
+    const studentIds = classMembers.map((member) => member.user.id);
+    const problemIds = assignment.problems.map((item) => item.problem.id);
+
+    const submissions = await this.prisma.submission.findMany({
+      where: {
+        userId: { in: studentIds },
+        problemId: { in: problemIds },
+        createdAt: { gte: assignment.startTime, lte: assignment.endTime },
+      },
+      select: {
+        id: true,
+        userId: true,
+        problemId: true,
+        status: true,
+        score: true,
+        timeUsed: true,
+        memoryUsed: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const byStudentProblem = new Map<string, typeof submissions>();
+    for (const submission of submissions) {
+      const key = submission.userId + ':' + submission.problemId;
+      const bucket = byStudentProblem.get(key) || [];
+      bucket.push(submission);
+      byStudentProblem.set(key, bucket);
+    }
+
+    const students = classMembers.map((member) => {
+      let solvedCount = 0;
+      const problemStatuses = assignment.problems.map((item) => {
+        const problem = item.problem;
+        const attempts = byStudentProblem.get(member.user.id + ':' + problem.id) || [];
+        const accepted = attempts.find((submission) => submission.status === 'ACCEPTED');
+        const best = accepted || attempts[0];
+        if (accepted) solvedCount++;
+        return {
+          problemId: problem.id,
+          title: problem.title,
+          status: best ? best.status : 'NOT_SUBMITTED',
+          attempts: attempts.length,
+          bestSubmissionId: best?.id || null,
+          score: best?.score ?? 0,
+          timeUsed: best?.timeUsed ?? null,
+          memoryUsed: best?.memoryUsed ?? null,
+          submittedAt: best?.createdAt ?? null,
+        };
+      });
+
+      return {
+        user: member.user,
+        solvedCount,
+        totalProblems: assignment.problems.length,
+        completed: solvedCount === assignment.problems.length && assignment.problems.length > 0,
+        problems: problemStatuses,
+      };
+    });
+
+    return {
+      assignment: {
+        id: assignment.id,
+        classId: assignment.classId,
+        title: assignment.title,
+        description: assignment.description,
+        startTime: assignment.startTime,
+        endTime: assignment.endTime,
+      },
+      class: { id: cls.id, name: cls.name },
+      problems: assignment.problems.map((item) => item.problem),
+      students,
+      summary: {
+        studentCount: students.length,
+        problemCount: assignment.problems.length,
+        completedStudents: students.filter((student) => student.completed).length,
+      },
+    };
+  }
+
+  // ========== ???? ==========
 
   async getContests(teacherId: string) {
     return this.prisma.contest.findMany({
@@ -161,30 +371,16 @@ export class TeacherService {
   async createContest(teacherId: string, data: {
     title: string; description?: string; mode?: string;
     startTime: string; endTime: string; problemIds?: string[];
-    visibility?: string; registerStart?: string; registerEnd?: string;
-    freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
-    penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
+    visibility?: string;
   }) {
-    if (new Date(data.endTime) <= new Date(data.startTime)) {
-      throw new ForbiddenException('比赛结束时间必须晚于开始时间');
-    }
     const contest = await this.prisma.contest.create({
       data: {
         title: data.title,
         description: data.description || '',
         mode: data.mode || 'ACM',
         visibility: data.visibility || 'PUBLIC',
-        password: data.password || null,
         startTime: new Date(data.startTime),
         endTime: new Date(data.endTime),
-        registerStart: data.registerStart ? new Date(data.registerStart) : null,
-        registerEnd: data.registerEnd ? new Date(data.registerEnd) : null,
-        freezeTime: data.freezeTime ? new Date(data.freezeTime) : null,
-        allowUpsolve: data.allowUpsolve ?? true,
-        maxSubmissions: data.maxSubmissions || null,
-        penaltyTime: data.penaltyTime || 20,
-        teamMode: data.teamMode ?? false,
-        isRated: data.isRated ?? false,
         createdBy: teacherId,
       },
     });
