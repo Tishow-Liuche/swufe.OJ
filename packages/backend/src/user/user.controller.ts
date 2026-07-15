@@ -58,8 +58,8 @@ export class UserController {
   @Post('admin/:id/reset-password')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
-  resetPassword(@Param('id') id: string, @Body('password') password: string) {
-    return this.userService.resetPassword(id, password);
+  resetPassword(@Param('id') id: string, @Req() req: any, @Body('password') password: string) {
+    return this.userService.resetPassword(req.user.id, id, password);
   }
 
   @Get('admin/classes')

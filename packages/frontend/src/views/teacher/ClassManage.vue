@@ -99,7 +99,7 @@ async function importStudents() {
   importing.value = true;
   try {
     const { data } = await api.post(`/api/teacher/classes/${importClassId.value}/import`, { students: rows.value.map(({ studentId, college, name, phone, email }) => ({ studentId, college, name, phone, email })) });
-    message.value = `导入完成：新增 ${data.added} 人，更新 ${data.updated} 人，跳过 ${data.skipped} 人。所有学生初始密码均为其学号，首次登录必须重设密码。`;
+    message.value = `导入完成：新增 ${data.added} 人，更新 ${data.updated} 人，跳过 ${data.skipped} 人。仅新建账号的初始密码为学号；已有账号会保留原密码。`;
     rows.value = [];
     await loadClasses();
   } catch (e: any) { message.value = '导入失败：' + (e.response?.data?.message || e.message); }

@@ -77,7 +77,8 @@ export class TeacherService {
       const user = existingUser
         ? await this.prisma.user.update({
             where: { id: existingUser.id },
-            data: { ...accountData, password: await bcrypt.hash(studentId, 10), mustChangePassword: true },
+            // 已有账号只更新教务资料，绝不在批量导入时重置密码或改写登录状态。
+            data: accountData,
           })
         : await this.prisma.user.create({
             data: { username: studentId, password: await bcrypt.hash(studentId, 10), role: 'STUDENT', requestedRole: 'STUDENT', mustChangePassword: true, ...accountData },

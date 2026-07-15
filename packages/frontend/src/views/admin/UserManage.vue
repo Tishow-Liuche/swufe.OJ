@@ -7,7 +7,7 @@ const users = ref<any[]>([]);
 const loading = ref(true);
 const msg = ref('');
 const showResetPwd = ref('');
-const newPassword = ref('Oj123456');
+const newPassword = ref('');
 const reviewing = ref('');
 const classApplications = ref<any[]>([]);
 const classReviewing = ref('');
@@ -55,8 +55,9 @@ function applicationLabel(status: string) {
 async function resetPassword(userId: string) {
   try {
     await api.post(`/api/user/admin/${userId}/reset-password`, { password: newPassword.value });
-    msg.value = '密码已重置为 ' + newPassword.value;
+    msg.value = '密码已重置，目标账号的所有历史登录状态已失效，用户下次登录必须修改密码。';
     showResetPwd.value = '';
+    newPassword.value = '';
   } catch (e: any) { msg.value = '重置失败: ' + (e.response?.data?.message || e.message); }
 }
 
@@ -140,7 +141,7 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
               </select>
               <button v-if="showResetPwd !== u.id" class="btn-sm" @click="showResetPwd = u.id">重置密码</button>
               <span v-else class="reset-row">
-                <input v-model="newPassword" size="8" />
+                <input v-model="newPassword" type="password" minlength="8" placeholder="至少8位，含字母和数字" />
                 <button class="btn-sm btn-green" @click="resetPassword(u.id)">确认</button>
                 <button class="btn-sm" @click="showResetPwd = ''">取消</button>
               </span>

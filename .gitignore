@@ -36,9 +36,6 @@ testdata/packages/
 *.zip
 *.tar.gz
 
-# Prisma
-packages/backend/prisma/migrations/
-
 # Coverage
 coverage/
 

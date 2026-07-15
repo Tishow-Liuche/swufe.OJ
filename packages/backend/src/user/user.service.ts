@@ -210,10 +210,29 @@ export class UserService {
     });
   }
 
-  async resetPassword(userId: string, password: string) {
-    if (!password || password.length < 8) throw new BadRequestException('密码至少 8 位');
+  async resetPassword(actorId: string, userId: string, password: string) {
+    if (!password || password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      throw new BadRequestException('密码至少 8 位，且必须同时包含字母和数字');
+    }
+    const target = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, username: true } });
+    if (!target) throw new NotFoundException('用户不存在');
     const hashed = await bcrypt.hash(password, 10);
-    await this.prisma.user.update({ where: { id: userId }, data: { password: hashed, mustChangePassword: true } });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { password: hashed, mustChangePassword: true, authVersion: { increment: 1 } },
+      }),
+      this.prisma.userSession.deleteMany({ where: { userId } }),
+      this.prisma.auditLog.create({
+        data: {
+          userId: actorId,
+          action: 'ADMIN_RESET_PASSWORD',
+          resource: 'USER',
+          resourceId: userId,
+          detail: `管理员重置账号 ${target.username} 的密码，并撤销全部历史登录会话`,
+        },
+      }),
+    ]);
     return { success: true };
   }
 

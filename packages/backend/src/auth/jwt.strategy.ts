@@ -17,12 +17,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string }) {
+  async validate(payload: { sub: string; ver?: number }) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, username: true, role: true },
+      select: { id: true, username: true, role: true, authVersion: true },
     });
-    if (!user) throw new UnauthorizedException();
+    if (!user || (payload.ver ?? 0) !== user.authVersion) throw new UnauthorizedException('登录状态已失效，请重新登录');
     return user;
   }
 }

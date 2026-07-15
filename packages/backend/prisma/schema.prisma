@@ -20,6 +20,7 @@ model User {
   college      String?
   phone        String?
   mustChangePassword Boolean @default(false)
+  authVersion  Int      @default(0)
   role         String   @default("STUDENT")
   school       String?
   requestedRole String  @default("STUDENT")

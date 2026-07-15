@@ -121,7 +121,7 @@ docker compose up -d
 cd packages/backend
 cp ../../config/.env.example .env
 npm install
-npx prisma migrate dev --name init
+npx prisma migrate deploy
 npx prisma generate
 npm run seed            # 导入洛谷 P1000-P1010 共 11 道题目
 npm run start:dev       # 启动开发服务器 (localhost:3000)

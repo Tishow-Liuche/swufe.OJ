@@ -54,6 +54,7 @@ export class ContestController {
   }
 
   @Get(':id/standings')
+  @UseGuards(AuthGuard('jwt'))
   standings(@Param('id') id: string, @Req() req: any) {
     return this.contests.standings(id, req.user);
   }
@@ -65,6 +66,7 @@ export class ContestController {
   }
 
   @Get(':id')
+  @UseGuards(AuthGuard('jwt'))
   detail(@Param('id') id: string, @Req() req: any) {
     return this.contests.getContest(id, req.user);
   }

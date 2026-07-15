@@ -136,7 +136,12 @@ export class AuthService {
   }
 
   private async generateTokens(userId: string, mustChangePassword = false) {
-    const accessToken = this.jwt.sign({ sub: userId });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { authVersion: true },
+    });
+    if (!user) throw new UnauthorizedException('账号不存在或已被删除');
+    const accessToken = this.jwt.sign({ sub: userId, ver: user.authVersion });
 
     const refreshToken = randomBytes(32).toString('hex');
     const expiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES') || '7d';
