@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ CF Helper
 // @namespace    https://oj.example.com
-// @version      7.1
+// @version      7.2
 // @description  自动填表 + 自动提交 + 回传 SID + 自动关闭 Codeforces 标签页
 // @author       OJ Team
 // @downloadURL  http://localhost:5173/cf-helper.user.js
@@ -410,6 +410,10 @@ function fillAndSubmit() {
     }
 
     var existing = loadState();
+    if (existing.submissionId !== d.submissionId || existing.problemId !== problemId) {
+      existing = {};
+      clearState();
+    }
     var taskState = {
       stage: existing.stage || 'FILLED',
       submissionId: d.submissionId,

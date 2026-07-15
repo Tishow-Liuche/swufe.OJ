@@ -76,7 +76,12 @@ export class LuoguTaskLeaseService {
           leaseExpiresAt: task.leaseExpiresAt,
         };
       }
-      throw new ConflictException('Task already has an active lease');
+      return {
+        submissionId,
+        leaseNonce: task.leaseNonce,
+        leaseExpiresAt: task.leaseExpiresAt,
+        alreadyLeased: true,
+      };
     }
 
     const leaseNonce = randomBytes(16).toString('hex');

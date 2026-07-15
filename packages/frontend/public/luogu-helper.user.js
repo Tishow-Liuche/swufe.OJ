@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Luogu Helper
 // @namespace    https://oj.example.com
-// @version      1.0
+// @version      1.1
 // @description  自动填表 + 自动提交 + 回传洛谷结果 + 自动关闭洛谷标签页
 // @author       OJ Team
 // @downloadURL  http://localhost:5173/luogu-helper.user.js
@@ -297,6 +297,10 @@ function startSubmitFlow() {
     }
 
     var st = loadState();
+    if (st.submissionId !== task.submissionId || st.problemId !== pid) {
+      st = {};
+      clearState();
+    }
     saveState({
       submissionId: task.submissionId,
       problemId: pid,

@@ -63,7 +63,7 @@ describe('CfTaskLeaseService', () => {
     });
   });
 
-  it('rejects a second active lease with a different nonce', async () => {
+  it('returns the current active lease when a helper retries without its nonce', async () => {
     const prisma = makePrisma({
       submissionId: 'sub_1',
       platformCode: 'CODEFORCES',
@@ -76,7 +76,15 @@ describe('CfTaskLeaseService', () => {
     });
     const service = new CfTaskLeaseService(prisma);
 
-    await expect(service.acquireLease('sub_1', 'task-token')).rejects.toBeInstanceOf(ConflictException);
+    const result = await service.acquireLease('sub_1', 'task-token');
+
+    expect(result).toEqual({
+      submissionId: 'sub_1',
+      leaseNonce: 'existing',
+      leaseExpiresAt: new Date('2026-07-14T12:01:00Z'),
+      alreadyLeased: true,
+    });
+    expect(prisma.remoteSubmissionTask.update).not.toHaveBeenCalled();
   });
 
   it('allows the same active lease to be replayed idempotently', async () => {
