@@ -12,6 +12,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { marked } from 'marked';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
 
 const route = useRoute();
 const problem = ref<any>(null);
@@ -379,6 +380,8 @@ function renderMd(text: string): string {
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
         </div>
       </div>
+
+      <ProblemDiscussionPanel :problem-id="problem.id" />
     </template>
 
     <!-- CF 远程提交引导弹窗 -->

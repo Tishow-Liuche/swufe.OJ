@@ -10,43 +10,52 @@ datasource db {
 // ===================== 用户与权限 =====================
 
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  email        String   @unique
-  password     String
-  nickname     String?
-  avatar       String?
-  role         String   @default("STUDENT")
-  school       String?
-  requestedRole String  @default("STUDENT")
-  teacherApplicationStatus String @default("NOT_REQUIRED")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                       String   @id @default(cuid())
+  username                 String   @unique
+  email                    String   @unique
+  password                 String
+  nickname                 String?
+  avatar                   String?
+  role                     String   @default("STUDENT")
+  school                   String?
+  requestedRole            String   @default("STUDENT")
+  teacherApplicationStatus String   @default("NOT_REQUIRED")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 
-  submissions       Submission[]
-  userRoles         UserRole[]
-  classMembers      ClassMember[]
-  contestParticipants ContestParticipant[]
-  assignmentStudents  AssignmentStudent[]
-  sessions          UserSession[]
-  externalAccounts  ExternalAccount[]
-  helperDevices     HelperDevice[]
-  remoteTasks       RemoteSubmissionTask[]
-  skillProfiles     UserSkillProfile[]
-  problemMetrics    UserProblemMetric[]
-  learningPlans     LearningPlan[]
-  favorites         UserFavorite[]
-  wrongBook         UserWrongBook[]
-  recommendationFeedback RecommendationFeedback[]
+  submissions              Submission[]
+  userRoles                UserRole[]
+  classMembers             ClassMember[]
+  contestParticipants      ContestParticipant[]
+  assignmentStudents       AssignmentStudent[]
+  sessions                 UserSession[]
+  externalAccounts         ExternalAccount[]
+  helperDevices            HelperDevice[]
+  remoteTasks              RemoteSubmissionTask[]
+  skillProfiles            UserSkillProfile[]
+  problemMetrics           UserProblemMetric[]
+  learningPlans            LearningPlan[]
+  favorites                UserFavorite[]
+  wrongBook                UserWrongBook[]
+  recommendationFeedback   RecommendationFeedback[]
+  communityPosts           CommunityPost[]
+  communityReplies         CommunityReply[]
+  communityReactions       CommunityReaction[]
+  announcements            Announcement[]
+  notifications            Notification[]
+  reportedContent          ContentReport[]          @relation("ContentReportReporter")
+  reviewedContentReports   ContentReport[]          @relation("ContentReportReviewer")
+  problemFeedbacks         ProblemFeedback[]        @relation("ProblemFeedbackReporter")
+  reviewedProblemFeedbacks ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
 }
 
 model Role {
-  id          String     @id @default(cuid())
-  name        String     @unique
+  id          String       @id @default(cuid())
+  name        String       @unique
   description String?
   permissions Permission[]
   userRoles   UserRole[]
-  createdAt   DateTime   @default(now())
+  createdAt   DateTime     @default(now())
 }
 
 model Permission {
@@ -82,41 +91,41 @@ model UserSession {
 }
 
 model ExternalAccount {
-  id                        String    @id @default(cuid())
-  userId                    String
-  platform                  String
-  remoteUserId              String
-  remoteUsername            String?
-  status                    String    @default("IDENTITY_ONLY")
-  ownershipVerified         Boolean   @default(false)
-  helperConnected           Boolean   @default(false)
-  remoteLoginVerifiedAt     DateTime?
+  id                         String    @id @default(cuid())
+  userId                     String
+  platform                   String
+  remoteUserId               String
+  remoteUsername             String?
+  status                     String    @default("IDENTITY_ONLY")
+  ownershipVerified          Boolean   @default(false)
+  helperConnected            Boolean   @default(false)
+  remoteLoginVerifiedAt      DateTime?
   lastSuccessfulSubmissionAt DateTime?
-  lastFailureAt             DateTime?
-  lastFailureReason         String?
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
-  user                      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastFailureAt              DateTime?
+  lastFailureReason          String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+  user                       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([platform, remoteUserId])
   @@index([userId])
 }
 
 model ExternalPlatform {
-  id                             String   @id @default(cuid())
-  code                           String   @unique
-  name                           String
-  baseUrl                        String
-  enabled                        Boolean  @default(true)
-  supportsMetadata               Boolean  @default(false)
-  supportsStatement              Boolean  @default(false)
-  supportsBrowserSubmission      Boolean  @default(false)
-  supportsOfficialSubmissionApi  Boolean  @default(false)
-  supportsOfficialResultApi      Boolean  @default(false)
-  allowLiveContestSubmission     Boolean  @default(false)
-  adapterVersion                 String   @default("0.0.0")
-  createdAt                      DateTime @default(now())
-  updatedAt                      DateTime @updatedAt
+  id                            String   @id @default(cuid())
+  code                          String   @unique
+  name                          String
+  baseUrl                       String
+  enabled                       Boolean  @default(true)
+  supportsMetadata              Boolean  @default(false)
+  supportsStatement             Boolean  @default(false)
+  supportsBrowserSubmission     Boolean  @default(false)
+  supportsOfficialSubmissionApi Boolean  @default(false)
+  supportsOfficialResultApi     Boolean  @default(false)
+  allowLiveContestSubmission    Boolean  @default(false)
+  adapterVersion                String   @default("0.0.0")
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
 }
 
 model HelperDevice {
@@ -135,32 +144,32 @@ model HelperDevice {
 }
 
 model RemoteSubmissionTask {
-  id                    String    @id @default(cuid())
-  submissionId          String    @unique
-  userId                String
-  platformCode          String
-  externalAccountId     String
-  remoteProblemId       String
-  remoteContestId       String?
-  remoteProblemIndex    String?
-  language              String
-  sourceCode            String
-  status                String    @default("PENDING")
+  id                     String    @id @default(cuid())
+  submissionId           String    @unique
+  userId                 String
+  platformCode           String
+  externalAccountId      String
+  remoteProblemId        String
+  remoteContestId        String?
+  remoteProblemIndex     String?
+  language               String
+  sourceCode             String
+  status                 String    @default("PENDING")
   assignedHelperDeviceId String?
-  expiresAt             DateTime
-  attemptCount          Int       @default(0)
-  maximumAttempts       Int       @default(1)
-  remoteSubmissionId    String?
-  failureCode           String?
-  failureMessage        String?
-  nonce                 String?
-  signature             String?
-  leaseNonce            String?
-  leaseExpiresAt        DateTime?
-  helperStage           String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt              DateTime
+  attemptCount           Int       @default(0)
+  maximumAttempts        Int       @default(1)
+  remoteSubmissionId     String?
+  failureCode            String?
+  failureMessage         String?
+  nonce                  String?
+  signature              String?
+  leaseNonce             String?
+  leaseExpiresAt         DateTime?
+  helperStage            String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -195,6 +204,8 @@ model Problem {
   favorites          UserFavorite[]
   wrongBook          UserWrongBook[]
   sourceInfo         ProblemSource?
+  communityPosts     CommunityPost[]
+  feedbacks          ProblemFeedback[]
 }
 
 model ProblemSource {
@@ -209,9 +220,9 @@ model ProblemSource {
 }
 
 model ProblemVersion {
-  id           String   @id @default(cuid())
+  id           String            @id @default(cuid())
   problemId    String
-  version      Int      @default(1)
+  version      Int               @default(1)
   description  String
   inputFormat  String?
   outputFormat String?
@@ -219,9 +230,9 @@ model ProblemVersion {
   sampleOutput String?
   hint         String?
   dataRange    String?
-  isCurrent    Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  problem      Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  isCurrent    Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  problem      Problem           @relation(fields: [problemId], references: [id], onDelete: Cascade)
   submissions  Submission[]
   testGroups   TestGroup[]
   testCases    ProblemTestCase[]
@@ -242,7 +253,7 @@ model ProblemTag {
 }
 
 model ProblemPermission {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   problemId  String
   targetType String
   targetId   String
@@ -253,37 +264,37 @@ model ProblemPermission {
 }
 
 model TestGroup {
-  id                String         @id @default(cuid())
-  problemVersionId  String
-  name              String?
-  score             Int            @default(10)
-  testCount         Int            @default(1)
-  order             Int            @default(0)
-  problemVersion    ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
+  id               String         @id @default(cuid())
+  problemVersionId String
+  name             String?
+  score            Int            @default(10)
+  testCount        Int            @default(1)
+  order            Int            @default(0)
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
 
   @@index([problemVersionId])
 }
 
 model Checker {
-  id                String         @id @default(cuid())
-  problemVersionId  String         @unique
-  type              String         @default("STANDARD")
-  sourceCode        String?
-  language          String?
-  problemVersion    ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
+  id               String         @id @default(cuid())
+  problemVersionId String         @unique
+  type             String         @default("STANDARD")
+  sourceCode       String?
+  language         String?
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
 }
 
 model ProblemTestCase {
-  id                String         @id @default(cuid())
-  problemVersionId  String
-  input             String         @default("")
-  expectedOutput    String         @default("")
-  score             Int            @default(10)
-  order             Int            @default(0)
-  isSample          Boolean        @default(false)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  problemVersion    ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
+  id               String         @id @default(cuid())
+  problemVersionId String
+  input            String         @default("")
+  expectedOutput   String         @default("")
+  score            Int            @default(10)
+  order            Int            @default(0)
+  isSample         Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
 
   @@index([problemVersionId])
   @@index([problemVersionId, order])
@@ -292,25 +303,25 @@ model ProblemTestCase {
 // ===================== 提交与评测 =====================
 
 model Submission {
-  id                String           @id @default(cuid())
-  problemId         String
-  problemVersionId  String?
-  userId            String
-  language          String
-  sourceCode        String
-  status            String           @default("PENDING")
-  score             Int              @default(0)
-  timeUsed          Int?
-  memoryUsed        Int?
-  compileMessage    String?
-  createdAt         DateTime         @default(now())
-  judgedAt          DateTime?
-  problem           Problem          @relation(fields: [problemId], references: [id])
-  problemVersion    ProblemVersion?  @relation(fields: [problemVersionId], references: [id])
-  user              User             @relation(fields: [userId], references: [id])
-  cases             SubmissionCase[]
-  judgeTask         JudgeTask?
-  remoteJob         RemoteJudgeJob?
+  id                 String              @id @default(cuid())
+  problemId          String
+  problemVersionId   String?
+  userId             String
+  language           String
+  sourceCode         String
+  status             String              @default("PENDING")
+  score              Int                 @default(0)
+  timeUsed           Int?
+  memoryUsed         Int?
+  compileMessage     String?
+  createdAt          DateTime            @default(now())
+  judgedAt           DateTime?
+  problem            Problem             @relation(fields: [problemId], references: [id])
+  problemVersion     ProblemVersion?     @relation(fields: [problemVersionId], references: [id])
+  user               User                @relation(fields: [userId], references: [id])
+  cases              SubmissionCase[]
+  judgeTask          JudgeTask?
+  remoteJob          RemoteJudgeJob?
   contestSubmissions ContestSubmission[]
 
   @@index([userId])
@@ -369,14 +380,14 @@ model RemoteJudgeJob {
 }
 
 model JudgeNode {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String
-  type          String   @default("LOCAL")
-  status        String   @default("ONLINE")
-  load          Float    @default(0)
+  type          String    @default("LOCAL")
+  status        String    @default("ONLINE")
+  load          Float     @default(0)
   lastHeartbeat DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model JudgeLanguage {
@@ -391,9 +402,9 @@ model JudgeLanguage {
 }
 
 model VerdictMapping {
-  id           String @id @default(cuid())
-  platform     String
-  rawStatus    String
+  id            String @id @default(cuid())
+  platform      String
+  rawStatus     String
   unifiedStatus String
 
   @@unique([platform, rawStatus])
@@ -402,23 +413,23 @@ model VerdictMapping {
 // ===================== 比赛 =====================
 
 model Contest {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   title          String
   description    String?
-  mode           String   @default("ACM")
-  visibility     String   @default("PUBLIC")
+  mode           String    @default("ACM")
+  visibility     String    @default("PUBLIC")
   password       String?
   startTime      DateTime
   endTime        DateTime
   registerStart  DateTime?
   registerEnd    DateTime?
   freezeTime     DateTime?
-  allowUpsolve   Boolean  @default(true)
+  allowUpsolve   Boolean   @default(true)
   maxSubmissions Int?
-  penaltyTime    Int      @default(20)
+  penaltyTime    Int       @default(20)
   createdBy      String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   problems     ContestProblem[]
   participants ContestParticipant[]
@@ -492,13 +503,13 @@ model Course {
 }
 
 model Class {
-  id        String   @id @default(cuid())
+  id        String        @id @default(cuid())
   courseId  String?
   name      String
   teacherId String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  course    Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  course    Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
   members   ClassMember[]
 }
 
@@ -515,19 +526,19 @@ model ClassMember {
 }
 
 model Assignment {
-  id           String   @id @default(cuid())
-  classId      String
-  title        String
-  description  String?
-  startTime    DateTime
-  endTime      DateTime
-  allowLate    Boolean  @default(false)
-  latePenalty  Float    @default(0)
+  id            String              @id @default(cuid())
+  classId       String
+  title         String
+  description   String?
+  startTime     DateTime
+  endTime       DateTime
+  allowLate     Boolean             @default(false)
+  latePenalty   Float               @default(0)
   passCondition String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  problems     AssignmentProblem[]
-  students     AssignmentStudent[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  problems      AssignmentProblem[]
+  students      AssignmentStudent[]
 }
 
 model AssignmentProblem {
@@ -582,13 +593,13 @@ model UserWrongBook {
 }
 
 model ProblemList {
-  id          String   @id @default(cuid())
+  id          String            @id @default(cuid())
   name        String
   description String?
   createdBy   String
-  isPublic    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isPublic    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
   items       ProblemListItem[]
 }
 
@@ -628,26 +639,26 @@ model KnowledgeRelation {
 }
 
 model ProblemKnowledgePoint {
-  id                String         @id @default(cuid())
-  problemId         String
-  knowledgePointId  String
-  weight            Float          @default(1.0)
-  problem           Problem        @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  knowledgePoint    KnowledgePoint @relation(fields: [knowledgePointId], references: [id], onDelete: Cascade)
+  id               String         @id @default(cuid())
+  problemId        String
+  knowledgePointId String
+  weight           Float          @default(1.0)
+  problem          Problem        @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  knowledgePoint   KnowledgePoint @relation(fields: [knowledgePointId], references: [id], onDelete: Cascade)
 
   @@unique([problemId, knowledgePointId])
 }
 
 model UserSkillProfile {
-  id                String   @id @default(cuid())
-  userId            String
-  knowledgePointId  String
-  score             Float    @default(0)
-  totalAttempts     Int      @default(0)
-  totalSolved       Int      @default(0)
-  lastAttemptAt     DateTime?
-  updatedAt         DateTime @updatedAt
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String    @id @default(cuid())
+  userId           String
+  knowledgePointId String
+  score            Float     @default(0)
+  totalAttempts    Int       @default(0)
+  totalSolved      Int       @default(0)
+  lastAttemptAt    DateTime?
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, knowledgePointId])
 }
@@ -668,27 +679,27 @@ model UserProblemMetric {
 }
 
 model LearningPlan {
-  id        String   @id @default(cuid())
+  id        String             @id @default(cuid())
   userId    String
   name      String
-  type      String   @default("DAILY")
+  type      String             @default("DAILY")
   startDate DateTime
   endDate   DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   items     LearningPlanItem[]
 }
 
 model LearningPlanItem {
-  id                String       @id @default(cuid())
-  planId            String
-  problemId         String?
-  knowledgePointId  String?
-  dayIndex          Int          @default(0)
-  type              String       @default("PRACTICE")
-  completed         Boolean      @default(false)
-  plan              LearningPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  id               String       @id @default(cuid())
+  planId           String
+  problemId        String?
+  knowledgePointId String?
+  dayIndex         Int          @default(0)
+  type             String       @default("PRACTICE")
+  completed        Boolean      @default(false)
+  plan             LearningPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 }
 
 model RecommendationFeedback {
@@ -700,6 +711,131 @@ model RecommendationFeedback {
   comment            String?
   createdAt          DateTime @default(now())
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ===================== 社区与学习服务 =====================
+
+model CommunityPost {
+  id           String              @id @default(cuid())
+  type         String              @default("DISCUSSION")
+  title        String?
+  content      String
+  category     String?
+  spoilerLevel String              @default("NONE")
+  status       String              @default("PUBLISHED")
+  isPinned     Boolean             @default(false)
+  isResolved   Boolean             @default(false)
+  viewCount    Int                 @default(0)
+  authorId     String
+  problemId    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  author       User                @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  problem      Problem?            @relation(fields: [problemId], references: [id], onDelete: SetNull)
+  replies      CommunityReply[]
+  reactions    CommunityReaction[]
+
+  @@index([type, status, createdAt])
+  @@index([problemId, status, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model CommunityReply {
+  id        String        @id @default(cuid())
+  postId    String
+  authorId  String
+  content   String
+  status    String        @default("PUBLISHED")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, status, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model CommunityReaction {
+  id        String        @id @default(cuid())
+  userId    String
+  postId    String
+  type      String        @default("UPVOTE")
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId, type])
+  @@index([postId, createdAt])
+}
+
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  content   String
+  audience  String    @default("ALL")
+  status    String    @default("PUBLISHED")
+  isPinned  Boolean   @default(false)
+  publishAt DateTime  @default(now())
+  expiresAt DateTime?
+  authorId  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([audience, status, publishAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  content   String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model ContentReport {
+  id           String   @id @default(cuid())
+  reporterId   String
+  targetType   String
+  targetId     String
+  reason       String
+  detail       String?
+  status       String   @default("OPEN")
+  reviewerId   String?
+  reviewerNote String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  reporter     User     @relation("ContentReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewer     User?    @relation("ContentReportReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([reporterId, createdAt])
+}
+
+model ProblemFeedback {
+  id           String   @id @default(cuid())
+  problemId    String
+  reporterId   String
+  type         String   @default("STATEMENT")
+  content      String
+  status       String   @default("OPEN")
+  reviewerId   String?
+  reviewerNote String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  problem      Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  reporter     User     @relation("ProblemFeedbackReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewer     User?    @relation("ProblemFeedbackReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([problemId, status, createdAt])
+  @@index([reporterId, createdAt])
 }
 
 // ===================== 系统与审计 =====================

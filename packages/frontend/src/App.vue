@@ -48,6 +48,7 @@ async function logout() {
           <router-link :to="protectedNavigation('/leaderboard')">排行榜</router-link>
           <router-link :to="protectedNavigation('/contests')">比赛</router-link>
           <router-link :to="protectedNavigation('/problem-lists')">题单</router-link>
+          <router-link to="/community">社区</router-link>
           <router-link v-if="auth.isTeacher()" to="/teacher/classes">班级</router-link>
         </nav>
       </div>
@@ -82,6 +83,7 @@ async function logout() {
         <router-link :to="protectedNavigation('/leaderboard')" @click="closeMobileMenu">排行榜</router-link>
         <router-link :to="protectedNavigation('/contests')" @click="closeMobileMenu">比赛</router-link>
         <router-link :to="protectedNavigation('/problem-lists')" @click="closeMobileMenu">题单</router-link>
+        <router-link to="/community" @click="closeMobileMenu">社区</router-link>
         <router-link v-if="auth.isTeacher()" to="/teacher/classes" @click="closeMobileMenu">班级</router-link>
         <template v-if="auth.isLoggedIn()">
           <router-link v-if="auth.isAdmin()" to="/admin/create-problem" class="admin-link" @click="closeMobileMenu">录题</router-link>
