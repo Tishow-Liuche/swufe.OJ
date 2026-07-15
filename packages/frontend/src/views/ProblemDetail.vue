@@ -120,7 +120,9 @@ async function submitCode() {
   result.value = null;
   isExternal.value = false;
   try {
-    const { data } = await api.post('/api/submissions', {
+    const contestId = typeof route.query.contestId === 'string' ? route.query.contestId : '';
+    const endpoint = contestId ? `/api/contests/${contestId}/submit` : '/api/submissions';
+    const { data } = await api.post(endpoint, {
       problemId: problem.value.id,
       language: language.value,
       sourceCode: code.value,

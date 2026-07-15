@@ -10,6 +10,7 @@ import { PublicModule } from './public/public.module';
 import { TeacherModule } from './teacher/teacher.module';
 import { SyncModule } from './sync/sync.module';
 import { HelperModule } from './helper/helper.module';
+import { ContestModule } from './contest/contest.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { HelperModule } from './helper/helper.module';
     FileUploadModule, PrismaModule, AuthModule, ProblemModule,
     SubmissionModule, UserModule, TeacherModule, SyncModule,
     HelperModule, PublicModule,
+    ContestModule,
   ],
 })
 export class AppModule {}

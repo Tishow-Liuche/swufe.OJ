@@ -438,6 +438,9 @@ model ContestParticipant {
   contestId    String
   userId       String
   registeredAt DateTime @default(now())
+  isVirtual    Boolean  @default(false)
+  virtualStart DateTime?
+  virtualEnd   DateTime?
   contest      Contest  @relation(fields: [contestId], references: [id], onDelete: Cascade)
   user         User     @relation(fields: [userId], references: [id])
 
