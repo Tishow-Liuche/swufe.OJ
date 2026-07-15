@@ -41,7 +41,8 @@ export class QojAdapter implements SyncAdapter {
   }
 
   private async httpGet(path: string): Promise<string> {
-    const resp = await fetch(`${this.baseUrl}${path}`, {
+    const targetUrl = `${this.baseUrl}${path}`;
+    const resp = await fetch(targetUrl, {
       headers: {
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8',
@@ -53,12 +54,28 @@ export class QojAdapter implements SyncAdapter {
       },
     });
 
+    if (!resp.ok) return this.httpGetViaTextMirror(targetUrl);
+    return resp.text();
+  }
+
+  private async httpGetViaTextMirror(targetUrl: string): Promise<string> {
+    const mirrorUrl = `https://r.jina.ai/http://r.jina.ai/http://${targetUrl}`;
+    const resp = await fetch(mirrorUrl, {
+      headers: {
+        Accept: 'text/plain,*/*',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      },
+    });
     if (!resp.ok) throw new Error(`QOJ HTTP ${resp.status}`);
     return resp.text();
   }
 }
 
 export function parseQojProblemList(html: string): { items: Array<{ remoteId: string }>; total: number } {
+  if (html.includes('Markdown Content:')) return parseQojProblemListMarkdown(html);
+
   const $ = cheerio.load(html);
   const ids: string[] = [];
   $('a[href^="/problem/"]').each((_, el) => {
@@ -82,6 +99,8 @@ export function parseQojProblemList(html: string): { items: Array<{ remoteId: st
 }
 
 export function parseQojProblemPage(remoteId: string, html: string): RemoteProblemData | null {
+  if (html.includes('Markdown Content:')) return parseQojProblemMarkdown(remoteId, html);
+
   const id = normalizeRemoteId(remoteId);
   if (!id) return null;
 
@@ -111,6 +130,79 @@ export function parseQojProblemPage(remoteId: string, html: string): RemoteProbl
     samples,
     dataRange: `Time: ${timeLimit}ms, Memory: ${memoryLimit}MB`,
   };
+}
+
+function parseQojProblemListMarkdown(markdown: string): { items: Array<{ remoteId: string }>; total: number } {
+  const ids: string[] = [];
+  const re = /#(\d+)\[[^\]]+\]\(https?:\/\/qoj\.ac\/problem\/\d+\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(markdown))) {
+    if (!ids.includes(match[1])) ids.push(match[1]);
+  }
+  const pageMatches = Array.from(markdown.matchAll(/[?&]page=(\d+)/g)).map((m) => Number(m[1]));
+  const maxPage = Math.max(1, ...pageMatches.filter((n) => Number.isFinite(n)));
+  return {
+    items: ids.map((remoteId) => ({ remoteId })),
+    total: maxPage * DEFAULT_PAGE_SIZE,
+  };
+}
+
+function parseQojProblemMarkdown(remoteId: string, raw: string): RemoteProblemData | null {
+  const id = normalizeRemoteId(remoteId);
+  if (!id) return null;
+
+  const titleLine = raw.match(/^Title:\s*(.+?)\s*-\s*Problem\s*-\s*QOJ\.ac/im);
+  const fallbackTitleLine = raw.match(/^Title:\s*(.+)$/im);
+  const title = (titleLine?.[1] || fallbackTitleLine?.[1] || `QOJ ${id}`).trim();
+  const marker = 'Markdown Content:';
+  const markerIndex = raw.indexOf(marker);
+  const description = (markerIndex >= 0 ? raw.slice(markerIndex + marker.length) : raw).trim();
+  if (!description) return null;
+
+  const samples = extractMarkdownSamples(description);
+  const inputFormat = extractMarkdownSection(description, ['Input', 'Input Format']);
+  const outputFormat = extractMarkdownSection(description, ['Output', 'Output Format']);
+  const timeLimit = parseTimeLimit(description) || 1000;
+  const memoryLimit = parseMemoryLimit(description) || 1024;
+
+  return {
+    remoteId: id,
+    title: `QOJ ${id} ${cleanupTitle(title, id)}`,
+    difficulty: 'NOI',
+    timeLimit,
+    memoryLimit,
+    tags: [],
+    url: `https://qoj.ac/problem/${id}`,
+    description,
+    inputFormat,
+    outputFormat,
+    samples,
+    dataRange: `Time: ${timeLimit}ms, Memory: ${memoryLimit}MB`,
+  };
+}
+
+function extractMarkdownSection(markdown: string, names: string[]): string | undefined {
+  const lines = markdown.split(/\r?\n/);
+  const normalized = new Set(names.map((n) => n.toLowerCase()));
+  const start = lines.findIndex((line) => {
+    const match = line.match(/^#{2,4}\s*(.+?)\s*$/);
+    return !!match && normalized.has(match[1].trim().toLowerCase());
+  });
+  if (start < 0) return undefined;
+
+  const parts: string[] = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^#{2,4}\s+/.test(lines[i])) break;
+    parts.push(lines[i]);
+  }
+  return parts.join('\n').trim() || undefined;
+}
+
+function extractMarkdownSamples(markdown: string): Array<{ input: string; output: string }> {
+  const blocks = Array.from(markdown.matchAll(/```(?:input|output|text|plain)?\s*\n([\s\S]*?)```/gi)).map((m) => m[1].trim());
+  const samples: Array<{ input: string; output: string }> = [];
+  for (let i = 0; i + 1 < blocks.length; i += 2) samples.push({ input: blocks[i], output: blocks[i + 1] });
+  return samples;
 }
 
 function normalizeRemoteId(remoteId: string): string | null {
@@ -213,7 +305,7 @@ function extractTags($: cheerio.CheerioAPI): string[] {
 }
 
 function parseTimeLimit(text: string): number | null {
-  const match = text.match(/Time\s*Limit\s*:?\s*([0-9.]+)\s*(ms|s|sec|second|seconds)/i);
+  const match = text.match(/Time\s*Limit\s*:?\s*\(?\s*([0-9.]+)\s*(ms|s|sec|second|seconds)/i);
   if (!match) return null;
   const value = Number(match[1]);
   if (!Number.isFinite(value)) return null;
@@ -221,7 +313,7 @@ function parseTimeLimit(text: string): number | null {
 }
 
 function parseMemoryLimit(text: string): number | null {
-  const match = text.match(/Memory\s*Limit\s*:?\s*([0-9.]+)\s*(MB|MiB|GB|GiB|KB|KiB)/i);
+  const match = text.match(/Memory\s*Limit\s*:?\s*\(?\s*([0-9.]+)\s*(MB|MiB|GB|GiB|KB|KiB)/i);
   if (!match) return null;
   const value = Number(match[1]);
   if (!Number.isFinite(value)) return null;
