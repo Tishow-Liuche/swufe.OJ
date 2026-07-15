@@ -110,16 +110,28 @@ export class TeacherService {
   async createContest(teacherId: string, data: {
     title: string; description?: string; mode?: string;
     startTime: string; endTime: string; problemIds?: string[];
-    visibility?: string;
+    visibility?: string; registerStart?: string; registerEnd?: string;
+    freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
+    penaltyTime?: number; password?: string;
   }) {
+    if (new Date(data.endTime) <= new Date(data.startTime)) {
+      throw new ForbiddenException('比赛结束时间必须晚于开始时间');
+    }
     const contest = await this.prisma.contest.create({
       data: {
         title: data.title,
         description: data.description || '',
         mode: data.mode || 'ACM',
         visibility: data.visibility || 'PUBLIC',
+        password: data.password || null,
         startTime: new Date(data.startTime),
         endTime: new Date(data.endTime),
+        registerStart: data.registerStart ? new Date(data.registerStart) : null,
+        registerEnd: data.registerEnd ? new Date(data.registerEnd) : null,
+        freezeTime: data.freezeTime ? new Date(data.freezeTime) : null,
+        allowUpsolve: data.allowUpsolve ?? true,
+        maxSubmissions: data.maxSubmissions || null,
+        penaltyTime: data.penaltyTime || 20,
         createdBy: teacherId,
       },
     });

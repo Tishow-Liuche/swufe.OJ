@@ -43,7 +43,12 @@ export class TeacherController {
   getContests(@Req() req: any) { return this.teacherService.getContests(req.user.id); }
 
   @Post('contests')
-  createContest(@Req() req: any, @Body() data: any) {
+  createContest(@Req() req: any, @Body() data: {
+    title: string; description?: string; mode?: string; startTime: string; endTime: string;
+    problemIds?: string[]; visibility?: string; registerStart?: string; registerEnd?: string;
+    freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
+    penaltyTime?: number; password?: string;
+  }) {
     return this.teacherService.createContest(req.user.id, data);
   }
 }

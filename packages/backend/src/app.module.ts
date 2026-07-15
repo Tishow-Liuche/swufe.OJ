@@ -11,6 +11,7 @@ import { TeacherModule } from './teacher/teacher.module';
 import { SyncModule } from './sync/sync.module';
 import { HelperModule } from './helper/helper.module';
 import { CodeforcesModule } from './codeforces/cf.module';
+import { ContestModule } from './contest/contest.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { CodeforcesModule } from './codeforces/cf.module';
     FileUploadModule, PrismaModule, AuthModule, ProblemModule,
     SubmissionModule, UserModule, TeacherModule, SyncModule,
     HelperModule, CodeforcesModule, PublicModule,
+    ContestModule,
   ],
 })
 export class AppModule {}
