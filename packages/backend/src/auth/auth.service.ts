@@ -45,6 +45,7 @@ export class AuthService {
         password,
         nickname: dto.nickname,
         school: dto.school,
+        college: dto.college,
         role: 'STUDENT',
         requestedRole: dto.requestedRole,
         teacherApplicationStatus: teacherRequested ? 'PENDING' : 'NOT_REQUIRED',
@@ -85,7 +86,7 @@ export class AuthService {
       throw new UnauthorizedException('账号或密码错误');
     }
 
-    return this.generateTokens(user.id);
+    return this.generateTokens(user.id, user.mustChangePassword);
   }
 
   async refresh(refreshToken: string) {
@@ -122,6 +123,10 @@ export class AuthService {
         avatar: true,
         role: true,
         school: true,
+        studentId: true,
+        college: true,
+        phone: true,
+        mustChangePassword: true,
         requestedRole: true,
         teacherApplicationStatus: true,
         createdAt: true,
@@ -130,8 +135,13 @@ export class AuthService {
     return user;
   }
 
-  private async generateTokens(userId: string) {
-    const accessToken = this.jwt.sign({ sub: userId });
+  private async generateTokens(userId: string, mustChangePassword = false) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { authVersion: true },
+    });
+    if (!user) throw new UnauthorizedException('账号不存在或已被删除');
+    const accessToken = this.jwt.sign({ sub: userId, ver: user.authVersion });
 
     const refreshToken = randomBytes(32).toString('hex');
     const expiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES') || '7d';
@@ -145,7 +155,7 @@ export class AuthService {
       },
     });
 
-    return { accessToken, refreshToken, expiresIn };
+    return { accessToken, refreshToken, expiresIn, mustChangePassword };
   }
 
   private parseExpires(expires: string): number {

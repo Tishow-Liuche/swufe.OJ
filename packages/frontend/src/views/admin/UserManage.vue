@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Check, X } from '@lucide/vue';
+import { Check, Clock3, X } from '@lucide/vue';
 import api from '../../api/client';
 
 const users = ref<any[]>([]);
 const loading = ref(true);
 const msg = ref('');
 const showResetPwd = ref('');
-const newPassword = ref('Oj123456');
+const newPassword = ref('');
 const reviewing = ref('');
+const classApplications = ref<any[]>([]);
+const classReviewing = ref('');
 
-onMounted(loadUsers);
+onMounted(async () => { await Promise.all([loadUsers(), loadClassApplications()]); });
 
 async function loadUsers() {
   try {
@@ -53,9 +55,27 @@ function applicationLabel(status: string) {
 async function resetPassword(userId: string) {
   try {
     await api.post(`/api/user/admin/${userId}/reset-password`, { password: newPassword.value });
-    msg.value = '密码已重置为 ' + newPassword.value;
+    msg.value = '密码已重置，目标账号的所有历史登录状态已失效，用户下次登录必须修改密码。';
     showResetPwd.value = '';
+    newPassword.value = '';
   } catch (e: any) { msg.value = '重置失败: ' + (e.response?.data?.message || e.message); }
+}
+
+async function loadClassApplications() {
+  try {
+    const { data } = await api.get('/api/user/admin/classes');
+    classApplications.value = data;
+  } catch (e: any) { msg.value = '班级申请加载失败：' + (e.response?.data?.message || e.message); }
+}
+
+async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJECTED') {
+  classReviewing.value = classId;
+  try {
+    await api.patch(`/api/user/admin/classes/${classId}`, { status });
+    msg.value = status === 'APPROVED' ? '班级已批准并启用' : '班级申请已拒绝';
+    await loadClassApplications();
+  } catch (e: any) { msg.value = '班级审核失败：' + (e.response?.data?.message || e.message); }
+  finally { classReviewing.value = ''; }
 }
 </script>
 
@@ -63,6 +83,17 @@ async function resetPassword(userId: string) {
   <div class="page">
     <h2>用户管理</h2>
     <p v-if="msg" class="msg">{{ msg }}</p>
+    <section class="class-review">
+      <header><div><h3>班级创建审核</h3><p>仅审核通过的班级可以导入学生和发布教学内容。</p></div><span><Clock3 :size="15" />{{ classApplications.filter((item) => item.status === 'PENDING').length }} 待审核</span></header>
+      <div v-if="classApplications.length" class="class-application-list">
+        <article v-for="item in classApplications" :key="item.id" class="class-application">
+          <div><span class="application-tag" :class="item.status?.toLowerCase()">{{ item.status === 'PENDING' ? '待审核' : item.status === 'APPROVED' ? '已通过' : '已拒绝' }}</span><strong>{{ item.name }}</strong><p>申请教师：{{ item.teacher?.nickname || item.teacher?.username || '未知教师' }} · {{ item.createdAt?.slice(0, 10) }}</p></div>
+          <div v-if="item.status === 'PENDING'" class="class-review-actions"><button :disabled="classReviewing === item.id" class="approve-btn" @click="reviewClassApplication(item.id, 'APPROVED')">通过并启用</button><button :disabled="classReviewing === item.id" class="reject-btn" @click="reviewClassApplication(item.id, 'REJECTED')">拒绝</button></div>
+          <small v-else>{{ item.status === 'APPROVED' ? '已启用' : item.reviewNote || '未通过' }}</small>
+        </article>
+      </div>
+      <p v-else class="empty-review">暂无班级申请</p>
+    </section>
     <div v-if="!loading" class="table-wrap">
       <table class="table">
         <thead>
@@ -110,7 +141,7 @@ async function resetPassword(userId: string) {
               </select>
               <button v-if="showResetPwd !== u.id" class="btn-sm" @click="showResetPwd = u.id">重置密码</button>
               <span v-else class="reset-row">
-                <input v-model="newPassword" size="8" />
+                <input v-model="newPassword" type="password" minlength="8" placeholder="至少8位，含字母和数字" />
                 <button class="btn-sm btn-green" @click="resetPassword(u.id)">确认</button>
                 <button class="btn-sm" @click="showResetPwd = ''">取消</button>
               </span>
@@ -154,4 +185,5 @@ h2 { margin-bottom: 16px; }
 .btn-green { background: #27ae60; color: #fff; border-color: #27ae60; }
 .reset-row { display: flex; gap: 4px; align-items: center; }
 .reset-row input { padding: 3px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+.class-review { margin:0 0 18px; padding:18px; border:1px solid #dfe8ef; border-radius:12px; background:#fff; box-shadow:0 4px 14px rgba(31,64,95,.04); }.class-review header { display:flex; align-items:center; justify-content:space-between; gap:15px; }.class-review h3 { margin:0; font-size:16px; }.class-review header p { margin:4px 0 0; color:#8290a0; font-size:12px; }.class-review header>span { display:flex; align-items:center; gap:5px; padding:6px 8px; color:#98600c; border-radius:6px; background:#fff1d8; font-size:11px; font-weight:800; }.class-application-list { display:grid; gap:9px; margin-top:15px; }.class-application { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:12px; border:1px solid #edf0f3; border-radius:9px; background:#fcfdff; }.class-application strong { display:block; margin-top:7px; font-size:14px; }.class-application p,.class-application small { margin:5px 0 0; color:#7f8e9d; font-size:11px; }.class-review-actions { display:flex; gap:7px; }.class-review-actions button { padding:6px 9px; border-radius:6px; font-size:12px; font-weight:800; cursor:pointer; }.approve-btn { color:#fff; border:1px solid #197452; background:#21845f; }.reject-btn { color:#9d3933; border:1px solid #e5bfbc; background:#fff; }.class-review-actions button:disabled { opacity:.5; cursor:wait; }.empty-review { margin:16px 0 0; color:#8e9aa7; font-size:13px; }@media(max-width:700px){.class-application{align-items:flex-start;flex-direction:column}.class-review header{align-items:flex-start;flex-direction:column}}
 </style>

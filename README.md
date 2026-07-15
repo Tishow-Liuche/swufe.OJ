@@ -121,7 +121,7 @@ docker compose up -d
 cd packages/backend
 cp ../../config/.env.example .env
 npm install
-npx prisma migrate dev --name init
+npx prisma migrate deploy
 npx prisma generate
 npm run seed            # 导入洛谷 P1000-P1010 共 11 道题目
 npm run start:dev       # 启动开发服务器 (localhost:3000)
@@ -145,7 +145,9 @@ npm run build           # 构建产物输出到 dist/
 |------|--------|------|
 | 管理员 | `admin` | `123456` |
 | 教师 | `teacher` | `123456` |
-| 学生 | `student` | `123456` |
+| 学生 | `stu` | `123456` |
+
+这三个账号已预置在当前开发数据库中，用于验收不同权限：管理员可进行平台管理，教师可创建教学与比赛内容，学生用于普通学习和参赛流程验证。请仅用于本地测试，正式部署前请修改密码或重新创建账号。
 
 如需手动注册：打开页面 → 点击右上角「登录」→ 切换到「注册」→ 填写信息即可。
 

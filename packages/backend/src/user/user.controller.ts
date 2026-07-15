@@ -42,6 +42,12 @@ export class UserController {
     return this.userService.setRole(id, role);
   }
 
+  @Post('password')
+  @UseGuards(AuthGuard('jwt'))
+  changeOwnPassword(@Req() req: any, @Body('password') password: string) {
+    return this.userService.changeOwnPassword(req.user.id, password);
+  }
+
   @Patch('admin/:id/teacher-application')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
@@ -52,7 +58,21 @@ export class UserController {
   @Post('admin/:id/reset-password')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
-  resetPassword(@Param('id') id: string, @Body('password') password: string) {
-    return this.userService.resetPassword(id, password);
+  resetPassword(@Param('id') id: string, @Req() req: any, @Body('password') password: string) {
+    return this.userService.resetPassword(req.user.id, id, password);
+  }
+
+  @Get('admin/classes')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  listClassApplications() {
+    return this.userService.listClassApplications();
+  }
+
+  @Patch('admin/classes/:id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  reviewClassApplication(@Param('id') id: string, @Body() data: { status: string; reviewNote?: string }) {
+    return this.userService.reviewClassApplication(id, data.status, data.reviewNote);
   }
 }

@@ -12,6 +12,7 @@ const router = createRouter({
     { path: '/contests', component: () => import('../views/Contests.vue') },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue'), meta: { requiresAuth: true } },
     { path: '/profile', component: () => import('../views/Profile.vue'), meta: { requiresAuth: true } },
+    { path: '/change-password', component: () => import('../views/ChangePassword.vue'), meta: { requiresAuth: true } },
     { path: '/external/accounts', component: () => import('../views/external/AccountBind.vue'), meta: { requiresAuth: true } },
     // 教师
     { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue') },
@@ -32,6 +33,15 @@ router.beforeEach(async (to) => {
     path: '/login',
     query: { redirect: to.fullPath },
   };
+});
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore();
+  if (auth.token && !auth.user) await auth.fetchProfile();
+  if (auth.user?.mustChangePassword && to.path !== '/change-password') {
+    return { path: '/change-password', query: { redirect: to.fullPath } };
+  }
+  return true;
 });
 
 export default router;

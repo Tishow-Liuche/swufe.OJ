@@ -34,6 +34,13 @@ export class RegisterDto {
   @MaxLength(80, { message: '学校名称最多 80 个字符' })
   school: string;
 
+  @ValidateIf((dto) => dto.requestedRole === 'STUDENT')
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MinLength(2, { message: '请选择或填写所在学院' })
+  @MaxLength(80, { message: '学院名称最多 80 个字符' })
+  college?: string;
+
   @IsIn(['STUDENT', 'TEACHER'], { message: '身份只能选择学生或教师' })
   requestedRole: 'STUDENT' | 'TEACHER';
 

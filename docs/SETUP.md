@@ -67,7 +67,7 @@ npm install
 npx prisma generate
 
 # 数据库迁移
-npx prisma migrate dev --name init
+npx prisma migrate deploy
 
 # 启动开发服务器
 npm run start:dev

@@ -8,6 +8,10 @@ interface AuthUser {
   role: string;
   nickname?: string;
   school?: string;
+  studentId?: string;
+  college?: string;
+  phone?: string;
+  mustChangePassword?: boolean;
   requestedRole?: 'STUDENT' | 'TEACHER';
   teacherApplicationStatus?: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED';
 }
