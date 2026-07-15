@@ -43,6 +43,15 @@ model User {
   favorites         UserFavorite[]
   wrongBook         UserWrongBook[]
   recommendationFeedback RecommendationFeedback[]
+  communityPosts           CommunityPost[]
+  communityReplies         CommunityReply[]
+  communityReactions       CommunityReaction[]
+  announcements            Announcement[]
+  notifications            Notification[]
+  reportedContent          ContentReport[]          @relation("ContentReportReporter")
+  reviewedContentReports   ContentReport[]          @relation("ContentReportReviewer")
+  problemFeedbacks         ProblemFeedback[]        @relation("ProblemFeedbackReporter")
+  reviewedProblemFeedbacks ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
 }
 
 model Role {
@@ -200,6 +209,8 @@ model Problem {
   favorites          UserFavorite[]
   wrongBook          UserWrongBook[]
   sourceInfo         ProblemSource?
+  communityPosts     CommunityPost[]
+  feedbacks          ProblemFeedback[]
 }
 
 model ProblemSource {
@@ -612,6 +623,131 @@ model ProblemListItem {
   problemId String
   order     Int         @default(0)
   list      ProblemList @relation(fields: [listId], references: [id], onDelete: Cascade)
+}
+
+// ===================== 社区与学习服务 =====================
+
+model CommunityPost {
+  id           String              @id @default(cuid())
+  type         String              @default("DISCUSSION")
+  title        String?
+  content      String
+  category     String?
+  spoilerLevel String              @default("NONE")
+  status       String              @default("PUBLISHED")
+  isPinned     Boolean             @default(false)
+  isResolved   Boolean             @default(false)
+  viewCount    Int                 @default(0)
+  authorId     String
+  problemId    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  author       User                @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  problem      Problem?            @relation(fields: [problemId], references: [id], onDelete: SetNull)
+  replies      CommunityReply[]
+  reactions    CommunityReaction[]
+
+  @@index([type, status, createdAt])
+  @@index([problemId, status, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model CommunityReply {
+  id        String        @id @default(cuid())
+  postId    String
+  authorId  String
+  content   String
+  status    String        @default("PUBLISHED")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, status, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model CommunityReaction {
+  id        String        @id @default(cuid())
+  userId    String
+  postId    String
+  type      String        @default("UPVOTE")
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId, type])
+  @@index([postId, createdAt])
+}
+
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  content   String
+  audience  String    @default("ALL")
+  status    String    @default("PUBLISHED")
+  isPinned  Boolean   @default(false)
+  publishAt DateTime  @default(now())
+  expiresAt DateTime?
+  authorId  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([audience, status, publishAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  content   String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model ContentReport {
+  id           String   @id @default(cuid())
+  reporterId   String
+  targetType   String
+  targetId     String
+  reason       String
+  detail       String?
+  status       String   @default("OPEN")
+  reviewerId   String?
+  reviewerNote String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  reporter     User     @relation("ContentReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewer     User?    @relation("ContentReportReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([reporterId, createdAt])
+}
+
+model ProblemFeedback {
+  id           String   @id @default(cuid())
+  problemId    String
+  reporterId   String
+  type         String   @default("STATEMENT")
+  content      String
+  status       String   @default("OPEN")
+  reviewerId   String?
+  reviewerNote String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  problem      Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  reporter     User     @relation("ProblemFeedbackReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewer     User?    @relation("ProblemFeedbackReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([problemId, status, createdAt])
+  @@index([reporterId, createdAt])
 }
 
 // ===================== 能力分析 =====================
