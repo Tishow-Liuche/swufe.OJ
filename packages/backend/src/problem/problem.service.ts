@@ -147,7 +147,7 @@ export class ProblemService {
     where.status = status || 'PUBLISHED'; // 默认只返回已发布，教师可传入草稿
     if (keyword) where.title = { contains: keyword, mode: 'insensitive' };
     if (source) {
-      if (source === 'LUOGU' || source === 'CODEFORCES') {
+      if (source === 'LUOGU' || source === 'CODEFORCES' || source === 'QOJ') {
         where.sourceInfo = { platform: source };
       } else {
         where.source = source;

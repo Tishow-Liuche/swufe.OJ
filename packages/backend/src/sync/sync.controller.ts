@@ -1,11 +1,117 @@
 import { Controller, Post, Body, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SyncService } from './sync.service';
 
 @Controller('api/sync')
 export class SyncController {
   private readonly logger = new Logger(SyncController.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private syncService: SyncService,
+  ) {}
+
+  @Post('problem')
+  async syncProblem(@Body() body: { platform: string; remoteId: string }) {
+    const platform = String(body.platform || '').trim().toUpperCase();
+    const remoteId = String(body.remoteId || '').trim();
+    if (!platform || !remoteId) return { error: 'platform and remoteId required' };
+
+    const problemId = await this.syncService.syncProblem(platform, remoteId);
+    return { platform, remoteId, problemId, synced: !!problemId };
+  }
+
+  @Post('batch')
+  async syncBatch(@Body() body: { platform: string; page?: number; pageSize?: number }) {
+    const platform = String(body.platform || '').trim().toUpperCase();
+    const page = Math.max(Number(body.page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(body.pageSize) || 20, 1), 100);
+    if (!platform) return { error: 'platform required' };
+
+    const results = await this.syncService.syncBatch(platform, page, pageSize);
+    return { platform, page, pageSize, results };
+  }
+
+  @Post('qoj-statement')
+  async receiveQoj(@Body() body: {
+    remoteId: string;
+    title: string;
+    description: string;
+    inputFormat?: string;
+    outputFormat?: string;
+    samples?: Array<{ input: string; output: string }>;
+    timeLimit?: number;
+    memoryLimit?: number;
+    tags?: string[];
+    sourceUrl?: string;
+  }) {
+    const remoteId = String(body.remoteId || '').trim();
+    if (!remoteId || !body.description) return { error: 'remoteId and description required' };
+
+    const source = await this.prisma.problemSource.findFirst({
+      where: { platform: 'QOJ', remoteProblemId: remoteId },
+      include: { problem: { include: { versions: { where: { isCurrent: true } } } } },
+    });
+    const sampleInput = body.samples?.map((s) => s.input).join('\n---\n') || null;
+    const sampleOutput = body.samples?.map((s) => s.output).join('\n---\n') || null;
+    const title = body.title || `QOJ ${remoteId}`;
+
+    if (source) {
+      const ver = source.problem.versions[0];
+      if (!ver) return { error: 'No version' };
+      await this.prisma.problemVersion.update({
+        where: { id: ver.id },
+        data: {
+          description: body.description,
+          inputFormat: body.inputFormat || null,
+          outputFormat: body.outputFormat || null,
+          sampleInput,
+          sampleOutput,
+          dataRange: `Time: ${body.timeLimit || source.problem.timeLimit}ms, Memory: ${body.memoryLimit || source.problem.memoryLimit}MB`,
+        },
+      });
+      await this.prisma.problem.update({
+        where: { id: source.problemId },
+        data: {
+          title,
+          timeLimit: body.timeLimit || source.problem.timeLimit,
+          memoryLimit: body.memoryLimit || source.problem.memoryLimit,
+        },
+      });
+      return { updated: true, created: false, remoteId, problemId: source.problemId };
+    }
+
+    const problem = await this.prisma.problem.create({
+      data: {
+        title,
+        source: 'EXTERNAL',
+        difficulty: 'NOI',
+        timeLimit: body.timeLimit || 1000,
+        memoryLimit: body.memoryLimit || 1024,
+        status: 'PUBLISHED',
+        versions: {
+          create: {
+            version: 1,
+            description: body.description,
+            inputFormat: body.inputFormat || null,
+            outputFormat: body.outputFormat || null,
+            sampleInput,
+            sampleOutput,
+            dataRange: `Time: ${body.timeLimit || 1000}ms, Memory: ${body.memoryLimit || 1024}MB`,
+          },
+        },
+        tags: { create: (body.tags || []).map((name) => ({ name, type: 'TAG' })) },
+        sourceInfo: {
+          create: {
+            platform: 'QOJ',
+            remoteProblemId: remoteId,
+            remoteUrl: body.sourceUrl || `https://qoj.ac/problem/${remoteId}`,
+          },
+        },
+      },
+    });
+    return { updated: true, created: true, remoteId, problemId: problem.id };
+  }
 
   /** 从浏览器端接收洛谷题面数据 */
   @Post('luogu-description')

@@ -15,7 +15,7 @@ export class HelperService {
     const platforms = [
       { code: 'LUOGU', name: '洛谷', baseUrl: 'https://www.luogu.com.cn', supportsMetadata: true, supportsBrowserSubmission: true },
       { code: 'NOWCODER', name: '牛客', baseUrl: 'https://ac.nowcoder.com', supportsMetadata: true, supportsBrowserSubmission: true },
-      { code: 'QOJ', name: 'QOJ', baseUrl: 'https://qoj.ac', supportsMetadata: true, supportsBrowserSubmission: true },
+      { code: 'QOJ', name: 'QOJ', baseUrl: 'https://qoj.ac', supportsMetadata: true, supportsBrowserSubmission: false },
     ];
     for (const p of platforms) {
       await this.prisma.externalPlatform.upsert({
