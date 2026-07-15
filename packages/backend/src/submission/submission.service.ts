@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CfSubmissionService } from '../codeforces/cf-submission.service';
 import { LuoguSubmissionService } from '../luogu/luogu-submission.service';
+import { LearningService } from '../learning/learning.service';
 
 @Injectable()
 export class SubmissionService {
@@ -13,6 +14,7 @@ export class SubmissionService {
     private prisma: PrismaService,
     private cfSubmission: CfSubmissionService,
     private luoguSubmission: LuoguSubmissionService,
+    private learning: LearningService,
     @InjectQueue('judge') private judgeQueue: Queue,
   ) {}
 
@@ -101,5 +103,9 @@ export class SubmissionService {
       sourceCode: sub.sourceCode, timeLimit: problem?.timeLimit || 1000,
       memoryLimit: problem?.memoryLimit || 256 }, { priority: 2 });
     return { id, status: 'QUEUING' };
+  }
+
+  async recordExternalResult(submissionId: string, status: string) {
+    await this.learning.recordSubmissionResult(submissionId, status);
   }
 }

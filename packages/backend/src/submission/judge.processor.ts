@@ -3,6 +3,7 @@ import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NativeJudgeService } from '../judge/native-judge.service';
+import { LearningService } from '../learning/learning.service';
 
 interface JudgeJob {
   submissionId: string; problemId: string; language: string;
@@ -16,6 +17,7 @@ export class JudgeProcessor extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private judge: NativeJudgeService,
+    private learning: LearningService,
   ) { super(); }
 
   async process(job: Job<JudgeJob>) {
@@ -42,6 +44,7 @@ export class JudgeProcessor extends WorkerHost {
           data: { status: 'COMPILE_ERROR', compileMessage: compileResult.message, judgedAt: new Date() },
         });
         await this.finishTask(data.submissionId);
+        await this.learning.recordSubmissionResult(data.submissionId, 'COMPILE_ERROR');
         return { status: 'COMPILE_ERROR' };
       }
 
@@ -96,6 +99,7 @@ export class JudgeProcessor extends WorkerHost {
         },
       });
       await this.finishTask(data.submissionId);
+      await this.learning.recordSubmissionResult(data.submissionId, finalStatus);
       this.logger.log(`Submission ${data.submissionId}: ${finalStatus} (${finalScore}分)`);
       return { status: finalStatus, score: finalScore };
     } catch (error: any) {

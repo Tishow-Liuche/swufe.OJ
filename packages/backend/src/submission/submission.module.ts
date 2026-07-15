@@ -10,10 +10,11 @@ import { JudgeModule } from '../judge/judge.module';
 import { HelperModule } from '../helper/helper.module';
 import { CodeforcesModule } from '../codeforces/cf.module';
 import { LuoguModule } from '../luogu/luogu.module';
+import { LearningModule } from '../learning/learning.module';
 
 @Module({
   imports: [
-    JudgeModule, HelperModule, CodeforcesModule, LuoguModule,
+    JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule,
     BullModule.registerQueueAsync({
       name: 'judge', imports: [ConfigModule], inject: [ConfigService],
       useFactory: (c: ConfigService) => ({

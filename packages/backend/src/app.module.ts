@@ -14,6 +14,7 @@ import { CodeforcesModule } from './codeforces/cf.module';
 import { ContestModule } from './contest/contest.module';
 import { CommunityModule } from './community/community.module';
 import { AtCoderModule } from './atcoder/atcoder.module';
+import { LearningModule } from './learning/learning.module';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { AtCoderModule } from './atcoder/atcoder.module';
     FileUploadModule, PrismaModule, AuthModule, ProblemModule,
     SubmissionModule, UserModule, TeacherModule, SyncModule,
     HelperModule, CodeforcesModule, PublicModule,
-    ContestModule, CommunityModule, AtCoderModule,
+    ContestModule, CommunityModule, AtCoderModule, LearningModule,
   ],
 })
 export class AppModule {}

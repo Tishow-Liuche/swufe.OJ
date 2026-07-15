@@ -12,6 +12,7 @@ const router = createRouter({
     { path: '/contests', component: () => import('../views/Contests.vue') },
     { path: '/community', component: () => import('../views/CommunityHub.vue') },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue'), meta: { requiresAuth: true } },
+    { path: '/learning-plans/:id', component: () => import('../views/LearningPlanDetail.vue'), meta: { requiresAuth: true } },
     { path: '/profile', component: () => import('../views/Profile.vue'), meta: { requiresAuth: true } },
     { path: '/change-password', component: () => import('../views/ChangePassword.vue'), meta: { requiresAuth: true } },
     { path: '/external/accounts', component: () => import('../views/external/AccountBind.vue'), meta: { requiresAuth: true } },
