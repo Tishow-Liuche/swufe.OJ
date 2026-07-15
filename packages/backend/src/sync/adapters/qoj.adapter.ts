@@ -118,15 +118,15 @@ export function parseQojProblemPage(remoteId: string, html: string): RemoteProbl
 
   return {
     remoteId: id,
-    title: `QOJ ${id} ${title}`,
+    title: cleanText(`QOJ ${id} ${title}`),
     difficulty: 'NOI',
     timeLimit,
     memoryLimit,
     tags,
     url: `https://qoj.ac/problem/${id}`,
-    description: statement.html()?.trim() || statement.text().trim() || `QOJ problem ${id}`,
-    inputFormat,
-    outputFormat,
+    description: cleanText(statement.html()?.trim() || statement.text().trim() || `QOJ problem ${id}`),
+    inputFormat: inputFormat ? cleanText(inputFormat) : undefined,
+    outputFormat: outputFormat ? cleanText(outputFormat) : undefined,
     samples,
     dataRange: `Time: ${timeLimit}ms, Memory: ${memoryLimit}MB`,
   };
@@ -156,7 +156,7 @@ function parseQojProblemMarkdown(remoteId: string, raw: string): RemoteProblemDa
   const title = (titleLine?.[1] || fallbackTitleLine?.[1] || `QOJ ${id}`).trim();
   const marker = 'Markdown Content:';
   const markerIndex = raw.indexOf(marker);
-  const description = (markerIndex >= 0 ? raw.slice(markerIndex + marker.length) : raw).trim();
+  const description = cleanText((markerIndex >= 0 ? raw.slice(markerIndex + marker.length) : raw).trim());
   if (!description) return null;
 
   const samples = extractMarkdownSamples(description);
@@ -167,18 +167,22 @@ function parseQojProblemMarkdown(remoteId: string, raw: string): RemoteProblemDa
 
   return {
     remoteId: id,
-    title: `QOJ ${id} ${cleanupTitle(title, id)}`,
+    title: cleanText(`QOJ ${id} ${cleanupTitle(title, id)}`),
     difficulty: 'NOI',
     timeLimit,
     memoryLimit,
     tags: [],
     url: `https://qoj.ac/problem/${id}`,
     description,
-    inputFormat,
-    outputFormat,
+    inputFormat: inputFormat ? cleanText(inputFormat) : undefined,
+    outputFormat: outputFormat ? cleanText(outputFormat) : undefined,
     samples,
     dataRange: `Time: ${timeLimit}ms, Memory: ${memoryLimit}MB`,
   };
+}
+
+function cleanText(s: string): string {
+  return String(s || '').replace(/\u0000/g, '').replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, '');
 }
 
 function extractMarkdownSection(markdown: string, names: string[]): string | undefined {
