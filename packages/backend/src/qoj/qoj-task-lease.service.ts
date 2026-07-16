@@ -127,13 +127,25 @@ export class QojTaskLeaseService {
       throw new ConflictException('Lease nonce mismatch');
     }
 
-    const status = normalizeQojStatus(data.status);
+    const rawStatusText = String(data.rawStatus || '');
+    let status = normalizeQojStatus(data.status);
+    const rawVerdict = parseQojVerdictFromRawStatus(rawStatusText);
+    if (rawVerdict) status = rawVerdict;
     const terminal = TERMINAL_STATUSES.has(status);
-    const score = normalizeOptionalMetric(data.score) ?? (status === 'ACCEPTED' ? 100 : 0);
+    if (!terminal) {
+      throw new BadRequestException('Unsupported QOJ result status');
+    }
     const timeUsed = normalizeOptionalMetric(data.timeUsed);
     const memoryUsed = normalizeOptionalMetric(data.memoryUsed);
     const remoteSubmissionId =
       String(data.remoteSubmissionId || task.remoteSubmissionId || '').trim() || null;
+    if (status !== 'REMOTE_ERROR' && !remoteSubmissionId) {
+      status = 'REMOTE_ERROR';
+    }
+    if (status !== 'REMOTE_ERROR' && !rawStatusMatchesProblem(rawStatusText, task.remoteProblemId)) {
+      status = 'REMOTE_ERROR';
+    }
+    const score = normalizeOptionalMetric(data.score) ?? (status === 'ACCEPTED' ? 100 : 0);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.submission.update({
@@ -143,7 +155,11 @@ export class QojTaskLeaseService {
           score,
           timeUsed,
           memoryUsed,
-          compileMessage: data.compileMessage || undefined,
+          compileMessage: data.compileMessage || (status === 'REMOTE_ERROR'
+            ? (!remoteSubmissionId
+              ? 'QOJ helper did not find a remote submission id; result was rejected to avoid false AC'
+              : 'QOJ helper result did not match the target problem; result was rejected')
+            : undefined),
           judgedAt: terminal ? new Date() : undefined,
         },
       });
@@ -161,7 +177,7 @@ export class QojTaskLeaseService {
         where: { submissionId },
         data: {
           remoteSubmissionId: remoteSubmissionId || undefined,
-          rawStatus: data.rawStatus || data.status,
+          rawStatus: rawStatusText || data.status,
           finishedAt: terminal ? new Date() : undefined,
         },
       });
@@ -194,4 +210,24 @@ export class QojTaskLeaseService {
 
 export function normalizeQojStatus(raw: string): string {
   return normalizeLuoguStatus(raw);
+}
+
+function parseQojVerdictFromRawStatus(raw: string): string | null {
+  const text = String(raw || '').toUpperCase();
+  if (/(^|[\s\t])WA($|[\s\t])|WRONG ANSWER/.test(text)) return 'WRONG_ANSWER';
+  if (/(^|[\s\t])TLE($|[\s\t])|TIME LIMIT/.test(text)) return 'TIME_LIMIT_EXCEEDED';
+  if (/(^|[\s\t])MLE($|[\s\t])|MEMORY LIMIT/.test(text)) return 'MEMORY_LIMIT_EXCEEDED';
+  if (/(^|[\s\t])RE($|[\s\t])|RUNTIME ERROR/.test(text)) return 'RUNTIME_ERROR';
+  if (/(^|[\s\t])CE($|[\s\t])|COMPILE ERROR/.test(text)) return 'COMPILE_ERROR';
+  if (/ACCEPTED|(^|[\s\t])AC($|[\s\t])|VERDICT:\s*100|RESULT\s+100|100\s*✓/.test(text)) {
+    return 'ACCEPTED';
+  }
+  return null;
+}
+
+function rawStatusMatchesProblem(raw: string, remoteProblemId: string): boolean {
+  const text = String(raw || '');
+  const escaped = String(remoteProblemId || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escaped) return false;
+  return new RegExp(`(?:^|[^0-9])#\\s*${escaped}(?:\\.|\\s|\\t|$)`).test(text);
 }

@@ -66,6 +66,7 @@ export class SubmissionService {
   }
 
   async findOne(id: string) {
+    await this.expireStaleQojHelperTasks();
     const s = await this.prisma.submission.findUnique({
       where: { id },
       include: { cases: { orderBy: { caseIndex: 'asc' } },
@@ -76,7 +77,10 @@ export class SubmissionService {
     return s;
   }
   async findAll(q: any) {
-    const { userId, problemId, status, page = 1, pageSize = 20 } = q;
+    await this.expireStaleQojHelperTasks();
+    const { userId, problemId, status } = q;
+    const page = Math.max(1, Number.parseInt(String(q.page ?? '1'), 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(String(q.pageSize ?? '20'), 10) || 20));
     const where: any = {};
     if (userId) where.userId = userId;
     if (problemId) where.problemId = problemId;
@@ -92,6 +96,68 @@ export class SubmissionService {
     ]);
     return { items, total, page, pageSize };
   }
+
+  private async expireStaleQojHelperTasks() {
+    const now = new Date();
+    const helperPickupDeadline = new Date(now.getTime() - 2 * 60 * 1000);
+
+    const stale = await this.prisma.remoteSubmissionTask.findMany({
+      where: {
+        platformCode: 'QOJ',
+        status: { in: ['PENDING', 'PROCESSING'] },
+        OR: [
+          {
+            status: 'PENDING',
+            leaseNonce: null,
+            createdAt: { lte: helperPickupDeadline },
+          },
+          {
+            status: 'PROCESSING',
+            remoteSubmissionId: null,
+            leaseExpiresAt: { lte: now },
+          },
+          {
+            expiresAt: { lte: now },
+          },
+        ],
+      },
+      select: { id: true, submissionId: true, helperStage: true, leaseNonce: true },
+    });
+
+    if (!stale.length) return;
+
+    const submissionIds = stale.map((task) => task.submissionId);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.remoteSubmissionTask.updateMany({
+        where: { id: { in: stale.map((task) => task.id) } },
+        data: {
+          status: 'FAILED',
+          failureCode: 'QOJ_HELPER_TIMEOUT',
+          failureMessage: 'QOJ helper did not create a remote submission in time',
+          helperStage: 'FAILED_TIMEOUT',
+        },
+      });
+      await tx.submission.updateMany({
+        where: { id: { in: submissionIds }, status: { in: ['QUEUING', 'JUDGING', 'PENDING', 'PROCESSING'] } },
+        data: {
+          status: 'REMOTE_ERROR',
+          score: 0,
+          compileMessage: 'QOJ 浏览器助手未在限定时间内完成真实提交；请确认脚本已更新到 v2.3 且 QOJ 已登录。',
+          judgedAt: now,
+        },
+      });
+      await tx.remoteJudgeJob.updateMany({
+        where: { submissionId: { in: submissionIds }, finishedAt: null },
+        data: {
+          finishedAt: now,
+          rawStatus: 'QOJ_HELPER_TIMEOUT',
+          errorMessage: 'QOJ helper did not create a remote submission in time',
+        },
+      });
+    });
+    this.log.warn(`Expired ${stale.length} stale QOJ helper task(s)`);
+  }
+
   async rejudge(id: string) {
     const sub = await this.prisma.submission.findUnique({ where: { id } });
     if (!sub) throw new NotFoundException('Submission not found');

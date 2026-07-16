@@ -155,7 +155,7 @@ export class LuoguTaskLeaseService {
       throw new ConflictException('Lease nonce mismatch');
     }
 
-    const status = normalizeLuoguStatus(data.status);
+    const status = normalizeLuoguReportedStatus(data.status, data.rawStatus);
     const terminal = TERMINAL_STATUSES.has(status);
     const score = normalizeOptionalMetric(data.score) ?? (status === 'ACCEPTED' ? 100 : 0);
     const timeUsed = normalizeOptionalMetric(data.timeUsed);
@@ -257,6 +257,22 @@ export function normalizeLuoguStatus(raw: string): string {
     RUNNING: 'JUDGING',
   };
   return map[text] || 'SYSTEM_ERROR';
+}
+
+export function normalizeLuoguReportedStatus(raw: string, rawStatus?: string): string {
+  const reported = normalizeLuoguStatus(raw);
+  const text = String(rawStatus || '').replace(/\s+/g, ' ').trim();
+  if (!text) return reported;
+
+  const hasAcceptedVerdict = /ACCEPTED|答案正确|通过|(?:^|[^A-Z])AC(?:[^A-Z]|$)/i.test(text);
+  const hasMemoryExceededVerdict =
+    /MEMORY\s+LIMIT\s+EXCEEDED|内存超限|超过内存|内存限制超出|(?:^|[^A-Z])MLE(?:[^A-Z]|$)/i.test(text);
+
+  if (reported === 'MEMORY_LIMIT_EXCEEDED' && hasAcceptedVerdict && !hasMemoryExceededVerdict) {
+    return 'ACCEPTED';
+  }
+
+  return reported;
 }
 
 export function normalizeOptionalMetric(raw: unknown): number | undefined {

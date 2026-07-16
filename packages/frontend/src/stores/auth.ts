@@ -24,6 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref(storedValue('accessToken'));
   const user = ref<AuthUser | null>(null);
   const loading = ref(false);
+  let profilePromise: Promise<void> | null = null;
 
   async function setAuth(accessToken: string, refreshToken: string, remember = true) {
     clearStoredTokens();
@@ -58,6 +59,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function fetchProfile() {
     if (!token.value) return;
+    if (profilePromise) return profilePromise;
+    profilePromise = (async () => {
     try {
       loading.value = true;
       const { data } = await api.get('/api/user/profile');
@@ -66,7 +69,10 @@ export const useAuthStore = defineStore('auth', () => {
       clearAuth();
     } finally {
       loading.value = false;
+      profilePromise = null;
     }
+    })();
+    return profilePromise;
   }
 
   const isLoggedIn = () => !!user.value && !!token.value;

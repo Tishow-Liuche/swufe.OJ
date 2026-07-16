@@ -93,7 +93,7 @@ export class QojSubmissionService {
       },
     });
 
-    const qojSubmitUrl = `https://qoj.ac/problem/${encodeURIComponent(remoteProblemId)}`;
+    const qojSubmitUrl = `https://qoj.ac/problem/${encodeURIComponent(remoteProblemId)}#tab-submit-answer`;
     this.log.log(
       `QOJ task created sub=${submission.id} pid=${remoteProblemId} lang=${language} user=${userId}`,
     );

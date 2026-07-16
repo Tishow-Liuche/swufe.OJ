@@ -1,5 +1,6 @@
 import {
   LuoguTaskLeaseService,
+  normalizeLuoguReportedStatus,
   normalizeLuoguStatus,
   normalizeOptionalMetric,
 } from './luogu-task-lease.service';
@@ -77,6 +78,17 @@ describe('normalizeLuoguStatus', () => {
 
   it('maps unknown statuses to SYSTEM_ERROR', () => {
     expect(normalizeLuoguStatus('Something strange')).toBe('SYSTEM_ERROR');
+  });
+});
+
+describe('normalizeLuoguReportedStatus', () => {
+  it('does not let generic memory-limit page text override an accepted Luogu verdict', () => {
+    expect(
+      normalizeLuoguReportedStatus(
+        'MEMORY_LIMIT_EXCEEDED',
+        'Accepted\nMemory Limit 128 MB\nTime Limit 1.00s',
+      ),
+    ).toBe('ACCEPTED');
   });
 });
 
