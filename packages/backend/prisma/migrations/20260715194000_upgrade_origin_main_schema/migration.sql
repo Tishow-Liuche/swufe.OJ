@@ -5,7 +5,6 @@
 ALTER TABLE "User"
     ADD COLUMN IF NOT EXISTS "studentId" TEXT,
     ADD COLUMN IF NOT EXISTS "college" TEXT,
-    ADD COLUMN IF NOT EXISTS "phone" TEXT,
     ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN NOT NULL DEFAULT false;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "User_studentId_key" ON "User"("studentId");

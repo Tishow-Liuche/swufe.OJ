@@ -13,6 +13,8 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "db:status": "prisma migrate status",
+    "db:sync": "prisma migrate deploy && prisma generate",
     "seed": "npx ts-node -r tsconfig-paths/register prisma/seed.ts",
     "test": "jest",
     "test:watch": "jest --watch",
