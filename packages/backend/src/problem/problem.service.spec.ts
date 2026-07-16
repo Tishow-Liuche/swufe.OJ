@@ -68,7 +68,7 @@ describe('ProblemService createFull with judge data', () => {
     prisma.problem.findMany.mockResolvedValue([]);
     prisma.problem.count.mockResolvedValue(0);
 
-    await service.findAll({ keyword: 'P10001', pageSize: 12 });
+    await service.findAll({ keyword: 'P10001', pageSize: 12, status: 'DRAFT' });
 
     const expectedWhere = {
       status: 'PUBLISHED',
@@ -81,6 +81,17 @@ describe('ProblemService createFull with judge data', () => {
     };
     expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
     expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('returns only public statement fields for published problem details', async () => {
+    prisma.problem.findFirst.mockResolvedValue({ id: 'p1', status: 'PUBLISHED', versions: [] });
+
+    await service.findOne('p1');
+
+    const query = prisma.problem.findFirst.mock.calls[0][0];
+    expect(query.where).toEqual({ id: 'p1', status: 'PUBLISHED' });
+    expect(query.select.versions.select).not.toHaveProperty('testCases');
+    expect(query.select.versions.select).not.toHaveProperty('checker');
   });
 
   it('creates normal problems with inline input and exact expected output', async () => {

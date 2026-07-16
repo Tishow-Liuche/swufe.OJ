@@ -16,7 +16,7 @@ export class ProblemController {
 
   /** 创建题目（教师/管理员） */
   @Post()
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   create(@Body() dto: CreateProblemDto, @Req() req: any) {
     return this.problem.createFull(dto, req.user.id);
@@ -24,7 +24,7 @@ export class ProblemController {
 
   /** 上传测试数据 */
   @Post(':id/testdata')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
   uploadTestData(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
@@ -33,7 +33,7 @@ export class ProblemController {
 
   /** 上传图片 */
   @Post('images/upload')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
   uploadImage(@UploadedFile() file: Express.Multer.File) {
@@ -42,7 +42,7 @@ export class ProblemController {
 
   /** 上传标程 */
   @Post(':id/checker')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   uploadChecker(
@@ -64,7 +64,7 @@ export class ProblemController {
 
   /** 编辑题目（教师/管理员） */
   @Patch(':id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   update(@Param('id') id: string, @Body() dto: UpdateProblemDto) {
     return this.problem.update(id, dto);
@@ -72,7 +72,7 @@ export class ProblemController {
 
   /** 删除题目（教师/管理员） */
   @Delete(':id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   delete(@Param('id') id: string) {
     return this.problem.delete(id);
@@ -80,7 +80,7 @@ export class ProblemController {
 
   /** 修改题目状态（教师/管理员） */
   @Patch(':id/status')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.problem.updateStatus(id, status);

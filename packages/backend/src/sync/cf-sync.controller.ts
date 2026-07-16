@@ -1,7 +1,12 @@
-import { Controller, Get, Post, Param, Body, Logger } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Param, Post, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('api/sync')
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Roles('ADMIN')
 export class CfSyncController {
   private readonly logger = new Logger(CfSyncController.name);
   constructor(private prisma: PrismaService) {}

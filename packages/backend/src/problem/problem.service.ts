@@ -146,11 +146,12 @@ export class ProblemService {
   }
 
   async findAll(query: any) {
-    const { keyword, source, difficulty, status, tag, page = 1, pageSize = 20 } = query;
+    const { keyword, source, difficulty, tag, page = 1, pageSize = 20 } = query;
     const where: any = {};
     const currentPage = Math.max(Number(page) || 1, 1);
     const currentPageSize = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
-    where.status = status || 'PUBLISHED';
+    // This endpoint is public. Management queries must use a separately guarded API.
+    where.status = 'PUBLISHED';
     if (keyword) {
       const search = String(keyword).trim();
       where.OR = [
@@ -197,22 +198,49 @@ export class ProblemService {
   }
 
   async findOne(id: string) {
-    const problem = await this.prisma.problem.findUnique({
-      where: { id },
-      include: {
+    const problem = await this.prisma.problem.findFirst({
+      where: { id, status: 'PUBLISHED' },
+      select: {
+        id: true,
+        title: true,
+        source: true,
+        status: true,
+        difficulty: true,
+        timeLimit: true,
+        memoryLimit: true,
+        outputLimit: true,
+        allowLanguages: true,
+        createdAt: true,
+        updatedAt: true,
         versions: {
           where: { isCurrent: true },
           take: 1,
-          include: {
-            testCases: { orderBy: { order: 'asc' } },
-            checker: true,
+          select: {
+            id: true,
+            version: true,
+            description: true,
+            inputFormat: true,
+            outputFormat: true,
+            sampleInput: true,
+            sampleOutput: true,
+            hint: true,
+            dataRange: true,
+            createdAt: true,
           },
         },
-        tags: true,
-        sourceInfo: true,
+        tags: { select: { name: true, type: true } },
+        sourceInfo: {
+          select: {
+            platform: true,
+            remoteProblemId: true,
+            remoteContestId: true,
+            remoteProblemIndex: true,
+            remoteUrl: true,
+          },
+        },
       },
     });
-    if (!problem) throw new NotFoundException('题目不存在');
+    if (!problem) throw new NotFoundException('题目不存在或尚未发布');
     return problem;
   }
 
@@ -256,12 +284,17 @@ export class ProblemService {
   }
 
   async delete(id: string) {
-    await this.findOne(id);
+    const problem = await this.prisma.problem.findUnique({ where: { id }, select: { id: true } });
+    if (!problem) throw new NotFoundException('题目不存在');
     return this.prisma.problem.delete({ where: { id } });
   }
 
   async updateStatus(id: string, status: string) {
-    const problem = await this.findOne(id);
+    const problem = await this.prisma.problem.findUnique({
+      where: { id },
+      select: { id: true, source: true },
+    });
+    if (!problem) throw new NotFoundException('题目不存在');
     if (status === 'PUBLISHED' && problem.source === 'LOCAL') {
       const version = await this.prisma.problemVersion.findFirst({
         where: { problemId: id, isCurrent: true },
