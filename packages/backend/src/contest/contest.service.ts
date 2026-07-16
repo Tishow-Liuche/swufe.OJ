@@ -330,7 +330,7 @@ export class ContestService {
 
   async leaderboardOptions(viewer: Viewer) {
     const [memberClasses, taughtClasses, lists] = await Promise.all([
-      this.prisma.classMember.findMany({ where: { userId: viewer.id }, include: { class: true } }),
+      this.prisma.classMember.findMany({ where: { userId: viewer.id, status: 'APPROVED' }, include: { class: true } }),
       this.prisma.class.findMany({ where: { teacherId: viewer.id } }),
       this.prisma.problemList.findMany({
         where: { OR: [{ isPublic: true }, { createdBy: viewer.id }] },
@@ -396,7 +396,7 @@ export class ContestService {
   async classLeaderboard(classId: string, viewer: Viewer) {
     const classroom = await this.prisma.class.findUnique({
       where: { id: classId },
-      include: { members: { select: { userId: true } } },
+      include: { members: { where: { status: 'APPROVED' }, select: { userId: true } } },
     });
     if (!classroom) throw new NotFoundException('班级不存在');
     const isMember = classroom.members.some((member) => member.userId === viewer.id);

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { TeacherService } from './teacher.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -27,6 +27,26 @@ export class TeacherController {
   @Get('classes/:id/members')
   getMembers(@Param('id') id: string, @Req() req: any) {
     return this.teacherService.getClassMembers(id, req.user.id);
+  }
+
+  @Put('classes/:id/join-code')
+  setJoinCode(@Param('id') id: string, @Req() req: any, @Body() data: { expiresAt: string }) {
+    return this.teacherService.setJoinCode(id, req.user.id, data.expiresAt);
+  }
+
+  @Delete('classes/:id/join-code')
+  disableJoinCode(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.disableJoinCode(id, req.user.id);
+  }
+
+  @Patch('classes/:id/members/:userId/review')
+  reviewMember(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Req() req: any,
+    @Body() data: { status: string; reviewNote?: string },
+  ) {
+    return this.teacherService.reviewMember(id, req.user.id, userId, data.status, data.reviewNote);
   }
 
   @Delete('classes/:id/members/:userId')

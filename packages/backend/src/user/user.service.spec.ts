@@ -24,6 +24,15 @@ describe('UserService profile settings', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      class: {
+        findUnique: jest.fn(),
+      },
+      classMember: {
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
       $transaction: jest.fn(async (operations: any[]) => Promise.all(operations)),
     };
     service = new UserService(prisma);
@@ -163,5 +172,41 @@ describe('UserService profile settings', () => {
     await expect(
       service.updateAward('u1', 'a2', { awardLevel: '金奖' }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('creates a pending class application from a valid join code', async () => {
+    prisma.user.findUnique.mockResolvedValue({ role: 'STUDENT' });
+    prisma.class.findUnique.mockResolvedValue({
+      id: 'class-1',
+      name: '算法训练一班',
+      status: 'APPROVED',
+      joinCodeExpiresAt: new Date(Date.now() + 3600000),
+    });
+    prisma.classMember.findUnique.mockResolvedValue(null);
+    prisma.classMember.create.mockResolvedValue({ id: 'member-1', status: 'PENDING' });
+
+    const result = await service.applyToClass('u1', 'abcd2345');
+
+    expect(prisma.class.findUnique).toHaveBeenCalledWith({
+      where: { joinCode: 'ABCD2345' },
+      select: { id: true, name: true, status: true, joinCodeExpiresAt: true },
+    });
+    expect(prisma.classMember.create).toHaveBeenCalledWith({
+      data: { classId: 'class-1', userId: 'u1', status: 'PENDING' },
+    });
+    expect(result).toEqual({ id: 'member-1', classId: 'class-1', className: '算法训练一班', status: 'PENDING' });
+  });
+
+  it('rejects an expired class join code', async () => {
+    prisma.user.findUnique.mockResolvedValue({ role: 'STUDENT' });
+    prisma.class.findUnique.mockResolvedValue({
+      id: 'class-1',
+      name: '算法训练一班',
+      status: 'APPROVED',
+      joinCodeExpiresAt: new Date(Date.now() - 1000),
+    });
+
+    await expect(service.applyToClass('u1', 'ABCD2345')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.classMember.create).not.toHaveBeenCalled();
   });
 });

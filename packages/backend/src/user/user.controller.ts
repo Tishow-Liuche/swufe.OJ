@@ -62,6 +62,18 @@ export class UserController {
     return this.userService.deleteAward(req.user.id, id);
   }
 
+  @Get('classes')
+  @UseGuards(AuthGuard('jwt'))
+  listMyClasses(@Req() req: any) {
+    return this.userService.listMyClasses(req.user.id);
+  }
+
+  @Post('classes/join')
+  @UseGuards(AuthGuard('jwt'))
+  applyToClass(@Req() req: any, @Body('joinCode') joinCode: string) {
+    return this.userService.applyToClass(req.user.id, joinCode);
+  }
+
   @Get('stats')
   @UseGuards(AuthGuard('jwt'))
   getStats(@Req() req: any) {

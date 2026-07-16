@@ -552,29 +552,36 @@ model Course {
 }
 
 model Class {
-  id         String        @id @default(cuid())
-  courseId   String?
-  name       String
-  teacherId  String
-  status     String        @default("PENDING")
-  reviewNote String?
-  approvedAt DateTime?
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-  course     Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  members    ClassMember[]
+  id                String        @id @default(cuid())
+  courseId          String?
+  name              String
+  teacherId         String
+  status            String        @default("PENDING")
+  reviewNote        String?
+  approvedAt        DateTime?
+  joinCode          String?       @unique
+  joinCodeExpiresAt DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  course            Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  members           ClassMember[]
 }
 
 model ClassMember {
-  id       String   @id @default(cuid())
-  classId  String
-  userId   String
-  role     String   @default("STUDENT")
-  joinedAt DateTime @default(now())
-  class    Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id])
+  id         String    @id @default(cuid())
+  classId    String
+  userId     String
+  role       String    @default("STUDENT")
+  status     String    @default("APPROVED")
+  reviewNote String?
+  joinedAt   DateTime  @default(now())
+  reviewedAt DateTime?
+  class      Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id])
 
   @@unique([classId, userId])
+  @@index([classId, status])
+  @@index([userId, status])
 }
 
 model Assignment {

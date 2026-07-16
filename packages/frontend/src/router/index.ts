@@ -14,6 +14,7 @@ const router = createRouter({
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue'), meta: { requiresAuth: true } },
     { path: '/learning-plans/:id', component: () => import('../views/LearningPlanDetail.vue'), meta: { requiresAuth: true } },
     { path: '/profile', component: () => import('../views/Profile.vue'), meta: { requiresAuth: true } },
+    { path: '/classes', component: () => import('../views/StudentClasses.vue'), meta: { requiresAuth: true, requiresStudent: true } },
     { path: '/change-password', component: () => import('../views/ChangePassword.vue'), meta: { requiresAuth: true } },
     { path: '/external/accounts', component: () => import('../views/external/AccountBind.vue'), meta: { requiresAuth: true } },
     // 教师
@@ -32,6 +33,7 @@ router.beforeEach(async (to) => {
   if (auth.token && !auth.user) await auth.fetchProfile();
   if (auth.isLoggedIn()) {
     if (to.meta.requiresTeacher && !auth.isTeacher()) return '/problems';
+    if (to.meta.requiresStudent && !auth.isStudent()) return '/problems';
     return true;
   }
 

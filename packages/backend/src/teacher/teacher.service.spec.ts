@@ -10,6 +10,7 @@ describe('TeacherService', () => {
       class: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        update: jest.fn(),
       },
       problem: {
         findMany: jest.fn(),
@@ -34,6 +35,7 @@ describe('TeacherService', () => {
       classMember: {
         create: jest.fn(),
         findUnique: jest.fn(),
+        update: jest.fn(),
         delete: jest.fn(),
       },
     };
@@ -84,7 +86,7 @@ describe('TeacherService', () => {
       .mockResolvedValueOnce(null);
     prisma.classMember.findUnique
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ classId: 'class-1', userId: 'student-2' });
+      .mockResolvedValueOnce({ classId: 'class-1', userId: 'student-2', status: 'APPROVED' });
 
     const result = await service.importStudents('class-1', 'teacher-1', [
       'alice',
@@ -157,6 +159,50 @@ describe('TeacherService', () => {
       skipDuplicates: true,
     });
     expect(result).toEqual({ id: 'assignment-1', classId: 'class-1', title: '第一周作业' });
+    expect(prisma.classMember.findMany).toHaveBeenCalledWith({
+      where: { classId: 'class-1', status: 'APPROVED' },
+      select: { userId: true },
+    });
+  });
+
+  it('generates a time-limited join code for an approved class', async () => {
+    prisma.class.findUnique
+      .mockResolvedValueOnce({ id: 'class-1', teacherId: 'teacher-1', status: 'APPROVED' })
+      .mockResolvedValueOnce(null);
+    prisma.class.update.mockResolvedValue({
+      id: 'class-1',
+      joinCode: 'ABCD2345',
+      joinCodeExpiresAt: new Date('2026-07-20T00:00:00.000Z'),
+    });
+
+    const result = await service.setJoinCode('class-1', 'teacher-1', '2026-07-20T00:00:00.000Z');
+
+    expect(prisma.class.update).toHaveBeenCalledWith({
+      where: { id: 'class-1' },
+      data: expect.objectContaining({ joinCode: expect.stringMatching(/^[A-Z2-9]{8}$/) }),
+      select: { id: true, joinCode: true, joinCodeExpiresAt: true },
+    });
+    expect(result.joinCode).toBe('ABCD2345');
+  });
+
+  it('approves a pending member and enrolls the student in existing assignments', async () => {
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.classMember.findUnique.mockResolvedValue({ classId: 'class-1', userId: 'student-1', status: 'PENDING' });
+    prisma.classMember.update.mockResolvedValue({
+      classId: 'class-1', userId: 'student-1', status: 'APPROVED', user: { id: 'student-1' },
+    });
+    prisma.assignment.findMany.mockResolvedValue([{ id: 'assignment-1' }, { id: 'assignment-2' }]);
+
+    const result = await service.reviewMember('class-1', 'teacher-1', 'student-1', 'APPROVED');
+
+    expect(prisma.assignmentStudent.createMany).toHaveBeenCalledWith({
+      data: [
+        { assignmentId: 'assignment-1', userId: 'student-1' },
+        { assignmentId: 'assignment-2', userId: 'student-1' },
+      ],
+      skipDuplicates: true,
+    });
+    expect(result.status).toBe('APPROVED');
   });
 
   it('builds an assignment report from class students, problems, and submissions', async () => {

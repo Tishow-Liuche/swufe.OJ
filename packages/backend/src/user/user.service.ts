@@ -302,6 +302,77 @@ export class UserService {
     };
   }
 
+  async listMyClasses(userId: string) {
+    const memberships = await this.prisma.classMember.findMany({
+      where: { userId },
+      include: {
+        class: {
+          select: {
+            id: true,
+            name: true,
+            teacherId: true,
+            status: true,
+            course: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { joinedAt: 'desc' },
+    });
+    const teacherIds = [...new Set(memberships.map((membership) => membership.class.teacherId))];
+    const teachers = teacherIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: teacherIds } },
+          select: { id: true, username: true, nickname: true },
+        })
+      : [];
+    const teacherById = new Map(teachers.map((teacher) => [teacher.id, teacher]));
+    return memberships.map((membership) => ({
+      id: membership.id,
+      status: membership.status,
+      reviewNote: membership.reviewNote,
+      appliedAt: membership.joinedAt,
+      reviewedAt: membership.reviewedAt,
+      class: membership.class,
+      teacher: teacherById.get(membership.class.teacherId) || null,
+    }));
+  }
+
+  async applyToClass(userId: string, joinCodeInput: string) {
+    const joinCode = String(joinCodeInput || '').trim().toUpperCase();
+    if (!/^[A-Z2-9]{8}$/.test(joinCode)) {
+      throw new BadRequestException('请输入有效的 8 位班级码');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (!user) throw new NotFoundException('用户不存在');
+    if (user.role !== 'STUDENT') throw new ForbiddenException('仅学生账号可以申请加入班级');
+
+    const cls = await this.prisma.class.findUnique({
+      where: { joinCode },
+      select: { id: true, name: true, status: true, joinCodeExpiresAt: true },
+    });
+    if (!cls || cls.status !== 'APPROVED') throw new NotFoundException('班级码不存在或班级尚未启用');
+    if (!cls.joinCodeExpiresAt || cls.joinCodeExpiresAt <= new Date()) {
+      throw new BadRequestException('班级码已过期，请联系老师获取新班级码');
+    }
+
+    const existing = await this.prisma.classMember.findUnique({
+      where: { classId_userId: { classId: cls.id, userId } },
+    });
+    if (existing?.status === 'APPROVED') throw new BadRequestException('你已经是该班级成员');
+    if (existing?.status === 'PENDING') throw new BadRequestException('你的入班申请正在等待老师审核');
+
+    const membership = existing
+      ? await this.prisma.classMember.update({
+          where: { classId_userId: { classId: cls.id, userId } },
+          data: { status: 'PENDING', reviewNote: null, reviewedAt: null, joinedAt: new Date() },
+        })
+      : await this.prisma.classMember.create({
+          data: { classId: cls.id, userId, status: 'PENDING' },
+        });
+    return { id: membership.id, classId: cls.id, className: cls.name, status: membership.status };
+  }
+
   /** 全年每日提交热力图数据 */
   private async getHeatmap(userId: string) {
     const now = new Date();

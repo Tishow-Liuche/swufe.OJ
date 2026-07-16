@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { Check, Clipboard, Clock3, RefreshCw, X } from '@lucide/vue';
 import api from '../../api/client';
 
-interface ClassInfo { id: string; name: string; memberCount?: number; createdAt: string; }
-interface ClassMember { user: { id: string; username: string; nickname?: string } }
+interface ClassInfo {
+  id: string; name: string; memberCount?: number; createdAt: string; status: string;
+  joinCode?: string | null; joinCodeExpiresAt?: string | null;
+}
+interface ClassMember {
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'; reviewNote?: string | null; joinedAt: string;
+  user: { id: string; username: string; nickname?: string };
+}
 interface ProblemItem {
   id: string; title: string; source?: string; difficulty?: string;
   sourceInfo?: { platform?: string; remoteProblemId?: string };
@@ -49,12 +56,25 @@ const assignmentTitle = ref('');
 const assignmentDescription = ref('');
 const assignmentEndTime = ref('');
 const problemKeyword = ref('');
+const joinCodeExpiresAt = ref('');
+const joinCodeSaving = ref(false);
+const reviewingUserId = ref('');
 
 const selectedClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value));
+const pendingMembers = computed(() => members.value.filter((member) => member.status === 'PENDING'));
+const approvedMembers = computed(() => members.value.filter((member) => member.status === 'APPROVED'));
 
 onMounted(loadClasses);
 
 function showMessage(text: string) { msg.value = text; }
+function defaultJoinCodeExpiry() {
+  const date = new Date(Date.now() + 7 * 86400000);
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+function formatDate(value?: string | null) {
+  return value ? new Date(value).toLocaleString('zh-CN') : '-';
+}
 function parseIdentifiers(text: string) {
   return text.split(/[\n,，\s]+/).map((item) => item.trim()).filter(Boolean);
 }
@@ -107,6 +127,13 @@ async function loadClasses() {
 async function loadClassData() {
   report.value = null;
   selectedAssignmentId.value = '';
+  joinCodeExpiresAt.value = selectedClass.value?.joinCodeExpiresAt
+    ? (() => {
+        const date = new Date(selectedClass.value!.joinCodeExpiresAt!);
+        date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+        return date.toISOString().slice(0, 16);
+      })()
+    : defaultJoinCodeExpiry();
   await Promise.all([loadMembers(), loadAssignments()]);
 }
 async function createClass() {
@@ -158,6 +185,49 @@ async function removeStudent(userId: string, username: string) {
     await loadMembers();
   } catch (e: any) {
     showMessage('移出失败：' + (e.response?.data?.message || e.message));
+  }
+}
+async function saveJoinCode() {
+  if (!selectedClassId.value) return showMessage('请先选择班级');
+  if (!joinCodeExpiresAt.value) return showMessage('请设置班级码有效期');
+  joinCodeSaving.value = true;
+  try {
+    await api.put(`/api/teacher/classes/${selectedClassId.value}/join-code`, {
+      expiresAt: new Date(joinCodeExpiresAt.value).toISOString(),
+    });
+    showMessage('班级码已生成，旧班级码已失效');
+    await loadClasses();
+  } catch (e: any) {
+    showMessage('设置班级码失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    joinCodeSaving.value = false;
+  }
+}
+async function disableJoinCode() {
+  if (!selectedClassId.value || !selectedClass.value?.joinCode) return;
+  try {
+    await api.delete(`/api/teacher/classes/${selectedClassId.value}/join-code`);
+    showMessage('班级码已停用');
+    await loadClasses();
+  } catch (e: any) {
+    showMessage('停用班级码失败：' + (e.response?.data?.message || e.message));
+  }
+}
+async function copyJoinCode() {
+  if (!selectedClass.value?.joinCode) return;
+  await navigator.clipboard.writeText(selectedClass.value.joinCode);
+  showMessage('班级码已复制');
+}
+async function reviewMember(member: ClassMember, status: 'APPROVED' | 'REJECTED') {
+  reviewingUserId.value = member.user.id;
+  try {
+    await api.patch(`/api/teacher/classes/${selectedClassId.value}/members/${member.user.id}/review`, { status });
+    showMessage(status === 'APPROVED' ? '已通过入班申请' : '已拒绝入班申请');
+    await Promise.all([loadClasses(), loadMembers(), loadAssignments()]);
+  } catch (e: any) {
+    showMessage('审核失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    reviewingUserId.value = '';
   }
 }
 async function searchProblems() {
@@ -247,6 +317,58 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
       <p v-if="loading" class="empty small">正在加载班级...</p>
     </div>
 
+    <section v-if="selectedClass" class="card join-code-card">
+      <div class="section-heading">
+        <div>
+          <h3>班级码</h3>
+          <p class="hint small">学生凭码提交入班申请，通过后才会进入正式名单和作业统计。</p>
+        </div>
+        <span class="class-state" :class="selectedClass.status.toLowerCase()">
+          {{ selectedClass.status === 'APPROVED' ? '班级已启用' : selectedClass.status === 'PENDING' ? '等待管理员审核' : '班级未启用' }}
+        </span>
+      </div>
+      <div class="join-code-layout">
+        <div class="code-display" :class="{ inactive: !selectedClass.joinCode }">
+          <span class="code-label">当前班级码</span>
+          <strong>{{ selectedClass.joinCode || '尚未生成' }}</strong>
+          <span class="code-expiry"><Clock3 :size="15" /> {{ selectedClass.joinCode ? `有效至 ${formatDate(selectedClass.joinCodeExpiresAt)}` : '设置有效期后生成' }}</span>
+        </div>
+        <div class="code-controls">
+          <label>有效期
+            <input v-model="joinCodeExpiresAt" class="input" type="datetime-local" :disabled="selectedClass.status !== 'APPROVED'" />
+          </label>
+          <div class="code-actions">
+            <button class="btn btn-blue icon-btn" :disabled="joinCodeSaving || selectedClass.status !== 'APPROVED'" @click="saveJoinCode">
+              <RefreshCw :size="16" /> {{ selectedClass.joinCode ? '重新生成' : '生成班级码' }}
+            </button>
+            <button v-if="selectedClass.joinCode" class="btn-sm icon-btn" @click="copyJoinCode"><Clipboard :size="16" />复制</button>
+            <button v-if="selectedClass.joinCode" class="btn-sm danger icon-btn" @click="disableJoinCode"><X :size="16" />停用</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="selectedClass" class="card applications-card">
+      <div class="section-heading">
+        <div><h3>入班申请</h3><p class="hint small">待审核 {{ pendingMembers.length }} 人，审核通过后自动加入当前班级已有作业。</p></div>
+        <button class="btn-sm" :disabled="membersLoading" @click="loadMembers">刷新</button>
+      </div>
+      <div v-if="pendingMembers.length" class="application-list">
+        <article v-for="member in pendingMembers" :key="member.user.id" class="application-row">
+          <div class="student-avatar">{{ (member.user.nickname || member.user.username).slice(0, 1).toUpperCase() }}</div>
+          <div class="application-copy">
+            <strong>{{ member.user.nickname || member.user.username }}</strong>
+            <span>@{{ member.user.username }} · 申请于 {{ formatDate(member.joinedAt) }}</span>
+          </div>
+          <div class="review-actions">
+            <button class="approve-action" :disabled="reviewingUserId === member.user.id" title="通过申请" @click="reviewMember(member, 'APPROVED')"><Check :size="18" />通过</button>
+            <button class="reject-action" :disabled="reviewingUserId === member.user.id" title="拒绝申请" @click="reviewMember(member, 'REJECTED')"><X :size="18" />拒绝</button>
+          </div>
+        </article>
+      </div>
+      <p v-else class="empty small">暂无待审核的入班申请。</p>
+    </section>
+
     <div class="grid">
       <section class="card">
         <h3>导入学生</h3>
@@ -259,10 +381,10 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
         <h3>查看班级学生</h3>
         <button class="btn-sm" :disabled="!selectedClassId || membersLoading" @click="loadMembers">刷新学生名单</button>
         <p v-if="membersLoading" class="empty small">正在加载学生...</p>
-        <table v-else-if="members.length" class="table compact">
+        <table v-else-if="approvedMembers.length" class="table compact">
           <thead><tr><th>用户名</th><th>昵称</th><th>操作</th></tr></thead>
           <tbody>
-            <tr v-for="m in members" :key="m.user.id">
+            <tr v-for="m in approvedMembers" :key="m.user.id">
               <td>{{ m.user.username }}</td>
               <td>{{ m.user.nickname || '-' }}</td>
               <td><button class="btn-sm danger" @click="removeStudent(m.user.id, m.user.username)">移出</button></td>
@@ -345,6 +467,34 @@ h3 { margin: 0 0 12px; font-size: 16px; }
 .small { font-size: 13px; }
 .msg { padding: 9px 12px; background: #e8f5e9; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
 .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.section-heading h3 { margin-bottom: 5px; }
+.class-state { padding: 5px 9px; border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.class-state.approved { background: #e9f7ef; color: #177245; }
+.class-state.pending { background: #fff7df; color: #8c6200; }
+.class-state.rejected { background: #fff0ef; color: #a63b34; }
+.join-code-card { border-left: 4px solid #2d6cdf; }
+.join-code-layout { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(320px, 1.2fr); gap: 18px; align-items: stretch; }
+.code-display { display: flex; min-height: 118px; flex-direction: column; justify-content: center; padding: 18px; border: 1px solid #cfe0f8; border-radius: 8px; background: #f4f8ff; }
+.code-display.inactive { border-style: dashed; background: #fafbfc; }
+.code-label { color: #6b7788; font-size: 12px; font-weight: 700; }
+.code-display strong { margin: 5px 0 8px; color: #173f77; font-family: Consolas, monospace; font-size: 29px; letter-spacing: 3px; }
+.code-display.inactive strong { color: #7f8996; font-family: inherit; font-size: 20px; letter-spacing: 0; }
+.code-expiry { display: flex; align-items: center; gap: 6px; color: #67768a; font-size: 12px; }
+.code-controls { display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+.code-controls label { display: grid; gap: 6px; color: #475467; font-size: 13px; font-weight: 700; }
+.code-actions, .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.icon-btn, .review-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.applications-card { border-top: 3px solid #e4a72c; }
+.application-list { display: grid; gap: 8px; }
+.application-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid #e8edf3; border-radius: 8px; background: #fcfdff; }
+.student-avatar { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 50%; background: #e8f1ff; color: #24599e; font-weight: 800; }
+.application-copy { display: grid; gap: 3px; min-width: 0; }
+.application-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.application-copy span { color: #778395; font-size: 12px; }
+.review-actions button { padding: 7px 10px; border-radius: 6px; background: #fff; font-weight: 700; cursor: pointer; }
+.approve-action { border: 1px solid #b9ddca; color: #177245; }
+.reject-action { border: 1px solid #ecc7c4; color: #a63b34; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
 .form-grid { display: grid; grid-template-columns: 1fr 260px; gap: 10px; margin-bottom: 10px; }
@@ -378,7 +528,9 @@ button:disabled { opacity: .5; cursor: default; }
 .status.muted { background: #f2f4f7; color: #667085; }
 td small { display: block; color: #667085; margin-top: 3px; }
 @media (max-width: 900px) {
-  .grid, .form-grid { grid-template-columns: 1fr; }
+  .grid, .form-grid, .join-code-layout { grid-template-columns: 1fr; }
   .row { flex-direction: column; align-items: stretch; }
+  .application-row { grid-template-columns: 40px minmax(0, 1fr); }
+  .review-actions { grid-column: 1 / -1; }
 }
 </style>

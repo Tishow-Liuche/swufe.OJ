@@ -1,6 +1,7 @@
 ﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
+import { randomInt } from 'crypto';
 
 type StudentImportRow = {
   studentId: string;
@@ -19,7 +20,7 @@ export class TeacherService {
   async getClasses(teacherId: string) {
     const classes = await this.prisma.class.findMany({
       where: { teacherId },
-      include: { _count: { select: { members: true } } },
+      include: { _count: { select: { members: { where: { status: 'APPROVED' } } } } },
       orderBy: { createdAt: 'desc' },
     });
     return classes.map(({ _count, ...cls }) => ({
@@ -75,7 +76,15 @@ export class TeacherService {
           where: { classId_userId: { classId, userId: user.id } },
         });
         if (existing) {
-          alreadyInClass.push(identifier);
+          if (existing.status === 'APPROVED') {
+            alreadyInClass.push(identifier);
+            continue;
+          }
+          await this.prisma.classMember.update({
+            where: { classId_userId: { classId, userId: user.id } },
+            data: { status: 'APPROVED', reviewNote: null, reviewedAt: new Date() },
+          });
+          added++;
           continue;
         }
         await this.prisma.classMember.create({ data: { classId, userId: user.id } });
@@ -138,7 +147,13 @@ export class TeacherService {
 
       const member = await this.prisma.classMember.findUnique({ where: { classId_userId: { classId, userId: user.id } } });
       if (!member) { await this.prisma.classMember.create({ data: { classId, userId: user.id } }); added++; }
-      else updated++;
+      else {
+        await this.prisma.classMember.update({
+          where: { classId_userId: { classId, userId: user.id } },
+          data: { status: 'APPROVED', reviewNote: null, reviewedAt: new Date() },
+        });
+        updated++;
+      }
     }
 
     return { added, updated, skipped, errors };
@@ -150,7 +165,78 @@ export class TeacherService {
     return this.prisma.classMember.findMany({
       where: { classId },
       include: { user: { select: { id: true, username: true, nickname: true } } },
+      orderBy: [{ status: 'asc' }, { joinedAt: 'asc' }],
     });
+  }
+
+  async setJoinCode(classId: string, teacherId: string, expiresAtInput: string) {
+    const cls = await this.requireOwnedClass(classId, teacherId);
+    if (cls.status !== 'APPROVED') {
+      throw new BadRequestException('班级通过管理员审核后才能启用班级码');
+    }
+
+    const expiresAt = new Date(expiresAtInput);
+    if (!expiresAtInput || Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
+      throw new BadRequestException('班级码有效期必须晚于当前时间');
+    }
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const joinCode = this.generateJoinCode();
+      const existing = await this.prisma.class.findUnique({ where: { joinCode }, select: { id: true } });
+      if (existing) continue;
+      return this.prisma.class.update({
+        where: { id: classId },
+        data: { joinCode, joinCodeExpiresAt: expiresAt },
+        select: { id: true, joinCode: true, joinCodeExpiresAt: true },
+      });
+    }
+    throw new BadRequestException('班级码生成失败，请稍后重试');
+  }
+
+  async disableJoinCode(classId: string, teacherId: string) {
+    await this.requireOwnedClass(classId, teacherId);
+    return this.prisma.class.update({
+      where: { id: classId },
+      data: { joinCode: null, joinCodeExpiresAt: null },
+      select: { id: true, joinCode: true, joinCodeExpiresAt: true },
+    });
+  }
+
+  async reviewMember(classId: string, teacherId: string, userId: string, status: string, reviewNote?: string) {
+    await this.requireOwnedClass(classId, teacherId);
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      throw new BadRequestException('审核状态必须为 APPROVED 或 REJECTED');
+    }
+
+    const member = await this.prisma.classMember.findUnique({
+      where: { classId_userId: { classId, userId } },
+    });
+    if (!member) throw new NotFoundException('未找到该学生的入班申请');
+    if (member.status !== 'PENDING') throw new BadRequestException('该申请已处理');
+
+    const updated = await this.prisma.classMember.update({
+      where: { classId_userId: { classId, userId } },
+      data: {
+        status,
+        reviewNote: reviewNote?.trim() || null,
+        reviewedAt: new Date(),
+      },
+      include: { user: { select: { id: true, username: true, nickname: true } } },
+    });
+
+    if (status === 'APPROVED') {
+      const assignments = await this.prisma.assignment.findMany({
+        where: { classId },
+        select: { id: true },
+      });
+      if (assignments.length) {
+        await this.prisma.assignmentStudent.createMany({
+          data: assignments.map((assignment) => ({ assignmentId: assignment.id, userId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+    return updated;
   }
 
   async removeStudent(classId: string, teacherId: string, userId: string) {
@@ -226,7 +312,7 @@ export class TeacherService {
     });
 
     const members = await this.prisma.classMember.findMany({
-      where: { classId: data.classId },
+      where: { classId: data.classId, status: 'APPROVED' },
       select: { userId: true },
     });
     if (members.length) {
@@ -274,7 +360,7 @@ export class TeacherService {
     if (cls.teacherId !== teacherId) throw new ForbiddenException('???????');
 
     const classMembers = await this.prisma.classMember.findMany({
-      where: { classId: assignment.classId },
+      where: { classId: assignment.classId, status: 'APPROVED' },
       include: { user: { select: { id: true, username: true, nickname: true } } },
       orderBy: { joinedAt: 'asc' },
     });
@@ -394,5 +480,17 @@ export class TeacherService {
     }
 
     return contest;
+  }
+
+  private async requireOwnedClass(classId: string, teacherId: string) {
+    const cls = await this.prisma.class.findUnique({ where: { id: classId } });
+    if (!cls) throw new NotFoundException('班级不存在');
+    if (cls.teacherId !== teacherId) throw new ForbiddenException('无权操作此班级');
+    return cls;
+  }
+
+  private generateJoinCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join('');
   }
 }
