@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, NotebookTabs } from '@lucide/vue';
+import '@fontsource-variable/manrope/wght.css';
+import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRouter } from 'vue-router';
 import api from '../api/client';
 import CheckInModal from '../components/CheckInModal.vue';
@@ -395,8 +398,8 @@ onMounted(loadAll);
         <p>把要练的题、正在复习的错题和每天的目标放在一处。</p>
       </div>
       <div class="header-actions">
-        <button class="secondary-btn" @click="router.push('/problems')">进入题库</button>
-        <button v-if="auth.isLoggedIn()" class="primary-btn" @click="activeTab = 'notes'">今日复习 {{ dueNotes.length }}</button>
+        <button class="secondary-btn" @click="router.push('/problems')"><BookOpenCheck :size="17" />进入题库</button>
+        <button v-if="auth.isLoggedIn()" class="primary-btn" @click="activeTab = 'notes'"><NotebookTabs :size="17" />今日复习 {{ dueNotes.length }}</button>
       </div>
     </header>
 
@@ -409,11 +412,11 @@ onMounted(loadAll);
     </div>
 
     <nav class="workspace-tabs" aria-label="学习工作台">
-      <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">总览</button>
-      <button :class="{ active: activeTab === 'lists' }" @click="activeTab = 'lists'">我的题单 <span>{{ lists.length }}</span></button>
-      <button :class="{ active: activeTab === 'plans' }" @click="activeTab = 'plans'">学习计划 <span>{{ plans.length }}</span></button>
-      <button :class="{ active: activeTab === 'library' }" @click="activeTab = 'library'">收藏与错题</button>
-      <button :class="{ active: activeTab === 'notes' }" @click="activeTab = 'notes'">笔记与复习 <span>{{ dueNotes.length }}</span></button>
+      <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'"><LayoutDashboard :size="17" />总览</button>
+      <button :class="{ active: activeTab === 'lists' }" @click="activeTab = 'lists'"><ListChecks :size="17" />我的题单 <span>{{ lists.length }}</span></button>
+      <button :class="{ active: activeTab === 'plans' }" @click="activeTab = 'plans'"><CalendarRange :size="17" />学习计划 <span>{{ plans.length }}</span></button>
+      <button :class="{ active: activeTab === 'library' }" @click="activeTab = 'library'"><Library :size="17" />收藏与错题</button>
+      <button :class="{ active: activeTab === 'notes' }" @click="activeTab = 'notes'"><NotebookTabs :size="17" />笔记与复习 <span>{{ dueNotes.length }}</span></button>
     </nav>
 
     <div v-if="loading" class="loading-state">正在整理你的学习数据…</div>
@@ -685,4 +688,43 @@ textarea { resize: vertical; }
   .login-banner .primary-btn { margin-top: 12px; }
 }
 @media (min-width: 641px) { .notice { left: auto; right: 24px; max-width: 420px; } }
+
+/* Product-wide learning workspace skin: aligned with Home and Contests. */
+.learning-page { --workspace-navy:#173b66; --workspace-blue:#2469ad; --workspace-pale:#eaf3fc; --workspace-line:#dfe7ef; width:min(1200px,calc(100% - 40px)); padding-top:28px; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
+.learning-header { min-height:166px; padding:28px 32px; border-radius:8px; color:#fff; background:var(--workspace-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
+.learning-header .eyebrow { color:#8fc2ec; letter-spacing:0; }
+.learning-header h1 { color:#fff; font-size:34px; letter-spacing:0; }
+.learning-header p { color:#d7e6f4; }
+.header-actions { flex-wrap:wrap; }
+.header-actions .secondary-btn { color:#eaf4fd; border:1px solid rgba(255,255,255,.24); background:rgba(255,255,255,.1); }
+.header-actions .primary-btn { color:#173b66; background:#f2c66d; }
+.primary-btn,.secondary-btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; border-radius:6px; }
+.primary-btn { background:var(--workspace-blue); }
+.primary-btn:hover { background:#1b568d; }
+.workspace-tabs { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:5px; margin:18px 0 24px; padding:6px; border:1px solid var(--workspace-line); border-radius:8px; background:#fff; box-shadow:0 7px 18px rgba(23,59,102,.05); }
+.workspace-tabs button { display:flex; min-height:42px; align-items:center; justify-content:center; gap:7px; border-radius:6px; color:#66778c; }
+.workspace-tabs button:hover { color:#1f5e96; background:#eef6fd; }
+.workspace-tabs button.active { color:#fff; background:var(--workspace-navy); box-shadow:0 5px 12px rgba(23,59,102,.16); }
+.workspace-tabs button span { min-width:20px; border-radius:5px; }
+.workspace-tabs button.active span { color:#dcecf9; background:rgba(255,255,255,.15); }
+.panel,.public-section,.metric,.login-banner { border-color:var(--workspace-line); border-radius:8px; box-shadow:0 7px 20px rgba(23,59,102,.04); }
+.metric { border-top:3px solid #8fb9dc; }
+.metric.accent { border-top-color:#e2a93f; background:#fffdf7; }
+.metric strong,.plan-meta strong,.daily-progress strong { color:#1f6099; }
+.section-kicker,.text-btn,.plan-type,.list-nav-item span { color:#3977aa; letter-spacing:0; }
+.text-btn:hover { color:#174f81; }
+.list-sidebar { border-right-color:var(--workspace-line); background:#f8fbfe; }
+.list-nav-item { border-radius:7px; }
+.list-nav-item:hover { background:#edf5fc; }
+.list-nav-item.active { border-color:#91b9da; background:#edf6fd; }
+input:focus,textarea:focus { border-color:#3979ad; box-shadow:0 0 0 2px #deedf9; }
+.switch-label input { accent-color:var(--workspace-blue); }
+.sort-modes button.active,.sort-direction:hover { border-color:var(--workspace-blue); color:#1f6098; background:#edf6fd; }
+.sort-direction { color:#1f6098; }
+.progress-track i { background:var(--workspace-blue); }
+.selected-problem { color:#1f6098; background:#edf6fd; }
+.daily-type { color:#28679d; background:#e6f1fb; }
+.public-list:hover { border-color:#8fb7d8; box-shadow:0 10px 22px rgba(23,59,102,.09); }
+.modal { border-radius:8px; }
+@media(max-width:760px){.workspace-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-tabs button:last-child{grid-column:1/-1}.learning-header{align-items:flex-start;flex-direction:column}.learning-header h1{font-size:29px}}
 </style>

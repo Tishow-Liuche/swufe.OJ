@@ -20,7 +20,7 @@ export class TeacherController {
   }
 
   @Post('classes/:id/import')
-  importStudents(@Param('id') id: string, @Req() req: any, @Body() data: { students: Array<{ studentId: string; name: string; college: string; phone: string; email: string }> }) {
+  importStudents(@Param('id') id: string, @Req() req: any, @Body() data: { students: string[] | Array<{ studentId: string; name: string; phone: string; email: string }> }) {
     return this.teacherService.importStudents(id, req.user.id, data.students);
   }
 

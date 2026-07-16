@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import '@fontsource-variable/manrope/wght.css';
+import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Bell, BookmarkCheck, Check, ChevronRight, CircleHelp, FileWarning, Flame,
@@ -393,4 +395,39 @@ onMounted(async () => {
 .post-dialog { border-radius: 6px; }
 @media (max-width: 1050px) { .community-layout { grid-template-columns: 188px minmax(0, 1fr); gap: 20px; } }
 @media (max-width: 720px) { .community-hub { width: min(100% - 28px, 1440px); }.community-topbar { min-height: 64px; padding-bottom: 18px; }.brand-block h1 { font-size: 25px; }.brand-title-row { gap: 10px; }.community-layout { margin-top: 18px; }.community-nav { padding-right: 0; border-right: 0; }.nav-caption { display: none; }.community-feed { border-radius: 5px; }.feed-heading, .post-body { padding-left: 16px; padding-right: 16px; }.post-body { gap: 10px; }.post-metrics { padding-left: 60px; padding-right: 16px; }.discussion-composer { margin-left: 16px; margin-right: 16px; }.feed-toolbar { padding-left: 16px; padding-right: 16px; }.announcement-item, .help-list { padding-left: 16px; padding-right: 16px; } }
+
+/* Community workspace skin shared with Home and Contests. */
+.community-hub { --community-navy:#173b66; --community-blue:#2469ad; --community-pale:#eaf3fc; --community-line:#dfe7ef; width:min(1380px,calc(100% - 40px)); font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
+.community-topbar { min-height:128px; padding:24px 28px; border-radius:8px; background:var(--community-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
+.brand-block p { color:#8fc2ec; letter-spacing:0; }
+.brand-block h1 { color:#fff; font-size:31px; letter-spacing:0; }
+.brand-title-row>span { color:#d6e6f4; }
+.brand-title-row>span i { background:#f2c66d; }
+.search-field { width:min(360px,32vw); border-color:rgba(255,255,255,.28); background:#fff; }
+.icon-command { border-color:rgba(255,255,255,.3); color:#e6f1fb; background:rgba(255,255,255,.1); }
+.icon-command:hover { border-color:rgba(255,255,255,.5); color:#fff; background:rgba(255,255,255,.18); }
+.notification-popover .icon-command,.post-dialog .icon-command,.moderation-drawer .icon-command { color:#475467; background:#fff; }
+.community-layout { grid-template-columns:210px minmax(0,1fr)244px; gap:18px; }
+.community-nav { padding:13px; border:1px solid var(--community-line); border-radius:8px; background:#f8fbfe; }
+.community-nav>button { border-radius:6px; }
+.community-nav>button:hover { color:#1d5d94; background:#eaf3fb; }
+.community-nav>button.active { border-color:transparent; color:#fff; background:var(--community-navy); box-shadow:0 5px 12px rgba(23,59,102,.16); }
+.community-nav .create-discussion { border-color:var(--community-blue); background:var(--community-blue); }
+.community-nav .create-discussion:hover { background:#1b578f; }
+.community-feed { border-color:var(--community-line); border-radius:8px; box-shadow:0 8px 24px rgba(23,59,102,.05); }
+.section-kicker { color:#3977aa; letter-spacing:0; }
+.primary-command { background:var(--community-blue); }
+.primary-command:hover { background:#1b578f; }
+.discussion-composer { border-color:#bcd5ea; background:#f3f8fd; }
+.plain-command,.sort-tabs button.active,.sort-tabs button:hover { color:#1f6098; }
+.sort-tabs button.active,.sort-tabs button:hover { background:#eaf3fb; }
+.post-body:hover h3 { color:#1f6098; }
+.author-avatar { border-color:#aecce5; color:#205f96; background:#e5f1fb; }
+.post-metrics button:hover { color:#1f6098; background:#eaf3fb; }
+.community-aside section { border-color:var(--community-line); border-radius:8px; background:#fff; box-shadow:0 6px 16px rgba(23,59,102,.04); }
+.community-aside section:first-child { border-top-color:var(--community-blue); }
+.community-aside section>button { color:#245f92; }
+.notification-popover,.post-dialog { border-radius:8px; }
+@media(max-width:1050px){.community-layout{grid-template-columns:200px minmax(0,1fr)}.community-aside{display:none}}
+@media(max-width:720px){.community-topbar{align-items:stretch;flex-direction:column;padding:20px}.topbar-actions{width:100%}.search-field{width:auto;flex:1}.community-layout{display:block}.community-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));position:static}.community-nav .nav-rule,.community-nav .signed-state{display:none}.community-feed{width:100%;margin-top:12px}}
 </style>

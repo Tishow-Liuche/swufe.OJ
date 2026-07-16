@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 import { TeacherService } from './teacher.service';
 
 describe('TeacherService', () => {
@@ -31,6 +32,9 @@ describe('TeacherService', () => {
       },
       user: {
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
       },
       classMember: {
         create: jest.fn(),
@@ -162,6 +166,58 @@ describe('TeacherService', () => {
     expect(prisma.classMember.findMany).toHaveBeenCalledWith({
       where: { classId: 'class-1', status: 'APPROVED' },
       select: { userId: true },
+    });
+  });
+
+  it('imports a fixed-format student row without requiring college', async () => {
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'student-1', username: '20240001', role: 'STUDENT' });
+    prisma.classMember.findUnique.mockResolvedValue(null);
+
+    const result = await service.importStudents('class-1', 'teacher-1', [{
+      studentId: '20240001',
+      name: '张三',
+      phone: '13800000000',
+      email: 'zhangsan@swufe.edu.cn',
+    }]);
+
+    expect(prisma.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        username: '20240001',
+        role: 'STUDENT',
+        requestedRole: 'STUDENT',
+        mustChangePassword: true,
+        nickname: '张三',
+        studentId: '20240001',
+        phone: '13800000000',
+        email: 'zhangsan@swufe.edu.cn',
+        school: '西南财经大学',
+        password: expect.any(String),
+      }),
+    });
+    expect(prisma.user.create.mock.calls[0][0].data).not.toHaveProperty('college');
+    expect(await bcrypt.compare('20240001', prisma.user.create.mock.calls[0][0].data.password)).toBe(true);
+    expect(prisma.classMember.create).toHaveBeenCalledWith({ data: { classId: 'class-1', userId: 'student-1' } });
+    expect(result).toEqual({ added: 1, updated: 0, skipped: 0, errors: [] });
+  });
+
+  it('rejects structured imports whose student ID is not exactly 8 digits', async () => {
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+
+    const result = await service.importStudents('class-1', 'teacher-1', [{
+      studentId: '240001',
+      name: '李四',
+      phone: '13900000000',
+      email: 'lisi@swufe.edu.cn',
+    }]);
+
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      added: 0,
+      updated: 0,
+      skipped: 1,
+      errors: [{ row: 2, studentId: '240001', reason: '学号必须为 8 位数字' }],
     });
   });
 

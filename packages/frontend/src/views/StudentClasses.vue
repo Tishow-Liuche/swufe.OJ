@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { CheckCircle2, Clock3, DoorOpen, RefreshCw, ShieldCheck, XCircle } from '@lucide/vue';
+import '@fontsource-variable/manrope/wght.css';
+import '@fontsource-variable/noto-sans-sc/wght.css';
 import api from '../api/client';
 
 interface Membership {
@@ -180,4 +182,24 @@ h2, h3 { margin: 0; color: #202c3d; }
   .join-form button { min-height: 44px; }
   .class-title { align-items: flex-start; flex-direction: column; }
 }
+
+.classes-page { --class-navy:#173b66; --class-blue:#2469ad; --class-pale:#eaf3fc; --class-line:#dfe7ef; width:min(1120px,calc(100% - 40px)); padding-top:28px; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
+.page-heading { min-height:158px; align-items:center; padding:26px 30px; border-radius:8px; color:#fff; background:var(--class-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
+.eyebrow { color:#8fc2ec; }
+h1 { color:#fff; font-size:34px; letter-spacing:0; }
+.page-heading p { color:#d9e8f5; }
+.summary-strip { border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.08); }
+.summary-strip div+div { border-left-color:rgba(255,255,255,.16); }
+.summary-strip strong { color:#fff; }
+.summary-strip span { color:#c4d6e8; }
+.join-panel,.membership-section { border-color:var(--class-line); border-radius:8px; background:#fff; box-shadow:0 7px 20px rgba(23,59,102,.04); }
+.join-panel { margin-top:18px; }
+.join-icon { background:var(--class-blue); }
+.join-form button { background:var(--class-blue); }
+.membership-list { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.membership-row { min-height:176px; align-content:start; border-color:var(--class-line); border-radius:8px; background:#fcfdff; transition:transform .18s,border-color .18s,box-shadow .18s; }
+.membership-row:hover { border-color:#8eb8da; transform:translateY(-2px); box-shadow:0 10px 22px rgba(23,59,102,.08); }
+.class-mark { color:#205f96; background:#e3effa; }
+.refresh-button { color:#285d8a; }
+@media(max-width:760px){.membership-list{grid-template-columns:1fr}.page-heading{align-items:stretch;flex-direction:column}.summary-strip{width:100%}}
 </style>

@@ -6,7 +6,7 @@ import { randomInt } from 'crypto';
 type StudentImportRow = {
   studentId: string;
   name: string;
-  college: string;
+  college?: string;
   phone: string;
   email: string;
 };
@@ -114,12 +114,12 @@ export class TeacherService {
       const phone = String(raw.phone || '').trim();
       const email = String(raw.email || '').trim().toLowerCase();
 
-      if (!/^\d{8}$/.test(studentId)) { errors.push({ row, studentId, reason: 'studentId must be 8 digits' }); skipped++; continue; }
-      if (!name || name.length > 40) { errors.push({ row, studentId, reason: 'name is required and must be <= 40 chars' }); skipped++; continue; }
-      if (!college || college.length > 80) { errors.push({ row, studentId, reason: 'college is required' }); skipped++; continue; }
-      if (!/^1\d{10}$/.test(phone)) { errors.push({ row, studentId, reason: 'phone must be a valid mainland China mobile number' }); skipped++; continue; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push({ row, studentId, reason: 'email format is invalid' }); skipped++; continue; }
-      if (seen.has(studentId)) { errors.push({ row, studentId, reason: 'duplicate studentId in file' }); skipped++; continue; }
+      if (!/^\d{8}$/.test(studentId)) { errors.push({ row, studentId, reason: '学号必须为 8 位数字' }); skipped++; continue; }
+      if (!name || name.length > 40) { errors.push({ row, studentId, reason: '姓名不能为空且不能超过 40 个字符' }); skipped++; continue; }
+      if (college.length > 80) { errors.push({ row, studentId, reason: '学院不能超过 80 个字符' }); skipped++; continue; }
+      if (!/^1\d{10}$/.test(phone)) { errors.push({ row, studentId, reason: '手机号必须为 11 位大陆号码' }); skipped++; continue; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push({ row, studentId, reason: '邮箱格式不正确' }); skipped++; continue; }
+      if (seen.has(studentId)) { errors.push({ row, studentId, reason: '文件内学号重复' }); skipped++; continue; }
       seen.add(studentId);
 
       const existingUser = await this.prisma.user.findUnique({ where: { username: studentId } });
@@ -131,7 +131,14 @@ export class TeacherService {
         errors.push({ row, studentId, reason: 'studentId is occupied by a non-student account' }); skipped++; continue;
       }
 
-      const accountData = { email, nickname: name, studentId, college, phone, school: '西南财经大学' };
+      const accountData = {
+        email,
+        nickname: name,
+        studentId,
+        phone,
+        school: '西南财经大学',
+        ...(college ? { college } : {}),
+      };
       const user = existingUser
         ? await this.prisma.user.update({ where: { id: existingUser.id }, data: accountData })
         : await this.prisma.user.create({
