@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { useStorage } from '@vueuse/core';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Bell, BookmarkCheck, Check, ChevronRight, CircleHelp, FileWarning, Flame,
-  LockKeyhole, Megaphone, MessageCircle, MessageSquarePlus, Search, Send,
-  ShieldCheck, ThumbsUp, Users, X,
+  LockKeyhole, Megaphone, MessageCircle, MessageSquarePlus, PanelLeftClose,
+  PanelLeftOpen, Search, Send, ShieldCheck, ThumbsUp, Users, X,
 } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
@@ -18,6 +19,7 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const panel = ref<Panel>('feed');
+const communitySidebarCollapsed = useStorage('swufe-oj:community-sidebar-collapsed', false);
 const sort = ref<'LATEST' | 'HOT' | 'UNANSWERED'>('LATEST');
 const category = ref('');
 const keyword = ref('');
@@ -115,6 +117,16 @@ async function switchPanel(nextPanel: Panel) {
   resetMessage();
   if (nextPanel === 'announcements') await loadAnnouncements();
   if (nextPanel === 'feed' || nextPanel === 'solutions') await loadPosts();
+}
+
+async function openDiscussionComposer() {
+  const needsFeedReload = panel.value !== 'feed';
+  panel.value = 'feed';
+  showComposer.value = true;
+  resetMessage();
+  if (needsFeedReload) await loadPosts();
+  await nextTick();
+  document.querySelector('.discussion-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function publishPost() {
@@ -262,8 +274,21 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="community-hub">
-    <header class="community-topbar">
+  <div class="community-hub" :class="{ 'sidebar-collapsed': communitySidebarCollapsed }">
+    <aside class="community-nav">
+      <div class="community-nav-title"><span class="community-nav-icon"><Users :size="19" /></span><span class="community-nav-copy"><strong>社区导航</strong><small>交流与共学</small></span><button class="community-nav-collapse" type="button" :title="communitySidebarCollapsed ? '展开侧栏' : '收起侧栏'" :aria-label="communitySidebarCollapsed ? '展开社区侧栏' : '收起社区侧栏'" @click="communitySidebarCollapsed = !communitySidebarCollapsed"><PanelLeftOpen v-if="communitySidebarCollapsed" :size="18" /><PanelLeftClose v-else :size="18" /></button></div>
+      <p class="nav-caption">社区模块</p>
+      <button type="button" :title="communitySidebarCollapsed ? '学习讨论' : undefined" :class="{ active: panel === 'feed' }" @click="switchPanel('feed')"><MessageCircle :size="18" /><span><strong>学习讨论</strong><small>提问与交流</small></span></button>
+      <button type="button" :title="communitySidebarCollapsed ? '题解复盘' : undefined" :class="{ active: panel === 'solutions' }" @click="switchPanel('solutions')"><LockKeyhole :size="18" /><span><strong>题解复盘</strong><small>通过后解锁</small></span></button>
+      <button type="button" :title="communitySidebarCollapsed ? '平台公告' : undefined" :class="{ active: panel === 'announcements' }" @click="switchPanel('announcements')"><Megaphone :size="18" /><span><strong>平台公告</strong><small>规则与动态</small></span><b>{{ announcements.length }}</b></button>
+      <button type="button" :title="communitySidebarCollapsed ? '帮助中心' : undefined" :class="{ active: panel === 'help' }" @click="switchPanel('help')"><CircleHelp :size="18" /><span><strong>帮助中心</strong><small>使用指引</small></span></button>
+      <div class="nav-rule"></div>
+      <button class="create-discussion" type="button" title="发起讨论" @click="openDiscussionComposer"><MessageSquarePlus :size="18" /><span><strong>发起讨论</strong><small>发布新话题</small></span></button>
+      <p class="signed-state"><Users :size="15" /><span>{{ auth.isLoggedIn() ? `当前：${authorName}` : '登录后可发帖、点赞和回复' }}</span></p>
+    </aside>
+
+    <main class="community-main">
+      <header class="community-topbar">
       <div class="brand-block"><p>WESTFIN OJ · LEARNING NETWORK</p><div class="brand-title-row"><h1>社区工作台</h1><span><i></i>实时同步</span></div></div>
       <div class="topbar-actions">
         <div class="search-field"><Search :size="17" /><input v-model="keyword" type="search" placeholder="搜索帖子、关键词" @keyup.enter="loadPosts"></div>
@@ -275,18 +300,7 @@ onMounted(async () => {
     <p v-if="feedbackMessage" class="toast success"><Check :size="16" />{{ feedbackMessage }}</p>
     <p v-if="errorMessage" class="toast error"><FileWarning :size="16" />{{ errorMessage }}</p>
 
-    <main class="community-layout">
-      <aside class="community-nav">
-        <p class="nav-caption">社区导航</p>
-        <button type="button" :class="{ active: panel === 'feed' }" @click="switchPanel('feed')"><MessageCircle :size="18" />学习讨论</button>
-        <button type="button" :class="{ active: panel === 'solutions' }" @click="switchPanel('solutions')"><LockKeyhole :size="18" />题解复盘</button>
-        <button type="button" :class="{ active: panel === 'announcements' }" @click="switchPanel('announcements')"><Megaphone :size="18" />平台公告</button>
-        <button type="button" :class="{ active: panel === 'help' }" @click="switchPanel('help')"><CircleHelp :size="18" />帮助中心</button>
-        <div class="nav-rule"></div>
-        <button class="create-discussion" type="button" @click="showComposer = !showComposer"><MessageSquarePlus :size="18" />发起讨论</button>
-        <p class="signed-state"><Users :size="15" />{{ auth.isLoggedIn() ? `当前：${authorName}` : '登录后可发帖、点赞和回复' }}</p>
-      </aside>
-
+      <div class="community-layout">
       <section class="community-feed">
         <template v-if="isFeed">
           <div class="feed-heading"><div><p class="section-kicker">{{ panel === 'solutions' ? '通过后解锁' : '学习社区' }}</p><h2>{{ feedTitle }}</h2><p>{{ feedDescription }}</p></div><button v-if="panel === 'feed'" class="primary-command" type="button" @click="showComposer = !showComposer"><MessageSquarePlus :size="17" />发起讨论</button></div>
@@ -314,9 +328,10 @@ onMounted(async () => {
         <section><h3>推荐入口</h3><button type="button" @click="router.push('/problems')">去题库练习 <ChevronRight :size="15" /></button><button type="button" @click="router.push('/problem-lists')">查看题单 <ChevronRight :size="15" /></button><button type="button" @click="switchPanel('announcements')">平台公告 <ChevronRight :size="15" /></button></section>
         <section v-if="isModerator" class="moderation-shortcut"><h3>内容审核</h3><p>{{ reports.length + feedbacks.length }} 项待处理内容</p><button type="button" @click="toggleModeration">打开审核中心 <ChevronRight :size="15" /></button></section>
       </aside>
-    </main>
+      </div>
 
-    <section v-if="moderationOpen" class="moderation-drawer"><header><div><p>教师 / 管理员</p><h2>审核中心</h2></div><button class="icon-command" type="button" title="关闭" @click="moderationOpen = false"><X :size="18" /></button></header><div class="moderation-columns"><div><h3>内容举报 <span>{{ reports.length }}</span></h3><article v-for="item in reports" :key="item.id"><b>{{ item.reason }}</b><p>{{ item.detail || '未填写补充说明' }}</p><small>举报人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleReport(item, false)">保留</button><button type="button" class="danger" @click="handleReport(item, true)">隐藏内容</button></footer></article><p v-if="!reports.length" class="no-item">暂无待处理举报</p></div><div><h3>题目纠错 <span>{{ feedbacks.length }}</span></h3><article v-for="item in feedbacks" :key="item.id"><b>{{ item.problem?.title }} · {{ item.type }}</b><p>{{ item.content }}</p><small>反馈人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleFeedback(item)">开始核实</button></footer></article><p v-if="!feedbacks.length" class="no-item">暂无待处理反馈</p></div></div></section>
+      <section v-if="moderationOpen" class="moderation-drawer"><header><div><p>教师 / 管理员</p><h2>审核中心</h2></div><button class="icon-command" type="button" title="关闭" @click="moderationOpen = false"><X :size="18" /></button></header><div class="moderation-columns"><div><h3>内容举报 <span>{{ reports.length }}</span></h3><article v-for="item in reports" :key="item.id"><b>{{ item.reason }}</b><p>{{ item.detail || '未填写补充说明' }}</p><small>举报人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleReport(item, false)">保留</button><button type="button" class="danger" @click="handleReport(item, true)">隐藏内容</button></footer></article><p v-if="!reports.length" class="no-item">暂无待处理举报</p></div><div><h3>题目纠错 <span>{{ feedbacks.length }}</span></h3><article v-for="item in feedbacks" :key="item.id"><b>{{ item.problem?.title }} · {{ item.type }}</b><p>{{ item.content }}</p><small>反馈人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleFeedback(item)">开始核实</button></footer></article><p v-if="!feedbacks.length" class="no-item">暂无待处理反馈</p></div></div></section>
+    </main>
 
     <div v-if="selectedPost" class="dialog-backdrop" @click.self="closePost"><article class="post-dialog"><button class="icon-command close-dialog" type="button" title="关闭" @click="closePost"><X :size="18" /></button><div class="post-labels"><span>{{ selectedPost.category || selectedPost.type }}</span><span v-if="selectedPost.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span></div><h2>{{ selectedPost.title || (selectedPost.type === 'SOLUTION' ? '题解复盘' : '讨论') }}</h2><div v-if="selectedPost.contentLocked" class="spoiler-state"><LockKeyhole :size="22" /><div><b>题解内容尚未解锁</b><p>{{ selectedPost.lockReason }}</p></div></div><template v-else><p class="post-content">{{ selectedPost.content }}</p><footer class="dialog-actions"><button type="button" :class="{ reacted: selectedPost.viewerReacted }" @click="toggleReaction(selectedPost)"><ThumbsUp :size="16" />{{ selectedPost.reactionCount || 0 }}</button><button v-if="selectedPost.authorId === auth.user?.id || isModerator" type="button" @click="resolvePost"><BookmarkCheck :size="16" />{{ selectedPost.isResolved ? '重新打开讨论' : '标记为已解决' }}</button></footer><section class="reply-list"><h3>回复 {{ selectedPost.replyCount || selectedPost.replies?.length || 0 }}</h3><article v-for="reply in selectedPost.replies" :key="reply.id"><b>{{ reply.author?.nickname || reply.author?.username }}</b><p>{{ reply.content }}</p><time>{{ formatDate(reply.createdAt) }}</time></article><form @submit.prevent="replyToPost"><textarea v-model="replyContent" maxlength="4000" placeholder="补充思路、给出建议或回答问题" required /><button class="primary-command" type="submit"><Send :size="16" />回复</button></form></section></template></article></div>
   </div>
@@ -397,8 +412,9 @@ onMounted(async () => {
 @media (max-width: 720px) { .community-hub { width: min(100% - 28px, 1440px); }.community-topbar { min-height: 64px; padding-bottom: 18px; }.brand-block h1 { font-size: 25px; }.brand-title-row { gap: 10px; }.community-layout { margin-top: 18px; }.community-nav { padding-right: 0; border-right: 0; }.nav-caption { display: none; }.community-feed { border-radius: 5px; }.feed-heading, .post-body { padding-left: 16px; padding-right: 16px; }.post-body { gap: 10px; }.post-metrics { padding-left: 60px; padding-right: 16px; }.discussion-composer { margin-left: 16px; margin-right: 16px; }.feed-toolbar { padding-left: 16px; padding-right: 16px; }.announcement-item, .help-list { padding-left: 16px; padding-right: 16px; } }
 
 /* Community workspace skin shared with Home and Contests. */
-.community-hub { --community-navy:#173b66; --community-blue:#2469ad; --community-pale:#eaf3fc; --community-line:#dfe7ef; width:min(1380px,calc(100% - 40px)); font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
-.community-topbar { min-height:128px; padding:24px 28px; border-radius:8px; background:var(--community-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
+.community-hub { --community-navy:#173b66; --community-blue:#2469ad; --community-pale:#eaf3fc; --community-line:#dfe7ef; display:flex; width:100%; max-width:none; min-height:calc(100vh - 56px); margin:0; padding:0; background:#f3f5f7; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
+.community-main { min-width:0; flex:1; padding:26px 28px 60px; }.community-main>.community-topbar,.community-main>.toast,.community-main>.community-layout,.community-main>.moderation-drawer { width:min(1180px,100%); margin-right:auto; margin-left:auto; }
+.community-topbar { min-height:128px; margin-bottom:0; padding:24px 28px; border-radius:8px; background:var(--community-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
 .brand-block p { color:#8fc2ec; letter-spacing:0; }
 .brand-block h1 { color:#fff; font-size:31px; letter-spacing:0; }
 .brand-title-row>span { color:#d6e6f4; }
@@ -407,13 +423,16 @@ onMounted(async () => {
 .icon-command { border-color:rgba(255,255,255,.3); color:#e6f1fb; background:rgba(255,255,255,.1); }
 .icon-command:hover { border-color:rgba(255,255,255,.5); color:#fff; background:rgba(255,255,255,.18); }
 .notification-popover .icon-command,.post-dialog .icon-command,.moderation-drawer .icon-command { color:#475467; background:#fff; }
-.community-layout { grid-template-columns:210px minmax(0,1fr)244px; gap:18px; }
-.community-nav { padding:13px; border:1px solid var(--community-line); border-radius:8px; background:#f8fbfe; }
-.community-nav>button { border-radius:6px; }
+.community-layout { grid-template-columns:minmax(0,1fr)244px; gap:18px; margin-top:22px; }
+.community-nav { position:sticky; top:56px; display:flex; width:264px; height:calc(100vh - 56px); flex:0 0 264px; align-self:flex-start; padding:22px 14px; overflow:hidden; flex-direction:column; border-right:1px solid var(--community-line); border-radius:0; background:#f8fbfe; transition:width .18s,flex-basis .18s; }
+.community-nav-title { display:flex; align-items:center; gap:10px; padding:0 7px 18px; }.community-nav-icon { display:grid; width:38px; height:38px; flex:0 0 38px; place-items:center; border-radius:8px; color:#1c5688; background:#dcecf9; }.community-nav-copy { display:grid; min-width:0; gap:2px; }.community-nav-copy strong { color:#29435d; font-size:13px; }.community-nav-copy small { color:#8492a2; font-size:10px; }.community-nav-collapse { display:grid; width:34px; height:34px; flex:0 0 34px; margin-left:auto; place-items:center; border:0; border-radius:7px; color:#6e7f91; background:transparent; cursor:pointer; }.community-nav-collapse:hover { color:#245f94; background:#e7f0f8; }
+.community-nav .nav-caption { margin:4px 9px 9px; color:#8493a5; font-size:10px; font-weight:900; }.community-nav>button { display:grid; grid-template-columns:22px minmax(0,1fr) auto; min-height:52px; gap:9px; padding:7px 10px; border-radius:7px; }.community-nav>button>span { display:grid; gap:2px; min-width:0; }.community-nav>button strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }.community-nav>button small { color:#8a98a8; font-size:9px; }.community-nav>button.active small { color:#cbddee; }.community-nav>button b { display:grid; min-width:21px; height:20px; place-items:center; border-radius:5px; color:#356b99; background:#e1edf8; font-size:10px; }.community-nav>button.active b { color:#fff; background:rgba(255,255,255,.15); }
 .community-nav>button:hover { color:#1d5d94; background:#eaf3fb; }
 .community-nav>button.active { border-color:transparent; color:#fff; background:var(--community-navy); box-shadow:0 5px 12px rgba(23,59,102,.16); }
 .community-nav .create-discussion { border-color:var(--community-blue); background:var(--community-blue); }
 .community-nav .create-discussion:hover { background:#1b578f; }
+.community-nav .nav-rule { width:100%; }.community-nav .signed-state span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.community-hub.sidebar-collapsed .community-nav { width:72px; flex-basis:72px; padding-right:10px; padding-left:10px; }.community-hub.sidebar-collapsed .community-nav-icon,.community-hub.sidebar-collapsed .community-nav-copy,.community-hub.sidebar-collapsed .nav-caption,.community-hub.sidebar-collapsed .nav-rule,.community-hub.sidebar-collapsed .signed-state { display:none; }.community-hub.sidebar-collapsed .community-nav-title { justify-content:center; padding-right:0; padding-left:0; }.community-hub.sidebar-collapsed .community-nav-collapse { margin-left:0; }.community-hub.sidebar-collapsed .community-nav>button { grid-template-columns:1fr; justify-items:center; padding-right:0; padding-left:0; }.community-hub.sidebar-collapsed .community-nav>button>span,.community-hub.sidebar-collapsed .community-nav>button>b { display:none; }
 .community-feed { border-color:var(--community-line); border-radius:8px; box-shadow:0 8px 24px rgba(23,59,102,.05); }
 .section-kicker { color:#3977aa; letter-spacing:0; }
 .primary-command { background:var(--community-blue); }
@@ -428,6 +447,6 @@ onMounted(async () => {
 .community-aside section:first-child { border-top-color:var(--community-blue); }
 .community-aside section>button { color:#245f92; }
 .notification-popover,.post-dialog { border-radius:8px; }
-@media(max-width:1050px){.community-layout{grid-template-columns:200px minmax(0,1fr)}.community-aside{display:none}}
-@media(max-width:720px){.community-topbar{align-items:stretch;flex-direction:column;padding:20px}.topbar-actions{width:100%}.search-field{width:auto;flex:1}.community-layout{display:block}.community-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));position:static}.community-nav .nav-rule,.community-nav .signed-state{display:none}.community-feed{width:100%;margin-top:12px}}
+@media(max-width:1050px){.community-layout{grid-template-columns:minmax(0,1fr)}.community-aside{display:none}}
+@media(max-width:860px){.community-hub{display:block}.community-main{padding:18px 16px 46px}.community-nav,.community-hub.sidebar-collapsed .community-nav{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:auto;height:auto;padding:12px;border-right:0}.community-nav-title,.community-nav .nav-rule,.community-nav .signed-state{display:none}.community-nav>button,.community-hub.sidebar-collapsed .community-nav>button{grid-template-columns:22px minmax(0,1fr) auto;justify-items:initial;padding:7px 10px}.community-nav>button>span,.community-hub.sidebar-collapsed .community-nav>button>span{display:grid}.community-nav>button>b,.community-hub.sidebar-collapsed .community-nav>button>b{display:grid}.community-nav .create-discussion{grid-column:1/-1}.community-topbar{align-items:stretch;flex-direction:column;padding:20px}.topbar-actions{width:100%}.search-field{width:auto;flex:1}.community-layout{display:block;margin-top:18px}.community-feed{width:100%}}
 </style>
