@@ -11,6 +11,8 @@ describe('ProblemService createFull with judge data', () => {
       problem: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn(),
+        findMany: jest.fn(),
+        count: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
       },
@@ -60,6 +62,25 @@ describe('ProblemService createFull with judge data', () => {
         },
       }),
     }));
+  });
+
+  it('searches published problems by title, internal ID, or remote problem metadata', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ keyword: 'P10001', pageSize: 12 });
+
+    const expectedWhere = {
+      status: 'PUBLISHED',
+      OR: [
+        { title: { contains: 'P10001', mode: 'insensitive' } },
+        { id: { contains: 'P10001', mode: 'insensitive' } },
+        { sourceInfo: { is: { remoteProblemId: { contains: 'P10001', mode: 'insensitive' } } } },
+        { sourceInfo: { is: { remoteUrl: { contains: 'P10001', mode: 'insensitive' } } } },
+      ],
+    };
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
+    expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
   });
 
   it('creates normal problems with inline input and exact expected output', async () => {

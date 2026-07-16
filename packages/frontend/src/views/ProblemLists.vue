@@ -30,6 +30,9 @@ const listForm = ref({ name: '', description: '', isPublic: false });
 const listModalOpen = ref(false);
 const listSearch = ref('');
 const listProblems = ref<any[]>([]);
+const listProblemsLoading = ref(false);
+const listProblemsLoaded = ref(false);
+const listProblemKeyword = ref('');
 const listSort = ref<ListSort>('difficulty');
 const listSortDirection = ref<'asc' | 'desc'>('asc');
 
@@ -178,6 +181,11 @@ async function selectList(id: string) {
       description: selectedList.value.description || '',
       isPublic: selectedList.value.isPublic,
     };
+    if (selectedListOwned.value) await loadListProblemOptions();
+    else {
+      listProblems.value = [];
+      listProblemsLoaded.value = false;
+    }
   } catch (err: any) { fail(err, '题单加载失败'); }
 }
 
@@ -223,16 +231,33 @@ async function deleteList() {
   } catch (err: any) { fail(err, '题单删除失败'); }
 }
 
+async function loadListProblemOptions(keyword = '') {
+  if (!selectedListOwned.value) return;
+  const normalizedKeyword = keyword.trim();
+  listProblemsLoading.value = true;
+  listProblemsLoaded.value = false;
+  listProblems.value = [];
+  listProblemKeyword.value = normalizedKeyword;
+  try {
+    const { data } = await api.get('/api/problems', {
+      params: { keyword: normalizedKeyword || undefined, pageSize: 30, status: 'PUBLISHED' },
+    });
+    const selectedIds = new Set(selectedListItems.value.map((item: any) => item.problemId));
+    listProblems.value = (data.items || []).filter((problem: any) => !selectedIds.has(problem.id));
+    listProblemsLoaded.value = true;
+  } catch (err: any) { fail(err, '题目加载失败'); }
+  finally { listProblemsLoading.value = false; }
+}
+
 async function searchListProblems() {
-  if (!listSearch.value.trim()) { listProblems.value = []; return; }
-  try { listProblems.value = (await api.get('/api/problems', { params: { keyword: listSearch.value, pageSize: 12 } })).data.items; }
-  catch (err: any) { fail(err, '题目搜索失败'); }
+  await loadListProblemOptions(listSearch.value);
 }
 
 async function addToList(problemId: string) {
   if (!selectedList.value) return;
   try {
     await api.post(`/api/problem-lists/${selectedList.value.id}/items`, { problemId });
+    listSearch.value = '';
     await selectList(selectedList.value.id);
     message('题目已加入题单');
   } catch (err: any) { fail(err, '题目加入失败'); }
@@ -487,7 +512,7 @@ onMounted(loadAll);
             <div class="editor-heading"><div><span class="section-kicker">{{ selectedListOwned ? 'LIST EDITOR' : 'PUBLIC LIST' }}</span><h2>{{ selectedList.name }}</h2><p>{{ selectedList.isPublic ? '公开题单' : '仅自己可见' }} · {{ selectedListItems.length }} 道题</p></div><div v-if="selectedListOwned" class="inline-actions"><button class="secondary-btn" @click="deleteList">删除</button><button class="primary-btn" @click="updateList">保存设置</button></div></div>
             <div v-if="selectedListOwned" class="list-settings"><label>名称<input v-model="listForm.name" maxlength="80"></label><label>说明<textarea v-model="listForm.description" rows="2" maxlength="500"></textarea></label><label class="switch-label"><input v-model="listForm.isPublic" type="checkbox"><span>公开题单</span></label></div>
             <p v-else class="public-description">{{ selectedList.description || '这个公开题单没有说明。' }}</p>
-            <div class="subheading"><div><h3>题目排序</h3><small>{{ sortDirectionLabel }}</small></div><div v-if="selectedListOwned" class="search-inline"><input v-model="listSearch" placeholder="搜索题目并加入" @keyup.enter="searchListProblems"><button class="secondary-btn" @click="searchListProblems">搜索</button></div></div>
+            <div class="subheading"><div><h3>题目排序</h3><small>{{ sortDirectionLabel }}</small></div><div v-if="selectedListOwned" class="search-inline"><input v-model="listSearch" placeholder="按标题、站内 ID 或平台题号搜索" @keyup.enter="searchListProblems"><button class="secondary-btn" :disabled="listProblemsLoading" @click="searchListProblems">{{ listProblemsLoading ? '加载中' : '搜索' }}</button></div></div>
             <div class="sort-toolbar" aria-label="题单排序方式">
               <div class="sort-modes">
                 <button :class="{ active: listSort === 'difficulty' }" @click="selectListSort('difficulty')">按难度</button>
@@ -496,9 +521,9 @@ onMounted(loadAll);
               </div>
               <button class="sort-direction" :title="`倒转排序，当前为${sortDirectionLabel}`" aria-label="倒转排序" @click="reverseListSort">{{ listSortDirection === 'asc' ? '↑' : '↓' }}</button>
             </div>
-            <div v-if="listProblems.length" class="search-results"><button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)"><span>{{ problem.title }}</span><small>＋加入</small></button></div>
+            <div v-if="selectedListOwned" class="problem-catalog"><div class="catalog-heading"><span>站内题目</span><small>{{ listProblemKeyword ? `“${listProblemKeyword}”的搜索结果` : '最近发布' }}</small></div><div v-if="listProblems.length" class="search-results"><button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)"><span><strong>{{ problem.title }}</strong><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }}{{ problem.sourceInfo?.remoteProblemId ? ` · ${problem.sourceInfo.remoteProblemId}` : '' }}</small></span><b>＋加入</b></button></div><div v-else-if="listProblemsLoading" class="problem-search-empty">正在获取站内题目...</div><div v-else-if="listProblemsLoaded" class="problem-search-empty">{{ listProblemKeyword ? '没有找到匹配题目，请尝试标题或平台题号。' : '暂无其他可加入的已发布题目。' }}</div></div>
             <div v-if="selectedListItems.length" class="ordered-list"><div v-for="(item, index) in sortedListItems" :key="item.id" class="ordered-row"><span class="order-number">{{ index + 1 }}</span><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span v-if="listSort === 'joined'" class="joined-at">{{ new Date(item.createdAt).toLocaleDateString() }}</span><span class="difficulty">{{ item.problem?.difficulty || '未分级' }}</span><button v-if="selectedListOwned" class="icon-btn danger" title="移出题单" @click="removeFromList(item.id)">×</button><button v-else class="icon-btn" title="打开题目" @click="openProblem(item.problemId)">›</button></div></div>
-            <div v-else class="empty-state">搜索题目后加入这个题单。</div>
+            <div v-else class="empty-state">从上方站内题目中选择并加入这个题单。</div>
           </main>
           <div v-else class="empty-state panel">选择一个题单开始编辑。</div>
         </div>
@@ -628,6 +653,7 @@ textarea { resize: vertical; }
 .search-results button:last-child { border-bottom: 0; }
 .search-results button:hover { background: #e0f2fe; }
 .search-results small { color: #0369a1; font-weight: 700; }
+.problem-catalog { margin:12px 0 16px; overflow:hidden; border:1px solid #dbe5ee; border-radius:7px; background:#f8fbfe; }.catalog-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; color:#34536f; font-size:12px; font-weight:850; }.catalog-heading small { color:#8492a2; font-size:10px; font-weight:650; }.problem-catalog .search-results { max-height:260px; margin:0; overflow-y:auto; border:0; border-top:1px solid #dbe5ee; background:#fff; }.problem-catalog .search-results button>span { display:grid; gap:3px; min-width:0; }.problem-catalog .search-results strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }.problem-catalog .search-results small { color:#7d8b9b; font-size:9px; }.problem-catalog .search-results b { flex:0 0 auto; color:#2469ad; font-size:11px; }.problem-search-empty { padding:24px 14px; border-top:1px solid #dbe5ee; color:#7d8b9b; text-align:center; font-size:11px; }
 .ordered-list { border-top: 1px solid #e2e8f0; }
 .sort-toolbar { display: flex; align-items: center; justify-content: flex-start; gap: 12px; margin-bottom: 12px; }
 .sort-modes { display: flex; gap: 4px; overflow-x: auto; }

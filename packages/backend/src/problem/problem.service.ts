@@ -151,7 +151,15 @@ export class ProblemService {
     const currentPage = Math.max(Number(page) || 1, 1);
     const currentPageSize = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
     where.status = status || 'PUBLISHED';
-    if (keyword) where.title = { contains: keyword, mode: 'insensitive' };
+    if (keyword) {
+      const search = String(keyword).trim();
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { id: { contains: search, mode: 'insensitive' } },
+        { sourceInfo: { is: { remoteProblemId: { contains: search, mode: 'insensitive' } } } },
+        { sourceInfo: { is: { remoteUrl: { contains: search, mode: 'insensitive' } } } },
+      ];
+    }
     if (source) {
       if (source === 'LUOGU' || source === 'CODEFORCES' || source === 'QOJ') {
         where.sourceInfo = { platform: source };
