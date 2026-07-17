@@ -1,15 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join, extname } from 'path';
 import { readFileSync } from 'fs';
-import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { configureHttpSecurity } from './common/security-config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  app.use(cookieParser());
+  configureHttpSecurity(app, app.get(ConfigService));
 
   app.useGlobalPipes(
     new ValidationPipe({

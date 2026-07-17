@@ -31,8 +31,12 @@ docker compose version
 
 ```bash
 # 在项目根目录
-docker compose up -d
+cp config/infra.env.example config/infra.env
+# 编辑 config/infra.env：所有密码必须替换为不同的随机强密码
+docker compose --env-file config/infra.env up -d
 ```
+
+基础设施端口只绑定到 `127.0.0.1`，不能从局域网或公网直接访问。请通过受控反向代理发布应用 API，而不是暴露 PostgreSQL、Redis、MinIO 或 go-judge 端口。
 
 验证：
 ```bash
@@ -40,11 +44,11 @@ docker compose up -d
 docker exec oj-postgres pg_isready -U oj -d oj_platform
 
 # Redis
-docker exec oj-redis redis-cli ping
+docker exec oj-redis redis-cli --no-auth-warning -a "<REDIS_PASSWORD>" ping
 
 # MinIO
-curl http://localhost:9000
-# 管理控制台: http://localhost:9001 (minioadmin / minioadmin_dev)
+curl http://127.0.0.1:9000
+# 管理控制台: http://127.0.0.1:9001（使用 config/infra.env 中的自定义账户）
 
 # go-judge
 curl http://localhost:5050/version
@@ -59,6 +63,8 @@ cd packages/backend
 
 # 复制环境变量（已创建则跳过）
 cp ../../config/.env.example .env
+# 将 DATABASE_URL、REDIS_PASSWORD、S3_ACCESS_KEY、S3_SECRET_KEY 与 config/infra.env 保持一致
+# 生产环境：NODE_ENV=production、COOKIE_SECURE=true；仅在受信任反向代理之后设置 TRUST_PROXY=true
 
 # 安装依赖
 npm install
@@ -71,6 +77,17 @@ npx prisma migrate deploy
 
 # 启动开发服务器
 npm run start:dev
+```
+
+本次刷新会话安全迁移会删除旧会话，部署后用户需要重新登录。不会自动重启已有 Docker 容器；更换 PostgreSQL、Redis 或 MinIO 密钥时，请安排维护窗口，先更新 `config/infra.env` 与后端 `.env`，再逐项重启依赖服务并检查健康状态。
+
+历史题目不会自动指定创建者，默认仅管理员可管理。管理员可显式转交：
+
+```bash
+curl -X PATCH http://localhost:3000/api/problems/<题目ID>/owner \
+  -H "Authorization: Bearer <管理员 access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"ownerId":"<教师或管理员用户ID>"}'
 ```
 
 API 运行在 http://localhost:3000

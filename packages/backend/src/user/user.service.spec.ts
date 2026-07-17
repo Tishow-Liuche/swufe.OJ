@@ -79,6 +79,22 @@ describe('UserService profile settings', () => {
     expect(result.email).toBe('alice@example.com');
   });
 
+  it('includes the mandatory-password-change state in the authenticated profile', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', username: 'alice', email: 'alice@example.com', avatar: null,
+      phone: null, nickname: 'Alice', role: 'STUDENT', school: null,
+      requestedRole: 'STUDENT', teacherApplicationStatus: 'NOT_REQUIRED',
+      mustChangePassword: true, createdAt: new Date(),
+    });
+
+    const result = await service.getProfile('u1');
+
+    expect(prisma.user.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ mustChangePassword: true }),
+    }));
+    expect(result).toMatchObject({ mustChangePassword: true });
+  });
+
   it('rejects duplicate email when another user already owns it', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u2' });
 

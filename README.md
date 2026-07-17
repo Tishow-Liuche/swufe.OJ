@@ -65,7 +65,7 @@
 
 #### AtCoder 当前实现
 
-AtCoder 按只读 C 级能力接入：管理员可在 `/admin/import-atcoder` 按单个公开题目 URL 导入标题、时间限制、内存限制和远程标识，题目详情始终提供规范化原站链接。平台不复制完整题面，不保存 AtCoder Cookie/CSRF/密码，也不执行远程提交或结果轮询。
+AtCoder 按只读 C 级能力接入：教师或管理员可在 `/admin/import-atcoder` 按单个公开题目 URL 导入标题、时间限制、内存限制和远程标识；后续更新须通过题目所有者/委派权限校验。题目详情始终提供规范化原站链接。平台不复制完整题面，不保存 AtCoder Cookie/CSRF/密码，也不执行远程提交或结果轮询。
 
 自动提交在数据库平台配置和提交服务中均强制关闭。启用更高等级前，必须先取得 AtCoder 对教育项目自动提交与结果读取的明确许可，并完成 Helper 签名、幂等和竞赛限制验收。完整边界见 [`docs/vjudge-platforms/03-atcoder.md`](docs/vjudge-platforms/03-atcoder.md)。
 
@@ -130,6 +130,14 @@ cp config/infra.env.example config/infra.env
 docker compose --env-file config/infra.env up -d
 # 启动 PostgreSQL 16 + Redis 7 + MinIO + go-judge；端口仅绑定本机回环地址
 ```
+
+### 安全上线与密钥轮换
+
+- `config/infra.env` 仅用于本机部署，已被 Git 忽略；不要将它、`.env` 或任何真实密钥提交到仓库。
+- 生产环境请设置 `NODE_ENV=production`、`COOKIE_SECURE=true`。只有在 API 确实位于受信任反向代理之后时，才设置 `TRUST_PROXY=true`。
+- 首次应用本次安全迁移会删除旧的刷新会话，所有用户需要重新登录。这是刷新令牌由明文迁移到哈希存储的预期结果。
+- 更换 PostgreSQL、Redis 或 MinIO 密钥时，先在维护窗口写入新的 `config/infra.env` 和后端 `.env`，再受控重启依赖该凭据的服务并验证健康检查。仓库不会自动重启任何现有容器。
+- 历史题目的 `createdById` 保持为空，因此只有管理员能管理；管理员可调用 `PATCH /api/problems/:id/owner`，请求体为 `{"ownerId":"<教师或管理员用户 ID>"}`，将其显式转交给新的所有者。所有者或管理员可通过 `POST /api/problems/:id/permissions` 为教师授予单项题目管理权限。
 
 ### 初始化后端
 
@@ -277,7 +285,8 @@ flowchart TB
 
 - Access Token：15 分钟，仅存前端内存（不写 localStorage，防 XSS）
 - Refresh Token：7 天，HttpOnly Secure SameSite Cookie，使用后立即轮换
-- 检测到 Token 重放 → 作废该用户全部会话
+- 数据库只保存 Refresh Token 的 SHA-256 哈希；迁移旧会话会被主动作废
+- 未修改初始密码的账号只可读取个人资料并提交新密码，后端会拒绝其他受保护 API
 
 ### Remote Judge 凭据
 

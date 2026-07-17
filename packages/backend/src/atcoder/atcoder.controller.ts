@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -17,8 +17,8 @@ export class AtCoderController {
   @Post('problems/import')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  importProblem(@Body() dto: ImportAtCoderProblemDto) {
-    return this.atcoder.importProblem(dto.url);
+  importProblem(@Body() dto: ImportAtCoderProblemDto, @Req() req: any) {
+    return this.atcoder.importProblem(dto.url, req.user);
   }
 
   @Patch('platform')

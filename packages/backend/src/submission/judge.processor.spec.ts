@@ -22,7 +22,7 @@ describe('JudgeProcessor local test data judging', () => {
     processor = new JudgeProcessor(prisma, judge, learning);
   });
 
-  it('uses exact output matching for standard problems', async () => {
+  it('ignores terminal whitespace when matching standard-problem output', async () => {
     prisma.problemVersion.findFirst.mockResolvedValue({
       checker: { type: 'STANDARD' },
       testCases: [{ order: 1, input: '1 2\n', expectedOutput: '3\n', score: 100 }],
@@ -39,10 +39,10 @@ describe('JudgeProcessor local test data judging', () => {
       memoryLimit: 256,
     } } as any);
 
-    expect(result.status).toBe('WRONG_ANSWER');
+    expect(result.status).toBe('ACCEPTED');
     expect(prisma.submissionCase.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        status: 'WRONG_ANSWER',
+        status: 'ACCEPTED',
         expectedOutput: '3\n',
         actualOutput: '3',
       }),

@@ -57,6 +57,7 @@ model User {
   reviewedContentReports   ContentReport[]          @relation("ContentReportReviewer")
   problemFeedbacks         ProblemFeedback[]        @relation("ProblemFeedbackReporter")
   reviewedProblemFeedbacks ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
+  createdProblems         Problem[]                @relation("ProblemCreator")
 }
 
 model CompetitionAward {
@@ -217,6 +218,7 @@ model RemoteSubmissionTask {
 
 model Problem {
   id             String   @id @default(cuid())
+  createdById    String?
   title          String
   source         String   @default("LOCAL")
   status         String   @default("DRAFT")
@@ -244,6 +246,9 @@ model Problem {
   sourceInfo         ProblemSource?
   communityPosts     CommunityPost[]
   feedbacks          ProblemFeedback[]
+  createdBy          User?                @relation("ProblemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdById])
 }
 
 model ProblemSource {
@@ -307,6 +312,7 @@ model ProblemPermission {
   problem    Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
 
   @@index([problemId])
+  @@unique([problemId, targetType, targetId, permission])
 }
 
 model TestGroup {

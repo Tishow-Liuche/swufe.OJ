@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, UseGuards, Req, ForbiddenExc
 import { AuthGuard } from '@nestjs/passport';
 import { SubmissionService } from './submission.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @Controller('api/submissions')
 export class SubmissionController {
@@ -45,7 +46,7 @@ export class SubmissionController {
 
   /** 重判（教师/管理员） */
   @Post(':id/rejudge')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   rejudge(@Param('id') id: string) {
     return this.submission.rejudge(id);

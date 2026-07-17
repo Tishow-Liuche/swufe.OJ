@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { ProblemModule } from './problem/problem.module';
@@ -21,11 +23,13 @@ import { MessageModule } from './message/message.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', '../../config/.env'] }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     FileUploadModule, PrismaModule, AuthModule, ProblemModule,
     SubmissionModule, UserModule, TeacherModule, SyncModule,
     HelperModule, CodeforcesModule, PublicModule,
     ContestModule, CommunityModule, AtCoderModule, LearningModule,
     QojModule, MessageModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

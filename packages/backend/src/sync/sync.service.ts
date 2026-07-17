@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProblemAccessService, type ProblemActor } from '../common/problem-access.service';
+import { sanitizeProblemContent } from '../common/content-sanitizer';
 
 export interface RemoteProblemData {
   remoteId: string;
@@ -34,7 +36,10 @@ export class SyncService {
   private readonly logger = new Logger(SyncService.name);
   private adapters = new Map<string, SyncAdapter>();
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private problemAccess: ProblemAccessService,
+  ) {}
 
   registerAdapter(adapter: SyncAdapter) {
     this.adapters.set(adapter.platform, adapter);
@@ -46,7 +51,7 @@ export class SyncService {
   }
 
   /** 同步单个题目到本地数据库 */
-  async syncProblem(platform: string, remoteId: string): Promise<string | null> {
+  async syncProblem(platform: string, remoteId: string, actor: ProblemActor): Promise<string | null> {
     const adapter = this.adapters.get(platform);
     if (!adapter) throw new Error(`No adapter for platform: ${platform}`);
 
@@ -56,6 +61,7 @@ export class SyncService {
       include: { problem: { include: { versions: { where: { isCurrent: true } } } } },
     });
     if (existing) {
+      await this.problemAccess.assertCanManage(existing.problemId, actor, 'EDIT');
       // 如果已有真实题面（非占位符），跳过
       const cv = existing.problem.versions[0];
       if (cv && !cv.description.startsWith('来自 ' + platform)) return existing.problem.id;
@@ -63,9 +69,13 @@ export class SyncService {
       const data = await adapter.fetchProblem(remoteId);
       if (data && data.description) {
         await this.prisma.problemVersion.update({ where: { id: cv!.id }, data: {
-          description: data.description, inputFormat: data.inputFormat, outputFormat: data.outputFormat,
-          sampleInput: data.samples?.map(s => s.input).join('\n---\n'), sampleOutput: data.samples?.map(s => s.output).join('\n---\n'),
-          hint: data.hint, dataRange: data.dataRange,
+          description: sanitizeProblemContent(data.description),
+          inputFormat: sanitizeOptionalContent(data.inputFormat),
+          outputFormat: sanitizeOptionalContent(data.outputFormat),
+          sampleInput: sanitizeOptionalContent(data.samples?.map(s => s.input).join('\n---\n')),
+          sampleOutput: sanitizeOptionalContent(data.samples?.map(s => s.output).join('\n---\n')),
+          hint: sanitizeOptionalContent(data.hint),
+          dataRange: sanitizeOptionalContent(data.dataRange),
         }});
         this.logger.log('Refreshed description: ' + remoteId);
       }
@@ -79,6 +89,7 @@ export class SyncService {
     // 创建题目
     const problem = await this.prisma.problem.create({
       data: {
+        createdById: actor.id,
         title: data.title,
         source: 'EXTERNAL',
         difficulty: data.difficulty || 'POPULAR',
@@ -88,13 +99,13 @@ export class SyncService {
         versions: {
           create: {
             version: 1,
-            description: data.description || `来自 ${platform} 题库：${data.url || ''}`,
-            inputFormat: data.inputFormat,
-            outputFormat: data.outputFormat,
-            sampleInput: data.samples?.map(s => s.input).join('\n---\n'),
-            sampleOutput: data.samples?.map(s => s.output).join('\n---\n'),
-            hint: data.hint,
-            dataRange: data.dataRange,
+            description: sanitizeProblemContent(data.description || `来自 ${platform} 题库：${data.url || ''}`),
+            inputFormat: sanitizeOptionalContent(data.inputFormat),
+            outputFormat: sanitizeOptionalContent(data.outputFormat),
+            sampleInput: sanitizeOptionalContent(data.samples?.map(s => s.input).join('\n---\n')),
+            sampleOutput: sanitizeOptionalContent(data.samples?.map(s => s.output).join('\n---\n')),
+            hint: sanitizeOptionalContent(data.hint),
+            dataRange: sanitizeOptionalContent(data.dataRange),
           },
         },
         tags: { create: (data.tags || []).map(n => ({ name: n, type: 'TAG' })) },
@@ -108,7 +119,7 @@ export class SyncService {
   }
 
   /** 批量同步 */
-  async syncBatch(platform: string, page: number, pageSize: number) {
+  async syncBatch(platform: string, page: number, pageSize: number, actor: ProblemActor) {
     const adapter = this.adapters.get(platform);
     if (!adapter) throw new Error(`No adapter for platform: ${platform}`);
 
@@ -116,7 +127,7 @@ export class SyncService {
     const results: Array<{ remoteId: string; status: string; problemId?: string | null; error?: string }> = [];
     for (const item of items) {
       try {
-        const id = await this.syncProblem(platform, item.remoteId);
+        const id = await this.syncProblem(platform, item.remoteId, actor);
         results.push({ remoteId: item.remoteId, status: id ? 'created' : 'skipped', problemId: id });
       } catch (e: any) {
         results.push({ remoteId: item.remoteId, status: 'error', error: e.message });
@@ -124,4 +135,8 @@ export class SyncService {
     }
     return results;
   }
+}
+
+function sanitizeOptionalContent(value?: string) {
+  return value === undefined ? undefined : sanitizeProblemContent(value);
 }

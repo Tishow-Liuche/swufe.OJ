@@ -1,9 +1,10 @@
-import { Body, Controller, Logger, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Logger, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../prisma/prisma.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SyncService } from './sync.service';
+import { sanitizeProblemContent } from '../common/content-sanitizer';
 
 @Controller('api/sync')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -17,23 +18,23 @@ export class SyncController {
   ) {}
 
   @Post('problem')
-  async syncProblem(@Body() body: { platform: string; remoteId: string }) {
+  async syncProblem(@Body() body: { platform: string; remoteId: string }, @Req() req: any) {
     const platform = String(body.platform || '').trim().toUpperCase();
     const remoteId = String(body.remoteId || '').trim();
     if (!platform || !remoteId) return { error: 'platform and remoteId required' };
 
-    const problemId = await this.syncService.syncProblem(platform, remoteId);
+    const problemId = await this.syncService.syncProblem(platform, remoteId, req.user);
     return { platform, remoteId, problemId, synced: !!problemId };
   }
 
   @Post('batch')
-  async syncBatch(@Body() body: { platform: string; page?: number; pageSize?: number }) {
+  async syncBatch(@Body() body: { platform: string; page?: number; pageSize?: number }, @Req() req: any) {
     const platform = String(body.platform || '').trim().toUpperCase();
     const page = Math.max(Number(body.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(body.pageSize) || 20, 1), 100);
     if (!platform) return { error: 'platform required' };
 
-    const results = await this.syncService.syncBatch(platform, page, pageSize);
+    const results = await this.syncService.syncBatch(platform, page, pageSize, req.user);
     return { platform, page, pageSize, results };
   }
 
@@ -49,7 +50,7 @@ export class SyncController {
     memoryLimit?: number;
     tags?: string[];
     sourceUrl?: string;
-  }) {
+  }, @Req() req: any) {
     const remoteId = String(body.remoteId || '').trim();
     if (!remoteId || !body.description) return { error: 'remoteId and description required' };
 
@@ -67,9 +68,9 @@ export class SyncController {
       await this.prisma.problemVersion.update({
         where: { id: ver.id },
         data: {
-          description: body.description,
-          inputFormat: body.inputFormat || null,
-          outputFormat: body.outputFormat || null,
+          description: sanitizeProblemContent(body.description),
+          inputFormat: sanitizeOptionalContent(body.inputFormat),
+          outputFormat: sanitizeOptionalContent(body.outputFormat),
           sampleInput,
           sampleOutput,
           dataRange: `Time: ${body.timeLimit || source.problem.timeLimit}ms, Memory: ${body.memoryLimit || source.problem.memoryLimit}MB`,
@@ -88,6 +89,7 @@ export class SyncController {
 
     const problem = await this.prisma.problem.create({
       data: {
+        createdById: req.user.id,
         title,
         source: 'EXTERNAL',
         difficulty: 'NOI',
@@ -97,9 +99,9 @@ export class SyncController {
         versions: {
           create: {
             version: 1,
-            description: body.description,
-            inputFormat: body.inputFormat || null,
-            outputFormat: body.outputFormat || null,
+            description: sanitizeProblemContent(body.description),
+            inputFormat: sanitizeOptionalContent(body.inputFormat),
+            outputFormat: sanitizeOptionalContent(body.outputFormat),
             sampleInput,
             sampleOutput,
             dataRange: `Time: ${body.timeLimit || 1000}ms, Memory: ${body.memoryLimit || 1024}MB`,
@@ -155,12 +157,12 @@ export class SyncController {
     await this.prisma.problemVersion.update({
       where: { id: existingVersion.id },
       data: {
-        description,
-        inputFormat: body.inputFormat || existingVersion.inputFormat,
-        outputFormat: body.outputFormat || existingVersion.outputFormat,
+        description: sanitizeProblemContent(description),
+        inputFormat: body.inputFormat ? sanitizeProblemContent(body.inputFormat) : existingVersion.inputFormat,
+        outputFormat: body.outputFormat ? sanitizeProblemContent(body.outputFormat) : existingVersion.outputFormat,
         sampleInput: body.samples?.map(s => s.input).join('\n---\n') || existingVersion.sampleInput,
         sampleOutput: body.samples?.map(s => s.output).join('\n---\n') || existingVersion.sampleOutput,
-        hint: body.hint || existingVersion.hint,
+        hint: body.hint ? sanitizeProblemContent(body.hint) : existingVersion.hint,
       },
     });
 
@@ -189,4 +191,8 @@ export class SyncController {
     this.logger.log('Updated description: ' + pid + ' (' + description.length + ' chars)');
     return { updated: true, pid };
   }
+}
+
+function sanitizeOptionalContent(value?: string) {
+  return value ? sanitizeProblemContent(value) : null;
 }

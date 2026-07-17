@@ -1,16 +1,24 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import AdmZip from 'adm-zip';
 import * as path from 'path';
 import { FileUploadService } from '../common/file-upload.service';
+import { PROBLEM_ACTIONS, ProblemAccessService, type ProblemAction, type ProblemActor } from '../common/problem-access.service';
+import { sanitizeProblemContent } from '../common/content-sanitizer';
 import { PrismaService } from '../prisma/prisma.service';
 
 type JudgeMode = 'STANDARD' | 'SPJ';
+
+const MAX_ZIP_ENTRIES = 200;
+const MAX_ZIP_ENTRY_BYTES = 10 * 1024 * 1024;
+const MAX_ZIP_TOTAL_BYTES = 100 * 1024 * 1024;
+const MAX_ZIP_COMPRESSION_RATIO = 100;
 
 @Injectable()
 export class ProblemService {
   constructor(
     private prisma: PrismaService,
     private fileUpload: FileUploadService,
+    private problemAccess: ProblemAccessService,
   ) {}
 
   async createFull(dto: {
@@ -33,7 +41,7 @@ export class ProblemService {
     spjLanguage?: string;
     spjSourceCode?: string;
     testCases?: Array<{ input?: string; expectedOutput?: string; score?: number; isSample?: boolean }>;
-  }, userId: string) {
+  }, actor: ProblemActor) {
     const existing = await this.prisma.problem.findFirst({ where: { title: dto.title } });
     if (existing) throw new BadRequestException('题目标题已存在');
 
@@ -44,19 +52,20 @@ export class ProblemService {
 
     const versionCreate: any = {
       version: 1,
-      description: dto.description,
-      inputFormat: dto.inputFormat,
-      outputFormat: dto.outputFormat,
-      sampleInput: dto.sampleInput,
-      sampleOutput: dto.sampleOutput,
-      hint: dto.hint,
-      dataRange: dto.dataRange,
+      description: sanitizeProblemContent(dto.description),
+      inputFormat: this.sanitizeOptionalContent(dto.inputFormat),
+      outputFormat: this.sanitizeOptionalContent(dto.outputFormat),
+      sampleInput: this.sanitizeOptionalContent(dto.sampleInput),
+      sampleOutput: this.sanitizeOptionalContent(dto.sampleOutput),
+      hint: this.sanitizeOptionalContent(dto.hint),
+      dataRange: this.sanitizeOptionalContent(dto.dataRange),
       checker: { create: checker },
     };
     if (testCases.length > 0) versionCreate.testCases = { create: testCases };
 
     return this.prisma.problem.create({
       data: {
+        createdById: actor.id,
         title: dto.title,
         source: 'LOCAL',
         status,
@@ -75,7 +84,8 @@ export class ProblemService {
     });
   }
 
-  async uploadTestData(problemId: string, file: Express.Multer.File) {
+  async uploadTestData(problemId: string, file: Express.Multer.File, actor: ProblemActor) {
+    await this.problemAccess.assertCanManage(problemId, actor, 'MANAGE_TESTDATA');
     const problem = await this.prisma.problem.findUnique({ where: { id: problemId } });
     if (!problem) throw new NotFoundException('题目不存在');
 
@@ -117,7 +127,8 @@ export class ProblemService {
     return { url: `s3://${s3Path}`, previewUrl: url };
   }
 
-  async uploadChecker(problemId: string, file: Express.Multer.File, type: string, language: string) {
+  async uploadChecker(problemId: string, file: Express.Multer.File, type: string, language: string, actor: ProblemActor) {
+    await this.problemAccess.assertCanManage(problemId, actor, 'MANAGE_CHECKER');
     const problem = await this.prisma.problem.findUnique({ where: { id: problemId } });
     if (!problem) throw new NotFoundException('题目不存在');
 
@@ -244,9 +255,14 @@ export class ProblemService {
     return problem;
   }
 
-  async update(id: string, dto: any) {
+  async update(id: string, dto: any, actor: ProblemActor) {
+    await this.problemAccess.assertCanManage(id, actor, 'EDIT');
     const problem = await this.prisma.problem.findUnique({ where: { id } });
     if (!problem) throw new NotFoundException('题目不存在');
+
+    if (dto.status !== undefined && dto.status !== problem.status) {
+      await this.problemAccess.assertCanManage(id, actor, 'PUBLISH');
+    }
 
     if (problem.status === 'PUBLISHED' && (dto.description || dto.inputFormat)) {
       await this.prisma.problemVersion.updateMany({
@@ -261,12 +277,12 @@ export class ProblemService {
         data: {
           problemId: id,
           version: (latest?.version || 1) + 1,
-          description: dto.description || '',
-          inputFormat: dto.inputFormat,
-          outputFormat: dto.outputFormat,
-          sampleInput: dto.sampleInput,
-          sampleOutput: dto.sampleOutput,
-          hint: dto.hint,
+          description: sanitizeProblemContent(dto.description || ''),
+          inputFormat: this.sanitizeOptionalContent(dto.inputFormat),
+          outputFormat: this.sanitizeOptionalContent(dto.outputFormat),
+          sampleInput: this.sanitizeOptionalContent(dto.sampleInput),
+          sampleOutput: this.sanitizeOptionalContent(dto.sampleOutput),
+          hint: this.sanitizeOptionalContent(dto.hint),
         },
       });
     }
@@ -283,13 +299,71 @@ export class ProblemService {
     });
   }
 
-  async delete(id: string) {
+  async delete(id: string, actor: ProblemActor) {
+    await this.problemAccess.assertCanManage(id, actor, 'DELETE');
     const problem = await this.prisma.problem.findUnique({ where: { id }, select: { id: true } });
     if (!problem) throw new NotFoundException('题目不存在');
     return this.prisma.problem.delete({ where: { id } });
   }
 
-  async updateStatus(id: string, status: string) {
+  async assignOwner(problemId: string, ownerId: string, actor: ProblemActor) {
+    if (actor.role !== 'ADMIN') {
+      throw new ForbiddenException('只有管理员可以转交题目所有权');
+    }
+    const owner = await this.prisma.user.findUnique({
+      where: { id: ownerId },
+      select: { id: true, role: true },
+    });
+    if (!owner || !['TEACHER', 'ADMIN'].includes(owner.role)) {
+      throw new BadRequestException('题目所有者必须是教师或管理员');
+    }
+    return this.prisma.problem.update({
+      where: { id: problemId },
+      data: { createdById: owner.id },
+    });
+  }
+
+  async grantPermission(
+    problemId: string,
+    dto: { targetId: string; permission: string },
+    actor: ProblemActor,
+  ) {
+    await this.problemAccess.assertCanChangePermissions(problemId, actor);
+    const permission = String(dto.permission || '').toUpperCase() as ProblemAction;
+    if (!PROBLEM_ACTIONS.includes(permission)) {
+      throw new BadRequestException('不支持的题目委派权限');
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: dto.targetId },
+      select: { id: true, role: true },
+    });
+    if (!target || !['TEACHER', 'ADMIN'].includes(target.role)) {
+      throw new BadRequestException('只能向教师或管理员委派题目管理权限');
+    }
+    const data = {
+      problemId,
+      targetType: 'USER',
+      targetId: target.id,
+      permission,
+    };
+    return this.prisma.problemPermission.upsert({
+      where: { problemId_targetType_targetId_permission: data },
+      create: data,
+      update: {},
+    });
+  }
+
+  async removePermission(problemId: string, permissionId: string, actor: ProblemActor) {
+    await this.problemAccess.assertCanChangePermissions(problemId, actor);
+    const result = await this.prisma.problemPermission.deleteMany({
+      where: { id: permissionId, problemId },
+    });
+    if (result.count === 0) throw new NotFoundException('题目委派权限不存在');
+    return { deleted: true };
+  }
+
+  async updateStatus(id: string, status: string, actor: ProblemActor) {
+    await this.problemAccess.assertCanManage(id, actor, 'PUBLISH');
     const problem = await this.prisma.problem.findUnique({
       where: { id },
       select: { id: true, source: true },
@@ -311,6 +385,10 @@ export class ProblemService {
 
   private normalizeJudgeMode(mode?: string): JudgeMode {
     return String(mode || 'STANDARD').toUpperCase() === 'SPJ' ? 'SPJ' : 'STANDARD';
+  }
+
+  private sanitizeOptionalContent(value?: string) {
+    return value === undefined ? undefined : sanitizeProblemContent(value);
   }
 
   private normalizeInlineTestCases(
@@ -360,8 +438,10 @@ export class ProblemService {
     }
 
     const zip = new AdmZip(file.buffer);
+    const entries = zip.getEntries();
+    this.validateZipBudget(entries);
     const byIndex = new Map<number, { input?: string; output?: string }>();
-    for (const entry of zip.getEntries()) {
+    for (const entry of entries) {
       if (entry.isDirectory) continue;
       const normalized = entry.entryName.replace(/\\/g, '/');
       if (normalized.includes('..')) throw new BadRequestException('测试数据包不能包含非法路径');
@@ -396,5 +476,35 @@ export class ProblemService {
         isSample: false,
       };
     });
+  }
+
+  validateZipBudget(entries: Array<{ isDirectory: boolean; header?: { size?: number; compressedSize?: number } }>) {
+    let fileCount = 0;
+    let totalSize = 0;
+
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+      fileCount++;
+      if (fileCount > MAX_ZIP_ENTRIES) {
+        throw new BadRequestException('ZIP 条目数量超过限制');
+      }
+
+      const size = Number(entry.header?.size);
+      const compressedSize = Number(entry.header?.compressedSize);
+      if (!Number.isFinite(size) || !Number.isFinite(compressedSize) || size < 0 || compressedSize < 0) {
+        throw new BadRequestException('ZIP 条目大小无效');
+      }
+      if (size > MAX_ZIP_ENTRY_BYTES) {
+        throw new BadRequestException('单个文件解压后大小超过限制');
+      }
+
+      totalSize += size;
+      if (totalSize > MAX_ZIP_TOTAL_BYTES) {
+        throw new BadRequestException('解压后大小超过限制');
+      }
+      if (size > 0 && (compressedSize === 0 || size / compressedSize > MAX_ZIP_COMPRESSION_RATIO)) {
+        throw new BadRequestException('ZIP 压缩比超过限制');
+      }
+    }
   }
 }

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const auth = vi.hoisted(() => ({
   isLoggedIn: vi.fn(),
+  isAdmin: vi.fn(),
   isStudent: vi.fn(),
   isTeacher: vi.fn(),
   restoreSession: vi.fn(),
@@ -19,6 +20,7 @@ describe('protected route session restore', () => {
     auth.token = '';
     auth.user = null;
     auth.isLoggedIn.mockReturnValue(false);
+    auth.isAdmin.mockReturnValue(false);
     auth.isStudent.mockReturnValue(true);
     auth.isTeacher.mockReturnValue(true);
     auth.restoreSession.mockResolvedValue(false);
@@ -37,5 +39,16 @@ describe('protected route session restore', () => {
 
     expect(auth.restoreSession).toHaveBeenCalledOnce();
     expect(router.currentRoute.value.path).toBe('/profile');
+  });
+
+  it('does not expose administrator routes to an authenticated teacher', async () => {
+    auth.token = 'teacher-token';
+    auth.user = {};
+    auth.isLoggedIn.mockReturnValue(true);
+    auth.isAdmin.mockReturnValue(false);
+
+    await router.push('/admin/users');
+
+    expect(router.currentRoute.value.path).toBe('/problems');
   });
 });

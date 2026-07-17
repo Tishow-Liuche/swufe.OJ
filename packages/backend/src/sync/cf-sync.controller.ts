@@ -3,6 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizeProblemContent } from '../common/content-sanitizer';
 
 @Controller('api/sync')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -91,15 +92,17 @@ export class CfSyncController {
     if (body.noteHtml) parts.push('<h3 class="section-title">Note</h3>' + body.noteHtml);
     parts.push('</div>');
 
-    var description = parts.join('\n\n');
+    var description = sanitizeProblemContent(parts.join('\n\n'));
     var sampleInput = samples.map(function(s) { return s.input; }).join('\n---\n');
     var sampleOutput = samples.map(function(s) { return s.output; }).join('\n---\n');
 
     await this.prisma.problemVersion.update({
       where: { id: ver.id },
       data: { description, sampleInput: sampleInput || null, sampleOutput: sampleOutput || null,
-        inputFormat: body.inputHtml || null, outputFormat: body.outputHtml || null,
-        hint: body.noteHtml || null, dataRange: 'Time: ' + body.timeLimitMs + 'ms, Memory: ' + body.memoryLimitMb + 'MB' },
+        inputFormat: body.inputHtml ? sanitizeProblemContent(body.inputHtml) : null,
+        outputFormat: body.outputHtml ? sanitizeProblemContent(body.outputHtml) : null,
+        hint: body.noteHtml ? sanitizeProblemContent(body.noteHtml) : null,
+        dataRange: 'Time: ' + body.timeLimitMs + 'ms, Memory: ' + body.memoryLimitMb + 'MB' },
     });
     await this.prisma.problem.update({
       where: { id: source.problemId },

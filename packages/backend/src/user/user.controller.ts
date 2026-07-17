@@ -3,6 +3,7 @@ import {
   UseInterceptors, UploadedFile,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserService } from './user.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -108,6 +109,7 @@ export class UserController {
   }
 
   @Post('password')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @UseGuards(AuthGuard('jwt'))
   changeOwnPassword(@Req() req: any, @Body('password') password: string) {
     return this.userService.changeOwnPassword(req.user.id, password);

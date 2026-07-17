@@ -8,6 +8,7 @@ import {
 import { createHash } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProblemAccessService, type ProblemActor } from '../common/problem-access.service';
 import { AtCoderReadonlyAdapter } from './atcoder-readonly.adapter';
 import {
   ATCODER_ADAPTER_VERSION,
@@ -22,6 +23,7 @@ export class AtCoderService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly adapter: AtCoderReadonlyAdapter,
     private readonly config: ConfigService,
+    private readonly problemAccess: ProblemAccessService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -61,7 +63,7 @@ export class AtCoderService implements OnModuleInit {
     });
   }
 
-  async importProblem(url: string) {
+  async importProblem(url: string, actor: ProblemActor) {
     const platform = await this.ensurePlatform();
     if (!platform.enabled || !this.isEnvironmentEnabled()) {
       throw new ServiceUnavailableException(
@@ -107,6 +109,7 @@ export class AtCoderService implements OnModuleInit {
       });
 
       if (existing) {
+        await this.problemAccess.assertCanManage(existing.problemId, actor, 'EDIT');
         await tx.problem.update({
           where: { id: existing.problemId },
           data: {
@@ -128,6 +131,7 @@ export class AtCoderService implements OnModuleInit {
 
       const problem = await tx.problem.create({
         data: {
+          createdById: actor.id,
           title: metadata!.title,
           source: 'EXTERNAL',
           status: 'PUBLISHED',

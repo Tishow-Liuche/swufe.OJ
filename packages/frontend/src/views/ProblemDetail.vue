@@ -13,6 +13,7 @@ import { marked } from 'marked';
 import katex from 'katex';
 import { BookOpen, MessageCircle } from '@lucide/vue';
 import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
+import { sanitizeStatementHtml } from '../security/sanitize-statement';
 import 'katex/dist/katex.min.css';
 
 const route = useRoute();
@@ -318,12 +319,12 @@ function renderMd(text: string): string {
       html = html.replace(key, rendered);
     });
 
-    return html;
+    return sanitizeStatementHtml(html);
   } catch {
-    return text
+    return sanitizeStatementHtml(text
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-      .replace(/\n/g, '<br>');
+      .replace(/\n/g, '<br>'));
   }
 }
 </script>

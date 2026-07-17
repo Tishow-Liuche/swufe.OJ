@@ -2,6 +2,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { ProblemController } from '../../problem/problem.controller';
 import { CfSyncController } from '../../sync/cf-sync.controller';
 import { SyncController } from '../../sync/sync.controller';
+import { SubmissionController } from '../../submission/submission.controller';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { RolesGuard } from './roles.guard';
 
@@ -30,4 +31,9 @@ describe('privileged controller guards', () => {
       expect(Reflect.getMetadata(ROLES_KEY, controller)).toEqual(['ADMIN']);
     },
   );
+
+  it('enforces role checks before rejudging a submission', () => {
+    const handler = SubmissionController.prototype.rejudge as object;
+    expect(guardsOn(handler)).toContain(RolesGuard);
+  });
 });

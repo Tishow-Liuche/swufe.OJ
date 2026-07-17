@@ -8,7 +8,13 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ProblemService } from './problem.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { CreateProblemDto, UpdateProblemDto, QueryProblemDto } from './dto';
+import {
+  AssignProblemOwnerDto,
+  CreateProblemDto,
+  GrantProblemPermissionDto,
+  QueryProblemDto,
+  UpdateProblemDto,
+} from './dto';
 
 @Controller('api/problems')
 export class ProblemController {
@@ -19,7 +25,7 @@ export class ProblemController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   create(@Body() dto: CreateProblemDto, @Req() req: any) {
-    return this.problem.createFull(dto, req.user.id);
+    return this.problem.createFull(dto, req.user);
   }
 
   /** 上传测试数据 */
@@ -27,8 +33,8 @@ export class ProblemController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
-  uploadTestData(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
-    return this.problem.uploadTestData(id, file);
+  uploadTestData(@Param('id') id: string, @UploadedFile() file: Express.Multer.File, @Req() req: any) {
+    return this.problem.uploadTestData(id, file, req.user);
   }
 
   /** 上传图片 */
@@ -47,8 +53,8 @@ export class ProblemController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   uploadChecker(
     @Param('id') id: string, @UploadedFile() file: Express.Multer.File,
-    @Body('type') type: string, @Body('language') language: string,
-  ) { return this.problem.uploadChecker(id, file, type || 'STANDARD', language || 'cpp'); }
+    @Body('type') type: string, @Body('language') language: string, @Req() req: any,
+  ) { return this.problem.uploadChecker(id, file, type || 'STANDARD', language || 'cpp', req.user); }
 
   /** 题库列表（公开） */
   @Get()
@@ -66,23 +72,47 @@ export class ProblemController {
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdateProblemDto) {
-    return this.problem.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateProblemDto, @Req() req: any) {
+    return this.problem.update(id, dto, req.user);
+  }
+
+  /** 管理员转交题目所有权（历史题目首次归属也通过此入口） */
+  @Patch(':id/owner')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  assignOwner(@Param('id') id: string, @Body() dto: AssignProblemOwnerDto, @Req() req: any) {
+    return this.problem.assignOwner(id, dto.ownerId, req.user);
+  }
+
+  /** 创建者或管理员向指定教师委派单项管理权限 */
+  @Post(':id/permissions')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('TEACHER', 'ADMIN')
+  grantPermission(@Param('id') id: string, @Body() dto: GrantProblemPermissionDto, @Req() req: any) {
+    return this.problem.grantPermission(id, dto, req.user);
+  }
+
+  /** 创建者或管理员撤销单项管理权限 */
+  @Delete(':id/permissions/:permissionId')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('TEACHER', 'ADMIN')
+  removePermission(@Param('id') id: string, @Param('permissionId') permissionId: string, @Req() req: any) {
+    return this.problem.removePermission(id, permissionId, req.user);
   }
 
   /** 删除题目（教师/管理员） */
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  delete(@Param('id') id: string) {
-    return this.problem.delete(id);
+  delete(@Param('id') id: string, @Req() req: any) {
+    return this.problem.delete(id, req.user);
   }
 
   /** 修改题目状态（教师/管理员） */
   @Patch(':id/status')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  updateStatus(@Param('id') id: string, @Body('status') status: string) {
-    return this.problem.updateStatus(id, status);
+  updateStatus(@Param('id') id: string, @Body('status') status: string, @Req() req: any) {
+    return this.problem.updateStatus(id, status, req.user);
   }
 }

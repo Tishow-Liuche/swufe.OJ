@@ -46,4 +46,25 @@ describe('AuthController refresh cookie', () => {
     );
     expect(response.clearCookie.mock.calls[0][1]).not.toHaveProperty('maxAge');
   });
+
+  it('defaults the refresh cookie to Secure when NODE_ENV is production', async () => {
+    const auth: any = {
+      login: jest.fn().mockResolvedValue({
+        accessToken: 'access-token', refreshToken: 'refresh-token', expiresIn: '7d', mustChangePassword: false,
+      }),
+    };
+    const response: any = { cookie: jest.fn() };
+    const config: any = {
+      get: jest.fn((key: string, fallback?: string) => key === 'NODE_ENV' ? 'production' : fallback),
+    };
+    const controller: any = new (AuthController as any)(auth, config);
+
+    await controller.login({ account: 'alice', password: 'Passw0rd1' }, response);
+
+    expect(response.cookie).toHaveBeenCalledWith(
+      'oj_refresh',
+      'refresh-token',
+      expect.objectContaining({ secure: true }),
+    );
+  });
 });

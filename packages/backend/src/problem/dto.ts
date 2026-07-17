@@ -3,11 +3,14 @@ import {
   IsOptional,
   IsInt,
   IsArray,
+  IsIn,
   ValidateNested,
   Min,
   Max,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PROBLEM_ACTIONS } from '../common/problem-access.service';
 
 export class ProblemTestCaseDto {
   @IsString()
@@ -183,6 +186,21 @@ export class ImportProblemDto {
 export class BatchImportDto {
   @IsArray()
   problems: ImportProblemDto[];
+}
+
+export class AssignProblemOwnerDto {
+  @IsString()
+  @MaxLength(128)
+  ownerId: string;
+}
+
+export class GrantProblemPermissionDto {
+  @IsString()
+  @MaxLength(128)
+  targetId: string;
+
+  @IsIn(PROBLEM_ACTIONS)
+  permission: string;
 }
 
 export class QueryProblemDto {

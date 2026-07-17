@@ -12,6 +12,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto } from './dto';
 import { REFRESH_COOKIE, refreshTokenMaxAge } from './refresh-token';
@@ -24,17 +25,20 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     return this.withRefreshCookie(res, await this.auth.register(dto));
   }
 
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(200)
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     return this.withRefreshCookie(res, await this.auth.login(dto));
   }
 
   @Post('refresh')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(200)
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const refreshToken = req.cookies?.[REFRESH_COOKIE];
@@ -67,7 +71,8 @@ export class AuthController {
   }
 
   private refreshCookieOptions(expiresIn?: string) {
-    const secure = String(this.config.get('COOKIE_SECURE', 'false')) === 'true';
+    const secure = this.config.get('NODE_ENV') === 'production'
+      || String(this.config.get('COOKIE_SECURE', 'false')) === 'true';
     const options = {
       httpOnly: true,
       secure,

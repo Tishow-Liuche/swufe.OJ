@@ -39,7 +39,7 @@ export class UserService {
       select: {
         id: true, username: true, email: true, nickname: true,
         avatar: true, phone: true, role: true, school: true, requestedRole: true,
-        teacherApplicationStatus: true, createdAt: true,
+        teacherApplicationStatus: true, mustChangePassword: true, createdAt: true,
       },
     });
     return this.withDisplayAvatar(profile);
