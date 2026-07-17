@@ -1,77 +1,77 @@
-# Security Hardening Design
+# 安全加固设计
 
-**Status:** Approved design pending implementation planning
+**状态：** 已确认设计，等待编写实施计划
 
-**Scope:** Close the deployment, session, authorization, rendering, password-change, upload, and baseline HTTP-security gaps identified in the 2026-07-17 security audit. This design intentionally does not restart containers or rotate live credentials; it prepares the repository for a controlled rollout.
+**范围：** 修复 2026-07-17 安全审计发现的部署、会话、授权、渲染、强制改密、上传和基础 HTTP 安全问题。本设计不会自动重启容器或轮换当前运行中的凭据，只为后续受控上线做好代码与配置准备。
 
-## Goals
+## 目标
 
-- Make infrastructure services private by default and require non-default secrets at deployment time.
-- Keep refresh tokens out of JavaScript-accessible storage and enforce mandatory password changes on the server.
-- Enforce problem ownership and explicit delegated permissions for all mutation and test-data operations.
-- Prevent untrusted problem statements from executing in the browser.
-- Add practical abuse limits and bounded ZIP processing without changing normal OJ workflows.
+- 基础设施默认仅私有访问，并在部署时要求非默认密钥。
+- 让刷新令牌不再可被 JavaScript 读取，并由服务端强制执行改密要求。
+- 对题目所有修改和测试数据操作实施创建者与显式授权校验。
+- 防止不可信题面内容在浏览器中执行。
+- 在不改变正常 OJ 使用流程的前提下，加入可行的滥用限制和 ZIP 解压边界。
 
-## Non-goals
+## 非目标
 
-- This phase does not redesign the remote-helper protocol, the native judge, or the existing public API catalogue.
-- This phase does not mutate the currently running database, restart Docker containers, or rotate credentials.
-- This phase does not infer historical problem ownership from unreliable data.
+- 本阶段不重构远程助手协议、本地原生判题器或现有公开 API 目录。
+- 本阶段不修改正在运行的数据库、不重启 Docker 容器，也不轮换正在使用的凭据。
+- 本阶段不根据不可靠的信息推断历史题目的创建者。
 
-## Deployment Boundary
+## 部署边界
 
-`docker-compose.yml` will bind PostgreSQL, Redis, MinIO API, MinIO Console, and go-judge only to `127.0.0.1` for the current host-based backend deployment. The compose file will consume required variables from a dedicated, ignored infrastructure environment file and fail fast when a secret is absent.
+`docker-compose.yml` 会将 PostgreSQL、Redis、MinIO API、MinIO 控制台和 go-judge 仅绑定到 `127.0.0.1`，以适配当前“后端运行在宿主机”的部署方式。Compose 文件将从专用、被忽略的基础设施环境文件读取必填变量；缺失密钥时必须立即启动失败。
 
-Redis will require a password and retain protected mode. The backend BullMQ connection will read that password from configuration. PostgreSQL and MinIO will no longer contain committed development credentials; the example configuration will use placeholders and the deployment documentation will describe the coordinated credential rotation required before restart.
+Redis 将启用密码并保留保护模式，后端 BullMQ 连接从配置中读取该密码。PostgreSQL 和 MinIO 不再在仓库中包含开发默认凭据；示例配置只保留占位符，部署文档会明确说明重启前需要协调完成的凭据轮换步骤。
 
-## Authentication and Session Boundary
+## 认证与会话边界
 
-The API will issue access tokens in the JSON response only and place refresh tokens in an `HttpOnly`, `SameSite=Lax` cookie. The frontend will retain the access token in memory only; it will not write either token to local or session storage. Refresh and logout requests will use credentials-enabled same-origin requests, and the backend will read, rotate, or clear the cookie.
+API 仍在 JSON 中返回访问令牌，但将刷新令牌写入 `HttpOnly`、`SameSite=Lax` Cookie。前端只在内存保存访问令牌，不再向 localStorage 或 sessionStorage 写入任意令牌。刷新和登出请求使用携带凭据的同源请求；后端从 Cookie 读取、轮换或清除刷新令牌。
 
-Production cookies will be `Secure`; local HTTP development remains explicitly supported through an environment-sensitive cookie option. Refresh tokens remain high-entropy, but database persistence will store only a hash so a database read cannot be replayed as a session.
+生产环境 Cookie 必须为 `Secure`；本地 HTTP 开发通过显式的环境判断保留可用性。刷新令牌仍使用高熵随机值，但数据库只保存其哈希，避免数据库读取结果可直接重放为会话。
 
-The authenticated principal will include `mustChangePassword`. A dedicated server-side guard will reject authenticated requests for such users except the small allowlist needed to inspect the account, change the password, refresh/logout, and load static assets. Frontend routing remains a usability aid, not the enforcement point.
+认证主体将包含 `mustChangePassword`。新增服务端守卫会拒绝此类用户的普通认证请求，只允许查看账号、修改密码、刷新/登出及加载静态资源等最小白名单。前端路由限制仅用于体验，不再作为唯一安全边界。
 
-## Problem Authorization Boundary
+## 题目授权边界
 
-`Problem` will gain a nullable `createdById` relation to `User`. New local and imported problems will have an explicit owner. A centralized problem-access policy will make the following decisions:
+`Problem` 将新增可为空的 `createdById` 到 `User` 的关系。新建本地题目和导入题目必须拥有明确创建者。集中式题目访问策略将执行以下规则：
 
-- Administrators retain full access.
-- A problem owner can edit metadata, versions, test data, checker files, and publication state.
-- A delegated `ProblemPermission` grants only the named operation; no implicit teacher-wide access exists.
-- A legacy problem with no owner is fail-closed: only an administrator can manage it until ownership is explicitly assigned.
+- 管理员拥有完整权限。
+- 题目创建者可编辑元数据、版本、测试数据、标程文件和发布状态。
+- 委派的 `ProblemPermission` 只授予指定操作；不再默认允许所有教师互相管理题目。
+- 没有创建者的历史题目采用默认拒绝策略：只有管理员可管理，直到管理员显式转交。
 
-Every mutation endpoint (`update`, `delete`, `status`, test-data upload, checker upload, image upload where relevant) will pass the caller identity into this policy. Read-only public problem endpoints remain limited to published data. A migration will add the nullable owner column without guessing owners; existing rows therefore become administrator-managed legacy content.
+所有修改接口（更新、删除、状态变更、测试数据上传、标程上传，以及相关图片上传）均把调用者身份传入该策略。公开只读题目接口继续只返回已发布数据。迁移只新增可空创建者字段而不猜测归属，因此历史数据会进入仅管理员可管理的状态。
 
-## Rendering and Input Boundary
+## 渲染与输入边界
 
-Problem statements will be sanitized at two layers:
+题面将采用双层净化：
 
-1. Server-side import and write paths will retain only an allowlisted subset of rich-text HTML needed for statements.
-2. The frontend will render Markdown, then sanitize the generated HTML with DOMPurify before assigning it to `v-html`.
+1. 服务端导入和写入路径只保留题面所需的富文本 HTML 白名单。
+2. 前端先渲染 Markdown，再用 DOMPurify 净化生成的 HTML，最后才赋给 `v-html`。
 
-This blocks scripts, event handlers, unsafe URLs, embedded active content, and dangerous SVG payloads while preserving code blocks, tables, links, mathematical output, and safe formatting.
+该策略会阻断脚本、事件处理器、不安全 URL、可执行嵌入内容和危险 SVG 载荷，同时保留代码块、表格、链接、数学公式与安全格式化。
 
-Test-data ZIP handling will set explicit limits for entry count, per-entry uncompressed size, aggregate uncompressed size, and compression ratio before reading entry data. Paths remain normalized and traversal is rejected. Upload handlers will fail with a clear 400 response when any safety budget is exceeded.
+测试数据 ZIP 会在读取条目内容前限制条目数、单条目解压后大小、总解压后大小与压缩比；路径继续规范化并拒绝目录穿越。任何超出安全预算的上传都会返回明确的 400 错误。
 
-## HTTP Baseline and Abuse Controls
+## HTTP 基线与滥用控制
 
-The backend will install Helmet with a CSP compatible with the current SPA and KaTeX assets, plus `nosniff`, frame protection, referrer policy, and production HSTS. Login, registration, refresh, and password-change endpoints will use tighter rate limits; general API endpoints receive a broader per-client limit. The proxy/trust configuration will be documented so client IP limits are meaningful behind a reverse proxy.
+后端将引入 Helmet，并配置兼容当前 SPA 与 KaTeX 资源的 CSP，同时启用 `nosniff`、防嵌入、Referrer Policy 和生产环境 HSTS。登录、注册、刷新和改密接口使用更严格的限流；普通 API 使用较宽松的按客户端限流。代理与 trust 配置将写入文档，以确保反向代理后的客户端 IP 限流仍然有效。
 
-## Migration and Rollout
+## 迁移与上线
 
-1. Deploy code and schema changes without restarting the current infrastructure.
-2. Generate and store replacement infrastructure secrets in the ignored deployment environment file.
-3. Coordinate PostgreSQL, Redis, MinIO, application, and browser-session restart/rotation in one maintenance window.
-4. Assign owners for historical problems through an administrator-only operation before returning teacher editing access.
-5. Revoke existing refresh sessions during rollout because the token storage format changes.
+1. 部署代码和数据库结构变更，但不立即重启当前基础设施。
+2. 在被忽略的部署环境文件中生成并保存新的基础设施密钥。
+3. 在维护窗口内协调 PostgreSQL、Redis、MinIO、应用和浏览器会话的重启/轮换。
+4. 管理员为历史题目分配创建者后，再恢复教师对这些题目的编辑权限。
+5. 因刷新令牌存储格式变化，上线时作废全部现有刷新会话。
 
-## Verification
+## 验证方式
 
-- Unit tests cover owner, delegate, administrator, and legacy-problem access decisions.
-- Endpoint tests prove forced-password users cannot access normal APIs.
-- Auth tests verify no refresh token appears in JSON and cookie rotation works.
-- Rendering tests prove representative script, event-handler, and `javascript:` payloads are removed.
-- ZIP tests cover normal archives, traversal, excessive entry count, excessive expansion, and invalid headers.
-- Compose/config checks confirm all infrastructure ports bind to loopback and required secrets have no defaults.
-- Existing backend and frontend type checks, Prisma validation, migration status, and the full test suite are run before handoff.
+- 单元测试覆盖题目创建者、委派用户、管理员和历史未归属题目的访问决策。
+- 接口测试证明强制改密用户无法调用普通 API。
+- 认证测试确认 JSON 不再包含刷新令牌，且 Cookie 轮换正确。
+- 渲染测试确认脚本、事件处理器和 `javascript:` 载荷被移除。
+- ZIP 测试覆盖正常压缩包、路径穿越、超量条目、过度膨胀和无效头部。
+- Compose/配置检查确认基础设施端口仅绑定回环地址，且必填密钥没有默认值。
+- 交付前运行后端与前端类型检查、Prisma 校验、迁移状态和完整测试套件。
