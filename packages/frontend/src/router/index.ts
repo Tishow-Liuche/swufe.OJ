@@ -29,28 +29,27 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
-  if (!to.matched.some((record) => record.meta.requiresAuth)) return true;
-
   const auth = useAuthStore();
-  if (auth.token && !auth.user) await auth.fetchProfile();
-  if (auth.isLoggedIn()) {
-    if (to.meta.requiresTeacher && !auth.isTeacher()) return '/problems';
-    if (to.meta.requiresStudent && !auth.isStudent()) return '/problems';
-    return true;
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+
+  if (requiresAuth && !auth.isLoggedIn()) {
+    await auth.restoreSession();
   }
 
-  return {
-    path: '/login',
-    query: { redirect: to.fullPath },
-  };
-});
+  if (requiresAuth && !auth.isLoggedIn()) {
+    return {
+      path: '/login',
+      query: { redirect: to.fullPath },
+    };
+  }
 
-router.beforeEach(async (to) => {
-  const auth = useAuthStore();
-  if (auth.token && !auth.user) await auth.fetchProfile();
   if (auth.user?.mustChangePassword && to.path !== '/change-password') {
     return { path: '/change-password', query: { redirect: to.fullPath } };
   }
+
+  if (requiresAuth && to.meta.requiresTeacher && !auth.isTeacher()) return '/problems';
+  if (requiresAuth && to.meta.requiresStudent && !auth.isStudent()) return '/problems';
+
   return true;
 });
 

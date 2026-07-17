@@ -1,37 +1,38 @@
-import axios from 'axios';
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
-const api = axios.create({
+const clientOptions = {
   baseURL: '',
   timeout: 10000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
-});
+};
 
-function storedValue(key: string) {
-  return localStorage.getItem(key) || sessionStorage.getItem(key);
-}
+const api = axios.create(clientOptions);
 
-function activeStorage() {
-  return localStorage.getItem('refreshToken') ? localStorage : sessionStorage;
-}
+// This separate client deliberately has no 401 interceptor, avoiding a refresh loop.
+export const refreshClient = axios.create(clientOptions);
 
-function clearStoredTokens() {
-  for (const storage of [localStorage, sessionStorage]) {
-    storage.removeItem('accessToken');
-    storage.removeItem('refreshToken');
-  }
-}
-
+let accessToken = '';
 let refreshPromise: Promise<string> | null = null;
 
-async function refreshAccessToken(refreshToken: string) {
+export function setAccessToken(token: string) {
+  accessToken = token;
+}
+
+export function clearAccessToken() {
+  accessToken = '';
+}
+
+export async function refreshAccessToken(): Promise<string> {
   if (!refreshPromise) {
-    refreshPromise = axios
-      .post('/api/auth/refresh', { refreshToken })
+    refreshPromise = refreshClient
+      .post('/api/auth/refresh')
       .then(({ data }) => {
-        const storage = activeStorage();
-        storage.setItem('accessToken', data.accessToken);
-        storage.setItem('refreshToken', data.refreshToken);
-        return data.accessToken as string;
+        if (typeof data?.accessToken !== 'string' || !data.accessToken) {
+          throw new Error('刷新登录状态时未返回访问令牌');
+        }
+        setAccessToken(data.accessToken);
+        return data.accessToken;
       })
       .finally(() => {
         refreshPromise = null;
@@ -40,38 +41,40 @@ async function refreshAccessToken(refreshToken: string) {
   return refreshPromise;
 }
 
-// Request interceptor — attach access token
 api.interceptors.request.use((config) => {
-  const token = storedValue('accessToken');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
   }
   return config;
 });
 
-// Response interceptor — handle 401 refresh
+type RetryableRequest = InternalAxiosRequestConfig & { _retry?: boolean };
+
+function redirectToLogin() {
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.assign('/login');
+  }
+}
+
 api.interceptors.response.use(
   (res) => res,
-  async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+  async (error: AxiosError) => {
+    const original = error.config as RetryableRequest | undefined;
+    const hasAccessToken = Boolean(original?.headers.Authorization);
+    const isRefreshRequest = original?.url === '/api/auth/refresh';
+
+    if (error.response?.status === 401 && original && hasAccessToken && !original._retry && !isRefreshRequest) {
       original._retry = true;
-      const refreshToken = storedValue('refreshToken');
-      if (refreshToken) {
-        try {
-          const accessToken = await refreshAccessToken(refreshToken);
-          original.headers = original.headers || {};
-          original.headers.Authorization = `Bearer ${accessToken}`;
-          return api(original);
-        } catch {
-          clearStoredTokens();
-          window.location.href = '/login';
-        }
-      } else {
-        clearStoredTokens();
-        window.location.href = '/login';
+      try {
+        const token = await refreshAccessToken();
+        original.headers.Authorization = `Bearer ${token}`;
+        return api(original);
+      } catch {
+        clearAccessToken();
+        redirectToLogin();
       }
     }
+
     return Promise.reject(error);
   },
 );

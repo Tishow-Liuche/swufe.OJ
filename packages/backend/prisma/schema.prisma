@@ -109,14 +109,14 @@ model UserRole {
 model UserSession {
   id           String   @id @default(cuid())
   userId       String
-  refreshToken String   @unique
+  refreshTokenHash String @unique
   expiresAt    DateTime
   ipAddress    String?
   userAgent    String?
   createdAt    DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([refreshToken])
+  @@index([refreshTokenHash])
   @@index([userId])
 }
 

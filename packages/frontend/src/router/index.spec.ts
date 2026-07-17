@@ -1,0 +1,41 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const auth = vi.hoisted(() => ({
+  isLoggedIn: vi.fn(),
+  isStudent: vi.fn(),
+  isTeacher: vi.fn(),
+  restoreSession: vi.fn(),
+  token: '',
+  user: null as { mustChangePassword?: boolean } | null,
+}));
+
+vi.mock('../stores/auth', () => ({ useAuthStore: () => auth }));
+
+import router from './index';
+
+describe('protected route session restore', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    auth.token = '';
+    auth.user = null;
+    auth.isLoggedIn.mockReturnValue(false);
+    auth.isStudent.mockReturnValue(true);
+    auth.isTeacher.mockReturnValue(true);
+    auth.restoreSession.mockResolvedValue(false);
+    await router.replace('/');
+  });
+
+  it('tries the HttpOnly-Cookie session before redirecting a protected route to login', async () => {
+    auth.restoreSession.mockImplementation(async () => {
+      auth.token = 'restored-token';
+      auth.user = {};
+      auth.isLoggedIn.mockReturnValue(true);
+      return true;
+    });
+
+    await router.push('/profile');
+
+    expect(auth.restoreSession).toHaveBeenCalledOnce();
+    expect(router.currentRoute.value.path).toBe('/profile');
+  });
+});

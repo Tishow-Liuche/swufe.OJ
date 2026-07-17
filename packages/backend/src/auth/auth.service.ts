@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { RegisterDto, LoginDto } from './dto';
+import { hashRefreshToken } from './refresh-token';
 
 @Injectable()
 export class AuthService {
@@ -86,12 +87,13 @@ export class AuthService {
       throw new UnauthorizedException('账号或密码错误');
     }
 
-    return this.generateTokens(user.id, user.mustChangePassword);
+    return this.generateTokens(user.id);
   }
 
   async refresh(refreshToken: string) {
+    const refreshTokenHash = hashRefreshToken(refreshToken);
     const session = await this.prisma.userSession.findUnique({
-      where: { refreshToken },
+      where: { refreshTokenHash },
     });
     if (!session || session.expiresAt < new Date()) {
       throw new UnauthorizedException('Token 已过期，请重新登录');
@@ -106,8 +108,9 @@ export class AuthService {
   }
 
   async logout(refreshToken: string) {
+    const refreshTokenHash = hashRefreshToken(refreshToken);
     await this.prisma.userSession.deleteMany({
-      where: { refreshToken },
+      where: { refreshTokenHash },
     });
     return { message: '已退出登录' };
   }
@@ -135,10 +138,10 @@ export class AuthService {
     return user;
   }
 
-  private async generateTokens(userId: string, mustChangePassword = false) {
+  private async generateTokens(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { authVersion: true },
+      select: { authVersion: true, mustChangePassword: true },
     });
     if (!user) throw new UnauthorizedException('账号不存在或已被删除');
     const accessToken = this.jwt.sign({ sub: userId, ver: user.authVersion });
@@ -150,12 +153,12 @@ export class AuthService {
     await this.prisma.userSession.create({
       data: {
         userId,
-        refreshToken,
+        refreshTokenHash: hashRefreshToken(refreshToken),
         expiresAt: new Date(Date.now() + ms),
       },
     });
 
-    return { accessToken, refreshToken, expiresIn, mustChangePassword };
+    return { accessToken, refreshToken, expiresIn, mustChangePassword: user.mustChangePassword };
   }
 
   private parseExpires(expires: string): number {

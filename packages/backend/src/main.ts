@@ -3,10 +3,13 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join, extname } from 'path';
 import { readFileSync } from 'fs';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({

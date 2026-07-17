@@ -38,7 +38,6 @@ const showConfirmPassword = ref(false);
 const loginForm = ref({
   account: '',
   password: '',
-  remember: true,
 });
 
 const registerForm = ref({
@@ -167,10 +166,9 @@ async function submit() {
       : {
           account: loginForm.value.account.trim(),
           password: loginForm.value.password,
-        };
+    };
     const { data } = await api.post(`/api/auth/${mode.value}`, payload);
-    const remember = mode.value === 'register' ? true : loginForm.value.remember;
-    await auth.setAuth(data.accessToken, data.refreshToken, remember);
+    await auth.setAuth(data.accessToken);
     await router.push(postAuthPath());
   } catch (reason: any) {
     error.value = errorMessage(reason);
@@ -266,10 +264,6 @@ async function submit() {
               </span>
             </label>
 
-            <label class="remember-row">
-              <input v-model="loginForm.remember" type="checkbox" />
-              <span>在此设备保持登录</span>
-            </label>
           </template>
 
           <template v-else>

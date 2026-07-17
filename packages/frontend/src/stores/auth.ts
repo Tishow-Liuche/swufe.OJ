@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import api from '../api/client';
+import api, { clearAccessToken, refreshAccessToken, setAccessToken } from '../api/client';
 
 interface AuthUser {
   id: string;
@@ -17,42 +17,28 @@ interface AuthUser {
   teacherApplicationStatus?: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-function storedValue(key: string) {
-  return localStorage.getItem(key) || sessionStorage.getItem(key) || '';
-}
-
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(storedValue('accessToken'));
+  const token = ref('');
   const user = ref<AuthUser | null>(null);
   const loading = ref(false);
   let profilePromise: Promise<void> | null = null;
+  let restorePromise: Promise<boolean> | null = null;
 
-  async function setAuth(accessToken: string, refreshToken: string, remember = true) {
-    clearStoredTokens();
-    const storage = remember ? localStorage : sessionStorage;
+  async function setAuth(accessToken: string) {
     token.value = accessToken;
-    storage.setItem('accessToken', accessToken);
-    storage.setItem('refreshToken', refreshToken);
+    setAccessToken(accessToken);
     await fetchProfile();
-  }
-
-  function clearStoredTokens() {
-    for (const storage of [localStorage, sessionStorage]) {
-      storage.removeItem('accessToken');
-      storage.removeItem('refreshToken');
-    }
   }
 
   function clearAuth() {
     token.value = '';
     user.value = null;
-    clearStoredTokens();
+    clearAccessToken();
   }
 
   async function logout() {
-    const refreshToken = storedValue('refreshToken');
     try {
-      if (refreshToken) await api.post('/api/auth/logout', { refreshToken });
+      await api.post('/api/auth/logout');
     } finally {
       clearAuth();
     }
@@ -61,28 +47,48 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchProfile() {
     if (!token.value) return;
     if (profilePromise) return profilePromise;
+
     profilePromise = (async () => {
-    try {
-      loading.value = true;
-      const { data } = await api.get('/api/user/profile');
-      user.value = data;
-    } catch {
-      clearAuth();
-    } finally {
-      loading.value = false;
-      profilePromise = null;
-    }
+      try {
+        loading.value = true;
+        const { data } = await api.get('/api/user/profile');
+        user.value = data;
+      } catch {
+        clearAuth();
+      } finally {
+        loading.value = false;
+        profilePromise = null;
+      }
     })();
     return profilePromise;
+  }
+
+  async function restoreSession(): Promise<boolean> {
+    if (isLoggedIn()) return true;
+    if (restorePromise) return restorePromise;
+
+    restorePromise = (async () => {
+      try {
+        if (!token.value) {
+          token.value = await refreshAccessToken();
+          setAccessToken(token.value);
+        }
+        await fetchProfile();
+        return isLoggedIn();
+      } catch {
+        clearAuth();
+        return false;
+      } finally {
+        restorePromise = null;
+      }
+    })();
+    return restorePromise;
   }
 
   const isLoggedIn = () => !!user.value && !!token.value;
   const isAdmin = () => user.value?.role === 'ADMIN';
   const isTeacher = () => user.value?.role === 'TEACHER' || user.value?.role === 'ADMIN';
   const isStudent = () => user.value?.role === 'STUDENT';
-
-  // 启动时如果有 token 就加载 profile
-  if (token.value) fetchProfile();
 
   return {
     token,
@@ -92,6 +98,7 @@ export const useAuthStore = defineStore('auth', () => {
     clearAuth,
     logout,
     fetchProfile,
+    restoreSession,
     isLoggedIn,
     isAdmin,
     isTeacher,
