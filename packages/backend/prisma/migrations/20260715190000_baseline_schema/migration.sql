@@ -1,0 +1,10 @@
+-- Intentionally empty compatibility checkpoint.
+--
+-- This migration used to contain a full schema baseline, but it was placed
+-- after the original incremental migrations. Replaying it after
+-- 20260713011755_init attempted to create tables such as "User" a second time,
+-- which broke `prisma migrate deploy` after branch merges.
+--
+-- The real schema changes are carried by the following incremental migrations.
+-- Keeping this migration as a no-op preserves migration ordering without
+-- destroying existing development databases.

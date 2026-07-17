@@ -12,6 +12,10 @@ import { SyncModule } from './sync/sync.module';
 import { HelperModule } from './helper/helper.module';
 import { CodeforcesModule } from './codeforces/cf.module';
 import { ContestModule } from './contest/contest.module';
+import { CommunityModule } from './community/community.module';
+import { AtCoderModule } from './atcoder/atcoder.module';
+import { LearningModule } from './learning/learning.module';
+import { QojModule } from './qoj/qoj.module';
 
 @Module({
   imports: [
@@ -19,7 +23,8 @@ import { ContestModule } from './contest/contest.module';
     FileUploadModule, PrismaModule, AuthModule, ProblemModule,
     SubmissionModule, UserModule, TeacherModule, SyncModule,
     HelperModule, CodeforcesModule, PublicModule,
-    ContestModule,
+    ContestModule, CommunityModule, AtCoderModule, LearningModule,
+    QojModule,
   ],
 })
 export class AppModule {}

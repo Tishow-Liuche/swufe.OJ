@@ -10,13 +10,18 @@ const router = createRouter({
     { path: '/problems/:id', component: () => import('../views/ProblemDetail.vue') },
     { path: '/leaderboard', component: () => import('../views/Leaderboard.vue') },
     { path: '/contests', component: () => import('../views/Contests.vue') },
+    { path: '/community', component: () => import('../views/CommunityHub.vue') },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue'), meta: { requiresAuth: true } },
+    { path: '/learning-plans/:id', component: () => import('../views/LearningPlanDetail.vue'), meta: { requiresAuth: true } },
     { path: '/profile', component: () => import('../views/Profile.vue'), meta: { requiresAuth: true } },
+    { path: '/classes', component: () => import('../views/StudentClasses.vue'), meta: { requiresAuth: true, requiresStudent: true } },
+    { path: '/change-password', component: () => import('../views/ChangePassword.vue'), meta: { requiresAuth: true } },
     { path: '/external/accounts', component: () => import('../views/external/AccountBind.vue'), meta: { requiresAuth: true } },
     // 教师
-    { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue') },
+    { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue'), meta: { requiresAuth: true, requiresTeacher: true } },
     // 管理员
     { path: '/admin/create-problem', component: () => import('../views/admin/CreateProblem.vue') },
+    { path: '/admin/import-atcoder', component: () => import('../views/admin/AtCoderImport.vue') },
     { path: '/admin/users', component: () => import('../views/admin/UserManage.vue') },
   ],
 });
@@ -26,12 +31,25 @@ router.beforeEach(async (to) => {
 
   const auth = useAuthStore();
   if (auth.token && !auth.user) await auth.fetchProfile();
-  if (auth.isLoggedIn()) return true;
+  if (auth.isLoggedIn()) {
+    if (to.meta.requiresTeacher && !auth.isTeacher()) return '/problems';
+    if (to.meta.requiresStudent && !auth.isStudent()) return '/problems';
+    return true;
+  }
 
   return {
     path: '/login',
     query: { redirect: to.fullPath },
   };
+});
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore();
+  if (auth.token && !auth.user) await auth.fetchProfile();
+  if (auth.user?.mustChangePassword && to.path !== '/change-password') {
+    return { path: '/change-password', query: { redirect: to.fullPath } };
+  }
+  return true;
 });
 
 export default router;

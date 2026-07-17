@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { TeacherService } from './teacher.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -20,8 +20,8 @@ export class TeacherController {
   }
 
   @Post('classes/:id/import')
-  importStudents(@Param('id') id: string, @Req() req: any, @Body() data: { usernames: string[] }) {
-    return this.teacherService.importStudents(id, req.user.id, data.usernames);
+  importStudents(@Param('id') id: string, @Req() req: any, @Body() data: { students: string[] | Array<{ studentId: string; name: string; phone: string; email: string }> }) {
+    return this.teacherService.importStudents(id, req.user.id, data.students);
   }
 
   @Get('classes/:id/members')
@@ -29,13 +29,48 @@ export class TeacherController {
     return this.teacherService.getClassMembers(id, req.user.id);
   }
 
+  @Put('classes/:id/join-code')
+  setJoinCode(@Param('id') id: string, @Req() req: any, @Body() data: { expiresAt: string }) {
+    return this.teacherService.setJoinCode(id, req.user.id, data.expiresAt);
+  }
+
+  @Delete('classes/:id/join-code')
+  disableJoinCode(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.disableJoinCode(id, req.user.id);
+  }
+
+  @Patch('classes/:id/members/:userId/review')
+  reviewMember(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Req() req: any,
+    @Body() data: { status: string; reviewNote?: string },
+  ) {
+    return this.teacherService.reviewMember(id, req.user.id, userId, data.status, data.reviewNote);
+  }
+
+  @Delete('classes/:id/members/:userId')
+  removeStudent(@Param('id') id: string, @Param('userId') userId: string, @Req() req: any) {
+    return this.teacherService.removeStudent(id, req.user.id, userId);
+  }
+
   // === 作业 ===
   @Get('assignments')
   getAssignments(@Req() req: any) { return this.teacherService.getAssignments(req.user.id); }
 
+  @Get('classes/:id/assignments')
+  getClassAssignments(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.getClassAssignments(req.user.id, id);
+  }
+
   @Post('assignments')
   createAssignment(@Req() req: any, @Body() data: any) {
     return this.teacherService.createAssignment(req.user.id, data);
+  }
+
+  @Get('assignments/:id/report')
+  getAssignmentReport(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.getAssignmentReport(req.user.id, id);
   }
 
   // === 比赛 ===
@@ -47,7 +82,7 @@ export class TeacherController {
     title: string; description?: string; mode?: string; startTime: string; endTime: string;
     problemIds?: string[]; visibility?: string; registerStart?: string; registerEnd?: string;
     freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
-    penaltyTime?: number; password?: string;
+    penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
   }) {
     return this.teacherService.createContest(req.user.id, data);
   }

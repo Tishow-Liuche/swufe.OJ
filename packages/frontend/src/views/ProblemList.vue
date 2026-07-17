@@ -74,6 +74,7 @@ const sourceOptions = [
   { value: 'LOCAL', label: '原创' },
   { value: 'LUOGU', label: '洛谷' },
   { value: 'CODEFORCES', label: 'Codeforces' },
+  { value: 'QOJ', label: 'QOJ' },
   { value: 'REMOTE', label: '远程' },
 ];
 

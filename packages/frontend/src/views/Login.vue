@@ -46,6 +46,8 @@ const registerForm = ref({
   email: '',
   school: '西南财经大学',
   customSchool: '',
+  college: '',
+  customCollege: '',
   requestedRole: 'STUDENT' as RequestedRole,
   password: '',
   confirmPassword: '',
@@ -62,10 +64,20 @@ const schoolOptions = [
   { value: '其他学校', label: '其他学校' },
 ];
 
+const swufeCollegeOptions = [
+  { value: '', label: '选择所在学院' },
+  ...['金融学院、中国金融研究院', '经济学院', '会计学院', '统计与数据科学学院', '工商管理学院', '财政税务学院', '国际商学院', '经济与管理研究院', '中国西部经济研究院', '管理科学与工程学院', '计算机与人工智能学院', '法学院', '外国语学院', '公共管理学院', '马克思主义学院', '数学学院', '人文与艺术学院', '体育学院', '社会发展研究院', '特拉华数据科学学院', '继续教育学院（西南财经大学培训中心）', '国际教育学院', '北京研究院', '深圳高等研究院', '西部商学院', '出国留学预备学院'].map((value) => ({ value, label: value })),
+];
+
 const resolvedSchool = computed(() => (
   registerForm.value.school === '其他学校'
     ? registerForm.value.customSchool.trim()
     : registerForm.value.school
+));
+const resolvedCollege = computed(() => (
+  registerForm.value.school === '西南财经大学'
+    ? registerForm.value.college
+    : registerForm.value.customCollege.trim()
 ));
 
 const passwordChecks = computed(() => ({
@@ -76,6 +88,14 @@ const passwordChecks = computed(() => ({
 
 const passwordScore = computed(() => Object.values(passwordChecks.value).filter(Boolean).length);
 const passwordLabel = computed(() => ['尚未输入', '较弱', '可用', '安全'][passwordScore.value]);
+const usernameHint = computed(() => {
+  const username = registerForm.value.username;
+  if (!username) return '';
+  if (username.trim() !== username) return '用户名不能包含首尾空格';
+  if (username.length < 3 || username.length > 20) return '用户名长度需为 3–20 个字符';
+  if (!/^[A-Za-z0-9_-]+$/.test(username)) return '仅支持字母、数字、下划线和连字符';
+  return '';
+});
 
 const canSubmit = computed(() => {
   if (submitting.value) return false;
@@ -86,6 +106,7 @@ const canSubmit = computed(() => {
     /^[A-Za-z0-9_-]{3,20}$/.test(registerForm.value.username.trim())
     && registerForm.value.email.trim()
     && resolvedSchool.value.length >= 2
+    && (registerForm.value.requestedRole !== 'STUDENT' || resolvedCollege.value.length >= 2)
     && passwordScore.value === 3
     && registerForm.value.password === registerForm.value.confirmPassword,
   );
@@ -99,7 +120,11 @@ function switchMode(nextMode: AuthMode) {
 function errorMessage(reason: any) {
   const message = reason.response?.data?.message;
   if (Array.isArray(message)) return message.join('；');
-  return message || (mode.value === 'register' ? '注册失败，请稍后重试' : '登录失败，请稍后重试');
+  if (message) return message;
+  if (reason.code === 'ERR_NETWORK' || !reason.response) {
+    return '无法连接后端服务，请确认 backend 已启动';
+  }
+  return mode.value === 'register' ? '注册失败，请稍后重试' : '登录失败，请稍后重试';
 }
 
 function postAuthPath() {
@@ -122,6 +147,10 @@ async function submit() {
       error.value = '请填写学校名称';
       return;
     }
+    if (registerForm.value.requestedRole === 'STUDENT' && !resolvedCollege.value) {
+      error.value = '请选择或填写所在学院';
+      return;
+    }
   }
 
   submitting.value = true;
@@ -132,6 +161,7 @@ async function submit() {
           email: registerForm.value.email.trim(),
           password: registerForm.value.password,
           school: resolvedSchool.value,
+          college: registerForm.value.requestedRole === 'STUDENT' ? resolvedCollege.value : undefined,
           requestedRole: registerForm.value.requestedRole,
         }
       : {
@@ -246,7 +276,7 @@ async function submit() {
             <div class="field-grid">
               <label class="field-group" for="register-username">
                 <span class="field-label">用户名</span>
-                <span class="input-shell">
+                <span class="input-shell" :class="{ invalid: usernameHint }">
                   <UserRound :size="18" aria-hidden="true" />
                   <input
                     id="register-username"
@@ -256,10 +286,11 @@ async function submit() {
                     minlength="3"
                     maxlength="20"
                     pattern="[A-Za-z0-9_-]+"
-                    placeholder="3-20 位字母或数字"
+                    placeholder="3-20 位字母、数字或 _ -"
                     required
                   />
                 </span>
+                <small v-if="usernameHint" class="field-error" role="status">{{ usernameHint }}</small>
               </label>
 
               <label class="field-group" for="register-email">
@@ -332,6 +363,26 @@ async function submit() {
             <div v-if="registerForm.requestedRole === 'TEACHER'" class="teacher-notice" role="status">
               <ShieldCheck :size="19" aria-hidden="true" />
               <span>注册后可正常训练；教师管理权限将在管理员审核通过后开通。</span>
+            </div>
+
+            <div v-if="registerForm.requestedRole === 'STUDENT'" class="field-group">
+              <span class="field-label">学院</span>
+              <FilterSelect
+                v-if="registerForm.school === '西南财经大学'"
+                v-model="registerForm.college"
+                class="school-select"
+                :options="swufeCollegeOptions"
+                label="选择所在学院"
+              >
+                <template #icon><GraduationCap :size="18" aria-hidden="true" /></template>
+              </FilterSelect>
+              <label v-else class="field-group nested-field" for="custom-college">
+                <span class="input-shell">
+                  <GraduationCap :size="18" aria-hidden="true" />
+                  <input id="custom-college" v-model="registerForm.customCollege" type="text" maxlength="80" placeholder="填写本人所在学院" required />
+                </span>
+              </label>
+              <small class="college-help">{{ registerForm.school === '西南财经大学' ? '请选择西南财经大学所属学院。' : '外校学生请填写本人所在学院。' }}</small>
             </div>
 
             <div class="field-grid">
@@ -590,6 +641,14 @@ async function submit() {
   background: #fffafa;
 }
 
+.field-error {
+  margin-top: -1px;
+  color: #b63730;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
 .input-shell input {
   width: 100%;
   min-width: 0;
@@ -636,6 +695,16 @@ async function submit() {
   --primary-container: #dfe7ff;
   --surface: #fff;
   --surface-low: #f3f5f8;
+}
+
+.nested-field {
+  margin: 0;
+}
+
+.college-help {
+  color: #7f8a97;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .role-fieldset {

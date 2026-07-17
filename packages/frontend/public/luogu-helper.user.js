@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Luogu Helper
 // @namespace    https://oj.example.com
-// @version      1.0
+// @version      1.3
 // @description  自动填表 + 自动提交 + 回传洛谷结果 + 自动关闭洛谷标签页
 // @author       OJ Team
 // @downloadURL  http://localhost:5173/luogu-helper.user.js
@@ -192,11 +192,97 @@ function normalizeStatus(text) {
   return '';
 }
 
+function normalizeLuoguVerdictStatus(text) {
+  text = String(text || '').replace(/\s+/g, ' ').trim();
+  var upper = text.toUpperCase();
+  if (/ACCEPTED|答案正确|通过|(?:^|[^A-Z])AC(?:[^A-Z]|$)/i.test(text)) return 'ACCEPTED';
+  if (/WRONG\s+ANSWER|答案错误|(?:^|[^A-Z])WA(?:[^A-Z]|$)/i.test(text)) return 'WRONG_ANSWER';
+  if (/TIME\s+LIMIT\s+EXCEEDED|时间超限|超时|(?:^|[^A-Z])TLE(?:[^A-Z]|$)/i.test(text)) return 'TIME_LIMIT_EXCEEDED';
+  if (/MEMORY\s+LIMIT\s+EXCEEDED|内存超限|超过内存|内存限制超出|(?:^|[^A-Z])MLE(?:[^A-Z]|$)/i.test(text)) return 'MEMORY_LIMIT_EXCEEDED';
+  if (/RUNTIME\s+ERROR|运行错误|(?:^|[^A-Z])RE(?:[^A-Z]|$)/i.test(text)) return 'RUNTIME_ERROR';
+  if (/COMPILE\s+ERROR|编译错误|(?:^|[^A-Z])CE(?:[^A-Z]|$)/i.test(text)) return 'COMPILE_ERROR';
+  if (/WAITING|JUDGING|COMPILING|RUNNING|评测|等待|编译|运行/i.test(text) || /PENDING/.test(upper)) return 'JUDGING';
+  return '';
+}
+
+function extractLuoguVerdictText() {
+  var selectors = [
+    '[class*="status"]',
+    '[class*="result"]',
+    '[class*="verdict"]',
+    '[class*="judge"]',
+    'td',
+    'span',
+    'div'
+  ];
+  var seen = [];
+  var candidates = [];
+  for (var i = 0; i < selectors.length; i++) {
+    var nodes = Array.prototype.slice.call(document.querySelectorAll(selectors[i]));
+    for (var j = 0; j < nodes.length; j++) {
+      if (seen.indexOf(nodes[j]) !== -1) continue;
+      seen.push(nodes[j]);
+      var itemText = visibleText(nodes[j]);
+      if (!itemText || itemText.length > 120) continue;
+      candidates.push(itemText);
+    }
+  }
+
+  for (var k = 0; k < candidates.length; k++) {
+    var terminal = normalizeLuoguVerdictStatus(candidates[k]);
+    if (terminal && terminal !== 'JUDGING') return candidates[k];
+  }
+  for (var m = 0; m < candidates.length; m++) {
+    if (normalizeLuoguVerdictStatus(candidates[m]) === 'JUDGING') return candidates[m];
+  }
+  return '';
+}
+
 function parseScore(text) {
   var m = String(text || '').match(/(?:得分|Score)?\s*(\d{1,3})\s*(?:分|pts|\/\s*100)?/i);
   if (!m) return undefined;
   var n = parseInt(m[1], 10);
   return n >= 0 && n <= 100 ? n : undefined;
+}
+
+function parseUsageMetrics(text) {
+  text = String(text || '').replace(/\s+/g, ' ');
+  var timeUsed;
+  var memoryUsed;
+
+  var timePatterns = [
+    /(?:time|耗时|用时|时间)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(ms|毫秒|s|sec|second|seconds|秒)\b/i,
+    /\b([0-9]+(?:\.[0-9]+)?)\s*(ms|毫秒)\b/i
+  ];
+  for (var i = 0; i < timePatterns.length; i++) {
+    var tm = text.match(timePatterns[i]);
+    if (tm) {
+      var tv = Number(tm[1]);
+      if (Number.isFinite(tv)) timeUsed = /^(s|sec|second|seconds|秒)$/i.test(tm[2]) ? Math.round(tv * 1000) : Math.round(tv);
+      break;
+    }
+  }
+
+  var memPatterns = [
+    /(?:memory|内存|空间)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(kb|kib|mb|mib|gb|gib|b)\b/i,
+    /\b([0-9]+(?:\.[0-9]+)?)\s*(kb|kib|mb|mib|gb|gib)\b/i
+  ];
+  for (var j = 0; j < memPatterns.length; j++) {
+    var mm = text.match(memPatterns[j]);
+    if (mm) {
+      var mv = Number(mm[1]);
+      var unit = String(mm[2] || '').toLowerCase();
+      if (Number.isFinite(mv)) {
+        if (unit === 'gb' || unit === 'gib') memoryUsed = Math.round(mv * 1024 * 1024);
+        else if (unit === 'mb' || unit === 'mib') memoryUsed = Math.round(mv * 1024);
+        else if (unit === 'b') memoryUsed = Math.round(mv / 1024);
+        else memoryUsed = Math.round(mv);
+      }
+      break;
+    }
+  }
+
+  return { timeUsed: timeUsed, memoryUsed: memoryUsed };
 }
 
 function parseRemoteId() {
@@ -225,14 +311,27 @@ function reportId(id) {
 function reportResult(status, rawText) {
   var st = loadState();
   if (!st.submissionId || !st.token || !st.leaseNonce) return;
+  rawText = document.body.innerText || rawText || '';
   var rid = parseRemoteId() || st.reportedId || '';
   var score = parseScore(rawText);
+  var metrics = parseUsageMetrics(rawText);
+  if ((metrics.timeUsed === undefined || metrics.memoryUsed === undefined) && status !== 'REMOTE_ERROR') {
+    st.metricWaits = (st.metricWaits || 0) + 1;
+    saveState(st);
+    if (st.metricWaits <= 8) {
+      banner('已获得洛谷结果，等待时间/内存数据渲染...', '#3498db');
+      setTimeout(function() { reportResult(status, document.body.innerText || rawText); }, 1500);
+      return;
+    }
+  }
   apiRequest('POST', '/api/luogu-submit-helper/' + st.submissionId + '/report-result', {
     token: st.token,
     leaseNonce: st.leaseNonce,
     remoteSubmissionId: rid,
     status: status,
     score: score,
+    timeUsed: metrics.timeUsed,
+    memoryUsed: metrics.memoryUsed,
     rawStatus: rawText.slice(0, 500)
   }, function(err) {
     if (err) {
@@ -257,9 +356,10 @@ function watchResult() {
     if (rid) reportId(rid);
 
     var text = document.body.innerText || '';
-    var status = normalizeStatus(text);
+    var verdictText = extractLuoguVerdictText();
+    var status = normalizeLuoguVerdictStatus(verdictText || text);
     if (status && status !== 'JUDGING') {
-      reportResult(status, text);
+      reportResult(status, verdictText ? (verdictText + '\n' + text) : text);
       return;
     }
 
@@ -297,6 +397,10 @@ function startSubmitFlow() {
     }
 
     var st = loadState();
+    if (st.submissionId !== task.submissionId || st.problemId !== pid) {
+      st = {};
+      clearState();
+    }
     saveState({
       submissionId: task.submissionId,
       problemId: pid,

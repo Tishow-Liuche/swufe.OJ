@@ -16,6 +16,9 @@ const manualProblem = ref({
   memoryLimit: 256,
   tags: '',
 });
+const qojRemoteId = ref('1');
+const qojPage = ref(1);
+const qojPageSize = ref(20);
 
 const difficulties = [
   { value: 'BEGINNER', label: '入门' },
@@ -193,6 +196,55 @@ async function importSingle() {
     importing.value = false;
   }
 }
+
+async function syncQojSingle() {
+  importing.value = true;
+  error.value = '';
+  importResult.value = null;
+
+  try {
+    const { data } = await api.post('/api/sync/problem', {
+      platform: 'QOJ',
+      remoteId: qojRemoteId.value,
+    });
+    importResult.value = {
+      imported: data.synced ? 1 : 0,
+      skipped: data.synced ? 0 : 1,
+      total: data.synced ? 1 : 0,
+      detail: data,
+    };
+  } catch (e: any) {
+    error.value = e.response?.data?.message || e.response?.data?.error || 'QOJ 同步失败';
+  } finally {
+    importing.value = false;
+  }
+}
+
+async function syncQojBatch() {
+  importing.value = true;
+  error.value = '';
+  importResult.value = null;
+
+  try {
+    const { data } = await api.post('/api/sync/batch', {
+      platform: 'QOJ',
+      page: qojPage.value,
+      pageSize: qojPageSize.value,
+    });
+    const results = data.results || [];
+    importResult.value = {
+      imported: results.filter((r: any) => r.problemId).length,
+      skipped: results.filter((r: any) => !r.problemId && r.status !== 'error').length,
+      total: results.length,
+      errors: results.filter((r: any) => r.status === 'error').length,
+      detail: data,
+    };
+  } catch (e: any) {
+    error.value = e.response?.data?.message || e.response?.data?.error || 'QOJ 批量同步失败';
+  } finally {
+    importing.value = false;
+  }
+}
 </script>
 
 <template>
@@ -215,6 +267,36 @@ async function importSingle() {
       <button class="btn-primary" @click="importLuogu" :disabled="importing">
         {{ importing ? '导入中...' : '一键导入 11 道题目' }}
       </button>
+    </div>
+
+    <div class="card">
+      <h3>QOJ 题库同步</h3>
+      <p class="card-desc">从 qoj.ac 拉取题目和题面。第一阶段支持题库展示，不启用自动提交。</p>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>QOJ 题号</label>
+          <input v-model="qojRemoteId" placeholder="例如: 1" />
+        </div>
+        <div class="form-group">
+          <label>单题同步</label>
+          <button class="btn-secondary" @click="syncQojSingle" :disabled="importing || !qojRemoteId">
+            {{ importing ? '同步中...' : '同步该 QOJ 题目' }}
+          </button>
+        </div>
+        <div class="form-group">
+          <label>列表页码</label>
+          <input v-model.number="qojPage" type="number" min="1" />
+        </div>
+        <div class="form-group">
+          <label>同步数量</label>
+          <input v-model.number="qojPageSize" type="number" min="1" max="100" />
+        </div>
+        <div class="form-group full">
+          <button class="btn-primary" @click="syncQojBatch" :disabled="importing">
+            {{ importing ? '同步中...' : '批量同步 QOJ 当前页' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 手动输入 -->

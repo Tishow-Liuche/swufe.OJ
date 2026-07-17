@@ -1,61 +1,246 @@
+import { BadRequestException } from '@nestjs/common';
+import AdmZip from 'adm-zip';
 import { ProblemService } from './problem.service';
 
-describe('ProblemService.findAll', () => {
-  const createService = () => {
-    const prisma = {
+describe('ProblemService createFull with judge data', () => {
+  let service: ProblemService;
+  let prisma: any;
+
+  beforeEach(() => {
+    prisma = {
       problem: {
-        findMany: jest.fn().mockResolvedValue([]),
-        count: jest.fn().mockResolvedValue(0),
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+        findMany: jest.fn(),
+        count: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      problemVersion: {
+        findFirst: jest.fn(),
+      },
+      problemTestCase: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+        count: jest.fn(),
+      },
+      testGroup: {
+        deleteMany: jest.fn(),
+        create: jest.fn(),
       },
     };
-    const service = new ProblemService(prisma as any, {} as any);
-    return { service, prisma };
-  };
+    service = new ProblemService(prisma, {} as any);
+  });
 
-  it('filters external problems by their real platform and returns sourceInfo', async () => {
-    const { service, prisma } = createService();
+  function zipFile(entries: Record<string, string>): Express.Multer.File {
+    const zip = new AdmZip();
+    for (const [name, content] of Object.entries(entries)) zip.addFile(name, Buffer.from(content));
+    const buffer = zip.toBuffer();
+    return {
+      originalname: 'testdata.zip',
+      mimetype: 'application/zip',
+      buffer,
+      size: buffer.length,
+    } as Express.Multer.File;
+  }
 
-    await service.findAll({ source: 'CODEFORCES', page: 2, pageSize: 50 });
+  it('allows draft problems to be created before uploading zip test data', async () => {
+    prisma.problem.create.mockResolvedValue({ id: 'p0' });
 
-    expect(prisma.problem.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          status: 'PUBLISHED',
-          sourceInfo: { platform: 'CODEFORCES' },
+    await service.createFull({
+      title: 'A+B',
+      description: 'desc',
+      judgeMode: 'STANDARD',
+      status: 'DRAFT',
+    } as any, 'teacher-1');
+
+    expect(prisma.problem.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'DRAFT',
+        versions: {
+          create: expect.not.objectContaining({ testCases: expect.anything() }),
         },
-        select: expect.objectContaining({
-          sourceInfo: {
-            select: {
-              platform: true,
-              remoteProblemId: true,
-              remoteUrl: true,
-            },
-          },
-        }),
-        skip: 50,
-        take: 50,
       }),
-    );
-    expect(prisma.problem.count).toHaveBeenCalledWith({
-      where: {
-        status: 'PUBLISHED',
-        sourceInfo: { platform: 'CODEFORCES' },
-      },
+    }));
+  });
+
+  it('searches published problems by title, internal ID, or remote problem metadata', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ keyword: 'P10001', pageSize: 12, status: 'DRAFT' });
+
+    const expectedWhere = {
+      status: 'PUBLISHED',
+      OR: [
+        { title: { contains: 'P10001', mode: 'insensitive' } },
+        { id: { contains: 'P10001', mode: 'insensitive' } },
+        { sourceInfo: { is: { remoteProblemId: { contains: 'P10001', mode: 'insensitive' } } } },
+        { sourceInfo: { is: { remoteUrl: { contains: 'P10001', mode: 'insensitive' } } } },
+      ],
+    };
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
+    expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('returns only public statement fields for published problem details', async () => {
+    prisma.problem.findFirst.mockResolvedValue({ id: 'p1', status: 'PUBLISHED', versions: [] });
+
+    await service.findOne('p1');
+
+    const query = prisma.problem.findFirst.mock.calls[0][0];
+    expect(query.where).toEqual({ id: 'p1', status: 'PUBLISHED' });
+    expect(query.select.versions.select).not.toHaveProperty('testCases');
+    expect(query.select.versions.select).not.toHaveProperty('checker');
+  });
+
+  it('creates normal problems with inline input and exact expected output', async () => {
+    prisma.problem.create.mockResolvedValue({ id: 'p1' });
+
+    await service.createFull({
+      title: 'A+B',
+      description: 'desc',
+      judgeMode: 'STANDARD',
+      testCases: [{ input: '1 2\n', expectedOutput: '3\n', score: 100 }],
+    } as any, 'teacher-1');
+
+    expect(prisma.problem.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        versions: {
+          create: expect.objectContaining({
+            testCases: {
+              create: [{
+                input: '1 2\n',
+                expectedOutput: '3\n',
+                score: 100,
+                order: 1,
+                isSample: false,
+              }],
+            },
+            checker: {
+              create: {
+                type: 'STANDARD',
+                language: null,
+                sourceCode: null,
+              },
+            },
+          }),
+        },
+      }),
+    }));
+  });
+
+  it('rejects spj problems without checker code', async () => {
+    await expect(
+      service.createFull({
+        title: 'Any order',
+        description: 'desc',
+        judgeMode: 'SPJ',
+        testCases: [{ input: '1 2\n' }],
+      } as any, 'teacher-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('creates spj problems with checker code and input-only test cases', async () => {
+    prisma.problem.create.mockResolvedValue({ id: 'p2' });
+
+    await service.createFull({
+      title: 'Any order',
+      description: 'desc',
+      judgeMode: 'SPJ',
+      spjLanguage: 'python',
+      spjSourceCode: 'print(input().strip() == "3")',
+      testCases: [{ input: '1 2\n', score: 100 }],
+    } as any, 'teacher-1');
+
+    expect(prisma.problem.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        versions: {
+          create: expect.objectContaining({
+            testCases: {
+              create: [{
+                input: '1 2\n',
+                expectedOutput: '',
+                score: 100,
+                order: 1,
+                isSample: false,
+              }],
+            },
+            checker: {
+              create: {
+                type: 'SPJ',
+                language: 'python',
+                sourceCode: 'print(input().strip() == "3")',
+              },
+            },
+          }),
+        },
+      }),
+    }));
+  });
+
+  it('imports standard zip files by pairing numbered .in and .out files', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p1' });
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      checker: { type: 'STANDARD' },
+    });
+    prisma.problemTestCase.createMany.mockResolvedValue({ count: 2 });
+
+    const result: any = await service.uploadTestData('p1', zipFile({
+      '1.in': '1 2\n',
+      '1.out': '3\n',
+      '2.in': '2 5\n',
+      '2.ans': '7\n',
+    }));
+
+    expect(prisma.problemTestCase.deleteMany).toHaveBeenCalledWith({ where: { problemVersionId: 'v1' } });
+    expect(prisma.problemTestCase.createMany).toHaveBeenCalledWith({
+      data: [
+        { problemVersionId: 'v1', input: '1 2\n', expectedOutput: '3\n', score: 50, order: 1, isSample: false },
+        { problemVersionId: 'v1', input: '2 5\n', expectedOutput: '7\n', score: 50, order: 2, isSample: false },
+      ],
+    });
+    expect(result.testCount).toBe(2);
+  });
+
+  it('imports SPJ zip files from numbered .in files without output files', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p2' });
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      id: 'v2',
+      checker: { type: 'SPJ' },
+    });
+    prisma.problemTestCase.createMany.mockResolvedValue({ count: 2 });
+
+    await service.uploadTestData('p2', zipFile({
+      '1.in': 'hello\n',
+      '2.in': 'world\n',
+    }));
+
+    expect(prisma.problemTestCase.createMany).toHaveBeenCalledWith({
+      data: [
+        { problemVersionId: 'v2', input: 'hello\n', expectedOutput: '', score: 50, order: 1, isSample: false },
+        { problemVersionId: 'v2', input: 'world\n', expectedOutput: '', score: 50, order: 2, isSample: false },
+      ],
     });
   });
 
-  it('keeps LOCAL filtering on the Problem.source field', async () => {
-    const { service, prisma } = createService();
+  it('rejects standard zip files when an input file has no matching output file', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p3' });
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      id: 'v3',
+      checker: { type: 'STANDARD' },
+    });
 
-    await service.findAll({ source: 'LOCAL' });
+    await expect(service.uploadTestData('p3', zipFile({ '1.in': '1 2\n' })))
+      .rejects.toBeInstanceOf(BadRequestException);
+  });
 
-    expect(prisma.problem.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          status: 'PUBLISHED',
-          source: 'LOCAL',
-        },
-      }),
-    );
+  it('prevents publishing local problems before test data is imported', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p4', source: 'LOCAL' });
+    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v4' });
+    prisma.problemTestCase.count.mockResolvedValue(0);
+
+    await expect(service.updateStatus('p4', 'PUBLISHED')).rejects.toBeInstanceOf(BadRequestException);
   });
 });

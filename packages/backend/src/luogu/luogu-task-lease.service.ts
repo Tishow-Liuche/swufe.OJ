@@ -76,7 +76,12 @@ export class LuoguTaskLeaseService {
           leaseExpiresAt: task.leaseExpiresAt,
         };
       }
-      throw new ConflictException('Task already has an active lease');
+      return {
+        submissionId,
+        leaseNonce: task.leaseNonce,
+        leaseExpiresAt: task.leaseExpiresAt,
+        alreadyLeased: true,
+      };
     }
 
     const leaseNonce = randomBytes(16).toString('hex');
@@ -150,9 +155,11 @@ export class LuoguTaskLeaseService {
       throw new ConflictException('Lease nonce mismatch');
     }
 
-    const status = normalizeLuoguStatus(data.status);
+    const status = normalizeLuoguReportedStatus(data.status, data.rawStatus);
     const terminal = TERMINAL_STATUSES.has(status);
-    const score = Number.isFinite(data.score) ? Number(data.score) : status === 'ACCEPTED' ? 100 : 0;
+    const score = normalizeOptionalMetric(data.score) ?? (status === 'ACCEPTED' ? 100 : 0);
+    const timeUsed = normalizeOptionalMetric(data.timeUsed);
+    const memoryUsed = normalizeOptionalMetric(data.memoryUsed);
     const remoteSubmissionId =
       String(data.remoteSubmissionId || task.remoteSubmissionId || '').trim() || null;
 
@@ -162,8 +169,8 @@ export class LuoguTaskLeaseService {
         data: {
           status,
           score,
-          timeUsed: Number.isFinite(data.timeUsed) ? Number(data.timeUsed) : undefined,
-          memoryUsed: Number.isFinite(data.memoryUsed) ? Number(data.memoryUsed) : undefined,
+          timeUsed,
+          memoryUsed,
           compileMessage: data.compileMessage || undefined,
           judgedAt: terminal ? new Date() : undefined,
         },
@@ -176,8 +183,8 @@ export class LuoguTaskLeaseService {
           submissionId,
           caseIndex: 1,
           status,
-          timeUsed: Number.isFinite(data.timeUsed) ? Number(data.timeUsed) : undefined,
-          memoryUsed: Number.isFinite(data.memoryUsed) ? Number(data.memoryUsed) : undefined,
+          timeUsed,
+          memoryUsed,
         },
       });
       await tx.remoteJudgeJob.update({
@@ -250,4 +257,29 @@ export function normalizeLuoguStatus(raw: string): string {
     RUNNING: 'JUDGING',
   };
   return map[text] || 'SYSTEM_ERROR';
+}
+
+export function normalizeLuoguReportedStatus(raw: string, rawStatus?: string): string {
+  const reported = normalizeLuoguStatus(raw);
+  const text = String(rawStatus || '').replace(/\s+/g, ' ').trim();
+  if (!text) return reported;
+
+  const hasAcceptedVerdict = /ACCEPTED|答案正确|通过|(?:^|[^A-Z])AC(?:[^A-Z]|$)/i.test(text);
+  const hasMemoryExceededVerdict =
+    /MEMORY\s+LIMIT\s+EXCEEDED|内存超限|超过内存|内存限制超出|(?:^|[^A-Z])MLE(?:[^A-Z]|$)/i.test(text);
+
+  if (reported === 'MEMORY_LIMIT_EXCEEDED' && hasAcceptedVerdict && !hasMemoryExceededVerdict) {
+    return 'ACCEPTED';
+  }
+
+  return reported;
+}
+
+export function normalizeOptionalMetric(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : undefined;
+  const match = String(raw).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+  if (!match) return undefined;
+  const value = Number(match[0]);
+  return Number.isFinite(value) ? value : undefined;
 }

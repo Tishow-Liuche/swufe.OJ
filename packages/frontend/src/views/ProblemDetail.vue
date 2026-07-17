@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../api/client';
@@ -11,6 +11,8 @@ import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { marked } from 'marked';
 import katex from 'katex';
+import { BookOpen, MessageCircle } from '@lucide/vue';
+import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
 import 'katex/dist/katex.min.css';
 
 const route = useRoute();
@@ -57,6 +59,15 @@ const statusColors: Record<string, string> = {
   SUBMITTING: '#3498db', COMPILING: '#3498db', RUNNING: '#3498db',
   SYSTEM_ERROR: '#e74c3c', REMOTE_ERROR: '#e74c3c',
 };
+
+function hasMetric(value: unknown) {
+  return value !== null && value !== undefined;
+}
+
+function formatMemoryKb(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) ? (n / 1024).toFixed(1) + 'MB' : '-';
+}
 
 onMounted(async () => {
   try {
@@ -165,21 +176,29 @@ async function submitCode() {
     });
     result.value = { id: data.submissionId || data.id, status: 'QUEUING', mode: data.mode || 'LOCAL' };
 
-    // CF 远程提交: 自动复制代码 + 打开 CF 页面
-    if ((data.mode === 'CODEFORCES' && data.cfSubmitUrl) || (data.mode === 'LUOGU' && data.luoguSubmitUrl)) {
+    // 远程提交：自动复制代码 + 打开第三方 OJ 页面
+    if (
+      (data.mode === 'CODEFORCES' && data.cfSubmitUrl) ||
+      (data.mode === 'LUOGU' && data.luoguSubmitUrl) ||
+      (data.mode === 'QOJ' && data.qojSubmitUrl)
+    ) {
       isExternal.value = true;
       const langNames: Record<string, string> = { cpp:'GNU G++17', c:'GNU GCC C11', python:'Python 3', java:'Java 11' };
       const luoguLangNames: Record<string, string> = { cpp:'C++', c:'C', python:'Python 3', java:'Java' };
+      const qojLangNames: Record<string, string> = { cpp:'C++', c:'C', python:'Python', java:'Java' };
       const isLuogu = data.mode === 'LUOGU';
+      const isQoj = data.mode === 'QOJ';
       cfData.value = {
-        url: isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl,
-        platform: isLuogu ? '洛谷' : 'Codeforces',
-        language: isLuogu ? (luoguLangNames[language.value] || language.value) : (langNames[language.value] || language.value),
+        url: isQoj ? data.qojSubmitUrl : (isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl),
+        platform: isQoj ? 'QOJ' : (isLuogu ? '洛谷' : 'Codeforces'),
+        language: isQoj
+          ? (qojLangNames[language.value] || language.value)
+          : (isLuogu ? (luoguLangNames[language.value] || language.value) : (langNames[language.value] || language.value)),
         code: code.value,
         submissionId: data.submissionId,
       };
       cfDialog.value = true;
-      cfAutoMessage.value = '正在打开 Codeforces 并自动提交。完成后标签页会自动关闭，结果会回到这里。';
+      cfAutoMessage.value = '正在打开 ' + cfData.value.platform + ' 并自动提交。完成后标签页会自动关闭，结果会回到这里。';
       copyCfCode();
       cfOpenBlocked.value = !openExternalUrl(cfData.value.url);
       startPolling(data.submissionId);
@@ -322,6 +341,14 @@ function renderMd(text: string): string {
           <span class="meta-item">🎯 {{ problem.difficulty || '-' }}</span>
           <span class="meta-item">📝 {{ (problem.tags || []).map((t: any) => t.name).join(', ') || '-' }}</span>
         </div>
+        <div class="problem-community-links">
+          <RouterLink :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }">
+            <MessageCircle :size="16" />题目讨论
+          </RouterLink>
+          <RouterLink :to="{ path: '/community', query: { panel: 'solutions', problemId: problem.id, problemTitle: problem.title } }">
+            <BookOpen :size="16" />查看题解
+          </RouterLink>
+        </div>
       </div>
 
       <div class="content-split">
@@ -353,7 +380,11 @@ function renderMd(text: string): string {
                 {{ statusLabels[result.status] || result.status }}
               </span>
               <span v-if="result.score !== undefined" class="result-score">得分: {{ result.score }}</span>
-              <span v-if="result.timeUsed" class="result-info">{{ result.timeUsed }}ms · {{ (result.memoryUsed / 1024).toFixed(1) }}MB</span>
+              <span v-if="hasMetric(result.timeUsed) || hasMetric(result.memoryUsed)" class="result-info">
+                <template v-if="hasMetric(result.timeUsed)">{{ result.timeUsed }}ms</template>
+                <template v-if="hasMetric(result.timeUsed) && hasMetric(result.memoryUsed)"> · </template>
+                <template v-if="hasMetric(result.memoryUsed)">{{ formatMemoryKb(result.memoryUsed) }}</template>
+              </span>
             </div>
             <div v-if="result.compileMessage" class="compile-box"><pre>{{ result.compileMessage }}</pre></div>
             <div v-if="result.cases?.length" class="cases">
@@ -381,14 +412,16 @@ function renderMd(text: string): string {
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
         </div>
       </div>
+
+      <ProblemDiscussionPanel :problem-id="problem.id" :problem-title="problem.title" />
     </template>
 
-    <!-- CF 远程提交引导弹窗 -->
+    <!-- 第三方 OJ 远程提交引导弹窗 -->
     <div v-if="cfDialog" class="cf-overlay" @click.self="cfDialog = false">
       <div class="cf-dialog">
         <div class="cf-dialog-header">
-          <span>🔗 Codeforces 远程提交</span>
-          <button class="cf-close" @click="cfDialog = false">✕</button>
+          <span>🔗 {{ cfData?.platform || '第三方 OJ' }} 远程提交</span>
+          <button class="cf-close" @click="cfDialog = false">×</button>
         </div>
         <div class="cf-dialog-body">
           <p style="margin-bottom:12px">{{ cfAutoMessage }}</p>
@@ -398,7 +431,7 @@ function renderMd(text: string): string {
 
           <div class="cf-step">
             <span class="cf-step-num">1</span>
-            <span class="cf-step-text">Codeforces 页面会自动选择语言: <b>{{ cfData?.language }}</b></span>
+            <span class="cf-step-text">{{ cfData?.platform || '第三方 OJ' }} 页面会自动选择语言: <b>{{ cfData?.language }}</b></span>
           </div>
           <div class="cf-step">
             <span class="cf-step-num">2</span>
@@ -406,11 +439,11 @@ function renderMd(text: string): string {
           </div>
           <div class="cf-step">
             <span class="cf-step-num">3</span>
-            <span class="cf-step-text">识别 SID 并回传成功后，Codeforces 标签页会自动关闭</span>
+            <span class="cf-step-text">识别提交编号并回传成功后，第三方 OJ 标签页会自动关闭</span>
           </div>
           <div class="cf-step">
             <span class="cf-step-num">4</span>
-            <span class="cf-step-text">此页面持续轮询并展示最终评测结果</span>
+            <span class="cf-step-text">此页面会持续轮询并展示最终评测结果</span>
           </div>
           <div class="cf-code-preview">
             <pre>{{ cfData?.code }}</pre>
@@ -420,7 +453,7 @@ function renderMd(text: string): string {
               📋 再次复制代码
             </button>
             <button class="cf-btn cf-btn-secondary" @click="retryOpenCf">
-              🔗 重新打开 CF 页面
+              🔗 重新打开提交页面
             </button>
           </div>
         </div>
@@ -433,6 +466,9 @@ function renderMd(text: string): string {
 .problem-page { max-width: 100%; margin: 0; padding: 20px 24px; }
 .problem-header { margin-bottom: 20px; }
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
+.problem-community-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.problem-community-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid #cbdde0; border-radius: 4px; background: #f7fbfa; color: #087a70; font-size: 13px; font-weight: 700; text-decoration: none; }
+.problem-community-links a:hover { border-color: #87bdb7; background: #eaf6f3; }
 .problem-meta { display: flex; gap: 16px; flex-wrap: wrap; }
 .meta-item { font-size: 13px; color: #666; background: #f0f0f0; padding: 3px 10px; border-radius: 4px; }
 .content-split { display: grid; grid-template-columns: 1fr 480px; gap: 20px; align-items: start; }
@@ -499,7 +535,7 @@ function renderMd(text: string): string {
 .btn-fill { padding: 6px 16px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .btn-fill:hover { background: #219a52; }
 
-/* CF 远程提交弹窗 */
+/* 第三方 OJ 远程提交弹窗 */
 .cf-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; }
 .cf-dialog { background: #fff; border-radius: 12px; width: 560px; max-width: 90vw; max-height: 85vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
 .cf-dialog-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #eee; font-size: 16px; font-weight: 600; }

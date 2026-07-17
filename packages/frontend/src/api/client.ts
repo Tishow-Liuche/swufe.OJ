@@ -21,6 +21,25 @@ function clearStoredTokens() {
   }
 }
 
+let refreshPromise: Promise<string> | null = null;
+
+async function refreshAccessToken(refreshToken: string) {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post('/api/auth/refresh', { refreshToken })
+      .then(({ data }) => {
+        const storage = activeStorage();
+        storage.setItem('accessToken', data.accessToken);
+        storage.setItem('refreshToken', data.refreshToken);
+        return data.accessToken as string;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
 // Request interceptor — attach access token
 api.interceptors.request.use((config) => {
   const token = storedValue('accessToken');
@@ -40,16 +59,17 @@ api.interceptors.response.use(
       const refreshToken = storedValue('refreshToken');
       if (refreshToken) {
         try {
-          const { data } = await axios.post('/api/auth/refresh', { refreshToken });
-          const storage = activeStorage();
-          storage.setItem('accessToken', data.accessToken);
-          storage.setItem('refreshToken', data.refreshToken);
-          original.headers.Authorization = `Bearer ${data.accessToken}`;
+          const accessToken = await refreshAccessToken(refreshToken);
+          original.headers = original.headers || {};
+          original.headers.Authorization = `Bearer ${accessToken}`;
           return api(original);
         } catch {
           clearStoredTokens();
           window.location.href = '/login';
         }
+      } else {
+        clearStoredTokens();
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);

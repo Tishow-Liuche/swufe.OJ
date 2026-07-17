@@ -3,10 +3,28 @@ import {
   IsOptional,
   IsInt,
   IsArray,
+  ValidateNested,
   Min,
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class ProblemTestCaseDto {
+  @IsString()
+  input: string;
+
+  @IsOptional()
+  @IsString()
+  expectedOutput?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  score?: number;
+
+  @IsOptional()
+  isSample?: boolean;
+}
 
 export class CreateProblemDto {
   @IsString()
@@ -72,6 +90,24 @@ export class CreateProblemDto {
   @IsOptional()
   @IsArray()
   tags?: string[];
+
+  @IsOptional()
+  @IsString()
+  judgeMode?: string;
+
+  @IsOptional()
+  @IsString()
+  spjLanguage?: string;
+
+  @IsOptional()
+  @IsString()
+  spjSourceCode?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProblemTestCaseDto)
+  testCases?: ProblemTestCaseDto[];
 }
 
 export class UpdateProblemDto {

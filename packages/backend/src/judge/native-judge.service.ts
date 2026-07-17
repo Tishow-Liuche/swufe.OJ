@@ -34,7 +34,7 @@ const LANGUAGE_CONFIG: Record<string, { extension: string; compileCmd: string; r
   python: {
     extension: 'py',
     compileCmd: '',
-    runCmd: 'python3 {source}',
+    runCmd: process.platform === 'win32' ? 'python {source}' : 'python3 {source}',
     compileTimeout: 0,
   },
   java: {

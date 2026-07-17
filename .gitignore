@@ -9,6 +9,7 @@ build/
 
 # Environment variables
 .env
+.env.backup
 .env.local
 .env.*.local
 *.env
@@ -35,9 +36,6 @@ logs/
 testdata/packages/
 *.zip
 *.tar.gz
-
-# Prisma
-packages/backend/prisma/migrations/
 
 # Coverage
 coverage/

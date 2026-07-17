@@ -39,16 +39,41 @@ export class ContestService {
     return 'RUNNING';
   }
 
+  private async withOrganizers(contests: any[]) {
+    const organizerIds = [...new Set(contests.map((contest) => contest.createdBy))];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: organizerIds } },
+      select: { id: true, username: true, nickname: true },
+    });
+    const byId = new Map(users.map((user) => [user.id, user]));
+    return contests.map((contest) => {
+      const { password: _password, ...safeContest } = contest;
+      return {
+      ...safeContest,
+      organizer: byId.get(contest.createdBy)
+        ? { id: contest.createdBy, name: byId.get(contest.createdBy)!.nickname || byId.get(contest.createdBy)!.username }
+        : { id: contest.createdBy, name: '平台赛事组' },
+      };
+    });
+  }
+
+  private assertCanViewStandings(contest: any, viewer: Viewer) {
+    if (contest.visibility === 'PUBLIC') return;
+    const isParticipant = contest.participants.some((participant: any) => participant.userId === viewer.id);
+    const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
+    if (!isParticipant && !canManage) throw new ForbiddenException('无权查看该私有比赛的排名');
+  }
+
   async listPublic() {
     const contests = await this.prisma.contest.findMany({
       where: { visibility: 'PUBLIC' },
       include: this.contestInclude,
       orderBy: { startTime: 'desc' },
     });
-    return contests.map((contest) => ({
+    return this.withOrganizers(contests.map((contest) => ({
       ...contest,
       state: this.stateOf(contest),
-    }));
+    })));
   }
 
   async listMine(viewer: Viewer) {
@@ -66,14 +91,14 @@ export class ContestService {
       },
       orderBy: { startTime: 'desc' },
     });
-    return contests.map((contest: any) => {
+    return this.withOrganizers(contests.map((contest: any) => {
       const participant = contest.participants[0];
       return {
         ...contest,
         participant: participant || null,
         state: this.stateOf(contest, participant),
       };
-    });
+    }));
   }
 
   async getContest(id: string, viewer?: Viewer) {
@@ -92,16 +117,23 @@ export class ContestService {
       throw new ForbiddenException('无权查看该比赛');
     }
 
-    return {
+    return (await this.withOrganizers([{
       ...contest,
       participant: participant || null,
       state: this.stateOf(contest, participant),
-    };
+    }]))[0];
   }
 
   async register(id: string, viewer: Viewer, password?: string) {
     const contest = await this.prisma.contest.findUnique({ where: { id } });
     if (!contest) throw new NotFoundException('比赛不存在');
+    const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
+    if (contest.visibility === 'PRIVATE' && !canManage) {
+      throw new ForbiddenException('该比赛为私有比赛，只有举办者或管理员可以报名');
+    }
+    if (contest.visibility !== 'PUBLIC' && contest.visibility !== 'PRIVATE' && !canManage && !contest.password) {
+      throw new ForbiddenException('无权报名该比赛');
+    }
     const now = new Date();
     if (contest.registerStart && now < contest.registerStart) {
       throw new BadRequestException('报名尚未开始');
@@ -110,7 +142,7 @@ export class ContestService {
       throw new BadRequestException('报名已结束');
     }
     if (contest.endTime < now) throw new BadRequestException('比赛已结束，不能报名');
-    if (contest.password && contest.password !== password) {
+    if (contest.password && !canManage && contest.password !== password) {
       throw new ForbiddenException('比赛密码不正确');
     }
 
@@ -125,6 +157,9 @@ export class ContestService {
   async startVirtual(id: string, viewer: Viewer) {
     const contest = await this.prisma.contest.findUnique({ where: { id } });
     if (!contest) throw new NotFoundException('比赛不存在');
+    if (contest.visibility !== 'PUBLIC' && viewer.role !== 'ADMIN' && contest.createdBy !== viewer.id) {
+      throw new ForbiddenException('无权发起该私有比赛的虚拟参赛');
+    }
     if (new Date() < contest.endTime) {
       throw new BadRequestException('正式比赛尚未结束，暂不能发起虚拟比赛');
     }
@@ -132,18 +167,18 @@ export class ContestService {
       throw new ForbiddenException('该比赛不允许虚拟参赛');
     }
 
+    const existing = await this.prisma.contestParticipant.findUnique({
+      where: { contestId_userId: { contestId: id, userId: viewer.id } },
+    });
+    if (existing?.isVirtual) throw new BadRequestException('虚拟比赛已经开始，参赛时间不可重复开启或续时');
+    if (existing) throw new BadRequestException('你已参加过正式比赛，不能再发起同一场虚拟比赛');
+
     const duration = contest.endTime.getTime() - contest.startTime.getTime();
     const start = new Date();
-    const participant = await this.prisma.contestParticipant.upsert({
-      where: { contestId_userId: { contestId: id, userId: viewer.id } },
-      create: {
+    const participant = await this.prisma.contestParticipant.create({
+      data: {
         contestId: id,
         userId: viewer.id,
-        isVirtual: true,
-        virtualStart: start,
-        virtualEnd: new Date(start.getTime() + duration),
-      },
-      update: {
         isVirtual: true,
         virtualStart: start,
         virtualEnd: new Date(start.getTime() + duration),
@@ -177,7 +212,7 @@ export class ContestService {
     return { ...submitted, contestId: id };
   }
 
-  async standings(id: string, viewer?: Viewer) {
+  async standings(id: string, viewer: Viewer) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -195,6 +230,7 @@ export class ContestService {
       },
     });
     if (!contest) throw new NotFoundException('比赛不存在');
+    this.assertCanViewStandings(contest, viewer);
     const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
     const now = new Date();
     const frozen = !!contest.freezeTime
@@ -294,7 +330,7 @@ export class ContestService {
 
   async leaderboardOptions(viewer: Viewer) {
     const [memberClasses, taughtClasses, lists] = await Promise.all([
-      this.prisma.classMember.findMany({ where: { userId: viewer.id }, include: { class: true } }),
+      this.prisma.classMember.findMany({ where: { userId: viewer.id, status: 'APPROVED' }, include: { class: true } }),
       this.prisma.class.findMany({ where: { teacherId: viewer.id } }),
       this.prisma.problemList.findMany({
         where: { OR: [{ isPublic: true }, { createdBy: viewer.id }] },
@@ -360,7 +396,7 @@ export class ContestService {
   async classLeaderboard(classId: string, viewer: Viewer) {
     const classroom = await this.prisma.class.findUnique({
       where: { id: classId },
-      include: { members: { select: { userId: true } } },
+      include: { members: { where: { status: 'APPROVED' }, select: { userId: true } } },
     });
     if (!classroom) throw new NotFoundException('班级不存在');
     const isMember = classroom.members.some((member) => member.userId === viewer.id);

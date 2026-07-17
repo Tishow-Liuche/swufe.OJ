@@ -1,5 +1,29 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcryptjs';
+
+type ProfileUpdateInput = {
+  nickname?: string | null;
+  avatar?: string | null;
+  email?: string;
+  phone?: string | null;
+};
+
+type ExternalAccountUpdateInput = {
+  codeforcesHandle?: string | null;
+  luoguHandle?: string | null;
+};
+
+type AwardInput = {
+  competition?: string;
+  year?: number | null;
+  season?: string | null;
+  region?: string | null;
+  awardLevel?: string;
+  teamName?: string | null;
+  rank?: number | null;
+  certificateUrl?: string | null;
+};
 
 @Injectable()
 export class UserService {
@@ -10,17 +34,212 @@ export class UserService {
       where: { id: userId },
       select: {
         id: true, username: true, email: true, nickname: true,
-        avatar: true, role: true, school: true, requestedRole: true,
+        avatar: true, phone: true, role: true, school: true, requestedRole: true,
         teacherApplicationStatus: true, createdAt: true,
       },
     });
   }
 
-  async updateProfile(userId: string, data: { nickname?: string; avatar?: string }) {
+  async getSettings(userId: string) {
+    const [profile, externalAccounts, awards] = await Promise.all([
+      this.getProfile(userId),
+      this.prisma.externalAccount.findMany({
+        where: { userId, platform: { in: ['CODEFORCES', 'LUOGU'] } },
+        select: {
+          platform: true,
+          remoteUserId: true,
+          remoteUsername: true,
+          ownershipVerified: true,
+          helperConnected: true,
+          updatedAt: true,
+        },
+      }),
+      this.listAwards(userId),
+    ]);
+
+    return {
+      profile,
+      externalAccounts: this.formatExternalAccounts(externalAccounts),
+      awards,
+    };
+  }
+
+  async updateProfile(userId: string, data: ProfileUpdateInput) {
+    const updateData: ProfileUpdateInput = {};
+    if (data.nickname !== undefined) updateData.nickname = this.cleanOptional(data.nickname);
+    if (data.avatar !== undefined) updateData.avatar = this.cleanOptional(data.avatar);
+    if (data.phone !== undefined) updateData.phone = this.cleanOptional(data.phone);
+    if (data.email !== undefined) {
+      const email = data.email.trim().toLowerCase();
+      if (!email) throw new BadRequestException('邮箱不能为空');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new BadRequestException('邮箱格式不正确');
+      }
+      const existing = await this.prisma.user.findFirst({
+        where: { email, id: { not: userId } },
+        select: { id: true },
+      });
+      if (existing) throw new BadRequestException('该邮箱已被其他账号绑定');
+      updateData.email = email;
+    }
+
     return this.prisma.user.update({
-      where: { id: userId }, data,
-      select: { id: true, username: true, nickname: true, avatar: true, role: true },
+      where: { id: userId }, data: updateData,
+      select: {
+        id: true, username: true, email: true, phone: true,
+        nickname: true, avatar: true, role: true, school: true,
+      },
     });
+  }
+
+  async updateExternalAccounts(userId: string, data: ExternalAccountUpdateInput) {
+    const operations: any[] = [];
+    this.queueExternalAccountUpdate(operations, userId, 'CODEFORCES', data.codeforcesHandle);
+    this.queueExternalAccountUpdate(operations, userId, 'LUOGU', data.luoguHandle);
+    await this.prisma.$transaction(operations);
+
+    const accounts = await this.prisma.externalAccount.findMany({
+      where: { userId, platform: { in: ['CODEFORCES', 'LUOGU'] } },
+      select: {
+        platform: true,
+        remoteUserId: true,
+        remoteUsername: true,
+        ownershipVerified: true,
+        helperConnected: true,
+        updatedAt: true,
+      },
+    });
+    return this.formatExternalAccounts(accounts);
+  }
+
+  async listAwards(userId: string) {
+    return this.prisma.competitionAward.findMany({
+      where: { userId },
+      orderBy: [{ year: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  async createAward(userId: string, data: AwardInput) {
+    const award: any = this.normalizeAwardInput(data, true);
+    return this.prisma.competitionAward.create({
+      data: { userId, ...award, status: 'PENDING' },
+    });
+  }
+
+  async updateAward(userId: string, awardId: string, data: AwardInput) {
+    const existing = await this.prisma.competitionAward.findFirst({
+      where: { id: awardId, userId },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('奖项认定记录不存在');
+
+    return this.prisma.competitionAward.update({
+      where: { id: awardId },
+      data: { ...this.normalizeAwardInput(data, false), status: 'PENDING' },
+    });
+  }
+
+  async deleteAward(userId: string, awardId: string) {
+    const existing = await this.prisma.competitionAward.findFirst({
+      where: { id: awardId, userId },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('奖项认定记录不存在');
+    await this.prisma.competitionAward.delete({ where: { id: awardId } });
+    return { success: true };
+  }
+
+  private queueExternalAccountUpdate(
+    operations: any[],
+    userId: string,
+    platform: 'CODEFORCES' | 'LUOGU',
+    rawHandle?: string | null,
+  ) {
+    if (rawHandle === undefined) return;
+    const handle = this.cleanOptional(rawHandle);
+    if (!handle) {
+      operations.push(this.prisma.externalAccount.deleteMany({ where: { userId, platform } }));
+      return;
+    }
+
+    operations.push(
+      this.prisma.externalAccount.deleteMany({
+        where: { userId, platform, remoteUserId: { not: handle } },
+      }),
+    );
+    operations.push(
+      this.prisma.externalAccount.upsert({
+        where: { platform_remoteUserId: { platform, remoteUserId: handle } },
+        create: {
+          userId,
+          platform,
+          remoteUserId: handle,
+          remoteUsername: handle,
+          status: 'IDENTITY_ONLY',
+        },
+        update: {
+          userId,
+          remoteUsername: handle,
+          status: 'IDENTITY_ONLY',
+        },
+      }),
+    );
+  }
+
+  private formatExternalAccounts(accounts: Array<{
+    platform: string;
+    remoteUserId: string;
+    remoteUsername: string | null;
+    ownershipVerified: boolean;
+    helperConnected: boolean;
+    updatedAt: Date;
+  }>) {
+    const find = (platform: string) => accounts.find((a) => a.platform === platform);
+    const cf = find('CODEFORCES');
+    const luogu = find('LUOGU');
+    return {
+      codeforcesHandle: cf?.remoteUsername || cf?.remoteUserId || '',
+      luoguHandle: luogu?.remoteUsername || luogu?.remoteUserId || '',
+      details: accounts,
+    };
+  }
+
+  private normalizeAwardInput(data: AwardInput, requireAll: boolean) {
+    const result: Record<string, string | number | null> = {};
+    if (data.competition !== undefined || requireAll) {
+      const competition = String(data.competition || '').trim().toUpperCase();
+      if (!['ICPC', 'CCPC'].includes(competition)) {
+        throw new BadRequestException('比赛类型只能是 ICPC 或 CCPC');
+      }
+      result.competition = competition;
+    }
+    if (data.awardLevel !== undefined || requireAll) {
+      const awardLevel = String(data.awardLevel || '').trim();
+      if (!awardLevel) throw new BadRequestException('奖项不能为空');
+      result.awardLevel = awardLevel;
+    }
+    if (data.year !== undefined) {
+      result.year = data.year === null ? null : Number(data.year);
+      if (result.year !== null && (!Number.isInteger(result.year) || result.year < 1970 || result.year > 2100)) {
+        throw new BadRequestException('年份不正确');
+      }
+    }
+    if (data.rank !== undefined) {
+      result.rank = data.rank === null ? null : Number(data.rank);
+      if (result.rank !== null && (!Number.isInteger(result.rank) || result.rank <= 0)) {
+        throw new BadRequestException('排名必须是正整数');
+      }
+    }
+    for (const key of ['season', 'region', 'teamName', 'certificateUrl'] as const) {
+      if (data[key] !== undefined) result[key] = this.cleanOptional(data[key] || '');
+    }
+    return result;
+  }
+
+  private cleanOptional(value: string | null) {
+    if (value === null) return null;
+    const cleaned = value.trim();
+    return cleaned ? cleaned : null;
   }
 
   async getStats(userId: string) {
@@ -81,6 +300,77 @@ export class UserService {
       difficultyDist: Object.entries(diffCount).map(([d, c]) => ({ difficulty: d, count: c })),
       recentSubmissions: recent,
     };
+  }
+
+  async listMyClasses(userId: string) {
+    const memberships = await this.prisma.classMember.findMany({
+      where: { userId },
+      include: {
+        class: {
+          select: {
+            id: true,
+            name: true,
+            teacherId: true,
+            status: true,
+            course: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { joinedAt: 'desc' },
+    });
+    const teacherIds = [...new Set(memberships.map((membership) => membership.class.teacherId))];
+    const teachers = teacherIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: teacherIds } },
+          select: { id: true, username: true, nickname: true },
+        })
+      : [];
+    const teacherById = new Map(teachers.map((teacher) => [teacher.id, teacher]));
+    return memberships.map((membership) => ({
+      id: membership.id,
+      status: membership.status,
+      reviewNote: membership.reviewNote,
+      appliedAt: membership.joinedAt,
+      reviewedAt: membership.reviewedAt,
+      class: membership.class,
+      teacher: teacherById.get(membership.class.teacherId) || null,
+    }));
+  }
+
+  async applyToClass(userId: string, joinCodeInput: string) {
+    const joinCode = String(joinCodeInput || '').trim().toUpperCase();
+    if (!/^[A-Z2-9]{8}$/.test(joinCode)) {
+      throw new BadRequestException('请输入有效的 8 位班级码');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (!user) throw new NotFoundException('用户不存在');
+    if (user.role !== 'STUDENT') throw new ForbiddenException('仅学生账号可以申请加入班级');
+
+    const cls = await this.prisma.class.findUnique({
+      where: { joinCode },
+      select: { id: true, name: true, status: true, joinCodeExpiresAt: true },
+    });
+    if (!cls || cls.status !== 'APPROVED') throw new NotFoundException('班级码不存在或班级尚未启用');
+    if (!cls.joinCodeExpiresAt || cls.joinCodeExpiresAt <= new Date()) {
+      throw new BadRequestException('班级码已过期，请联系老师获取新班级码');
+    }
+
+    const existing = await this.prisma.classMember.findUnique({
+      where: { classId_userId: { classId: cls.id, userId } },
+    });
+    if (existing?.status === 'APPROVED') throw new BadRequestException('你已经是该班级成员');
+    if (existing?.status === 'PENDING') throw new BadRequestException('你的入班申请正在等待老师审核');
+
+    const membership = existing
+      ? await this.prisma.classMember.update({
+          where: { classId_userId: { classId: cls.id, userId } },
+          data: { status: 'PENDING', reviewNote: null, reviewedAt: null, joinedAt: new Date() },
+        })
+      : await this.prisma.classMember.create({
+          data: { classId: cls.id, userId, status: 'PENDING' },
+        });
+    return { id: membership.id, classId: cls.id, className: cls.name, status: membership.status };
   }
 
   /** 全年每日提交热力图数据 */
@@ -197,11 +487,45 @@ export class UserService {
     });
   }
 
-  async resetPassword(userId: string, password: string) {
-    if (!password || password.length < 8) throw new BadRequestException('密码至少 8 位');
-    const bcrypt = require('bcryptjs');
+  async changeOwnPassword(userId: string, password: string) {
+    if (!password || password.length < 8) throw new BadRequestException('Password must be at least 8 characters');
     const hashed = await bcrypt.hash(password, 10);
-    await this.prisma.user.update({ where: { id: userId }, data: { password: hashed } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashed, mustChangePassword: false, authVersion: { increment: 1 } },
+    });
     return { success: true };
+  }
+
+  async resetPassword(adminId: string, userId: string, password: string) {
+    const admin = await this.prisma.user.findUnique({ where: { id: adminId }, select: { role: true } });
+    if (!admin || admin.role !== 'ADMIN') throw new ForbiddenException('No permission to reset password');
+    if (!password || password.length < 8) throw new BadRequestException('Password must be at least 8 characters');
+    const hashed = await bcrypt.hash(password, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashed, mustChangePassword: true, authVersion: { increment: 1 } },
+    });
+    return { success: true };
+  }
+
+  async listClassApplications() {
+    return this.prisma.class.findMany({
+      where: { status: 'PENDING' },
+      include: {
+        _count: { select: { members: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async reviewClassApplication(classId: string, status: string, reviewNote?: string) {
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      throw new BadRequestException('Status must be APPROVED or REJECTED');
+    }
+    return this.prisma.class.update({
+      where: { id: classId },
+      data: { status, reviewNote: reviewNote || null },
+    });
   }
 }
