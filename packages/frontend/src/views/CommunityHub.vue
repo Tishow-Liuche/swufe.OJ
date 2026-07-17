@@ -19,6 +19,14 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const panel = ref<Panel>('feed');
+const scopedProblemId = computed(() => {
+  const value = route.query.problemId;
+  return Array.isArray(value) ? value[0] : value;
+});
+const scopedProblemTitle = computed(() => {
+  const value = route.query.problemTitle;
+  return Array.isArray(value) ? value[0] : value;
+});
 const communitySidebarCollapsed = useStorage('swufe-oj:community-sidebar-collapsed', false);
 const sort = ref<'LATEST' | 'HOT' | 'UNANSWERED'>('LATEST');
 const category = ref('');
@@ -43,10 +51,12 @@ const announcementForm = ref({ title: '', content: '', isPinned: false });
 
 const isModerator = computed(() => auth.isTeacher() || auth.isAdmin());
 const isFeed = computed(() => panel.value === 'feed' || panel.value === 'solutions');
-const feedTitle = computed(() => panel.value === 'solutions' ? '题解复盘' : '学习讨论');
+const feedTitle = computed(() => panel.value === 'solutions' ? '题解复盘' : (scopedProblemId.value ? '题目讨论' : '学习讨论'));
 const feedDescription = computed(() => panel.value === 'solutions'
   ? '题解以通过题目后解锁为默认规则，保留独立思考空间。'
-  : '提问、拆解思路、分享训练经验。题目内讨论请在对应题目页发起。');
+  : scopedProblemId.value
+    ? '围绕当前题目交流思路、提问和回复，内容会集中归档到题目社区。'
+    : '提问、拆解思路、分享训练经验。题目内讨论请在对应题目页发起。');
 const authorName = computed(() => auth.user?.nickname || auth.user?.username || '未登录');
 const categoryOptions = ['全部', '学习交流', '算法讨论', '平台建议', '组队交流'];
 
@@ -62,8 +72,15 @@ function initials(value?: string) {
 
 function requireLogin() {
   if (auth.isLoggedIn()) return true;
-  void router.push({ path: '/login', query: { redirect: '/community' } });
+  void router.push({ path: '/login', query: { redirect: route.fullPath } });
   return false;
+}
+
+function applyRouteScope() {
+  const requestedPanel = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel;
+  if (requestedPanel === 'feed' || requestedPanel === 'solutions') panel.value = requestedPanel;
+  const requestedComposer = Array.isArray(route.query.compose) ? route.query.compose[0] : route.query.compose;
+  showComposer.value = panel.value === 'feed' && requestedComposer === '1';
 }
 
 function resetMessage() {
@@ -78,6 +95,7 @@ async function loadPosts() {
     const { data } = await api.get('/api/community/posts', {
       params: {
         type: panel.value === 'solutions' ? 'SOLUTION' : 'FORUM',
+        problemId: scopedProblemId.value || undefined,
         sort: sort.value,
         category: category.value || undefined,
         keyword: keyword.value.trim() || undefined,
@@ -133,7 +151,11 @@ async function publishPost() {
   if (!requireLogin()) return;
   resetMessage();
   try {
-    await api.post('/api/community/posts', { type: 'FORUM', ...postForm.value });
+    await api.post('/api/community/posts', {
+      type: 'FORUM',
+      problemId: scopedProblemId.value || undefined,
+      ...postForm.value,
+    });
     postForm.value = { title: '', content: '', category: '学习交流' };
     showComposer.value = false;
     feedbackMessage.value = '已发布到学习社区。';
@@ -160,7 +182,7 @@ async function openPostFromRoute(postId: unknown) {
   if (!id) return;
   if (!auth.isLoggedIn() && auth.token) await auth.fetchProfile();
   if (!auth.isLoggedIn()) return;
-  panel.value = 'feed';
+  applyRouteScope();
   await openPost({ id: String(id) });
 }
 
@@ -264,10 +286,15 @@ async function handleFeedback(item: any) {
 }
 
 watch([sort, category], () => { void loadPosts(); });
+watch(() => [route.query.panel, route.query.problemId, route.query.problemTitle, route.query.compose], () => {
+  applyRouteScope();
+  void loadPosts();
+});
 watch(() => route.query.post, (postId, previousPostId) => {
   if (postId && postId !== previousPostId) void openPostFromRoute(postId);
 });
 onMounted(async () => {
+  applyRouteScope();
   await Promise.all([loadPosts(), loadAnnouncements(), loadNotifications()]);
   await openPostFromRoute(route.query.post);
 });
@@ -303,6 +330,13 @@ onMounted(async () => {
       <div class="community-layout">
       <section class="community-feed">
         <template v-if="isFeed">
+          <div v-if="scopedProblemId" class="problem-scope">
+            <div><span>当前题目</span><strong>{{ scopedProblemTitle || '题目社区' }}</strong></div>
+            <div class="scope-actions">
+              <button type="button" @click="router.push(`/problems/${scopedProblemId}`)">返回题面</button>
+              <button type="button" @click="router.replace({ path: '/community', query: { panel } })">查看全部社区</button>
+            </div>
+          </div>
           <div class="feed-heading"><div><p class="section-kicker">{{ panel === 'solutions' ? '通过后解锁' : '学习社区' }}</p><h2>{{ feedTitle }}</h2><p>{{ feedDescription }}</p></div><button v-if="panel === 'feed'" class="primary-command" type="button" @click="showComposer = !showComposer"><MessageSquarePlus :size="17" />发起讨论</button></div>
           <form v-if="showComposer && panel === 'feed'" class="discussion-composer" @submit.prevent="publishPost"><input v-model="postForm.title" maxlength="120" placeholder="用一句话说清你的讨论主题" required><div><select v-model="postForm.category"><option>学习交流</option><option>算法讨论</option><option>平台建议</option><option>组队交流</option></select><span>公开发布，请勿在普通讨论区直接公布完整题解。</span></div><textarea v-model="postForm.content" maxlength="12000" placeholder="描述背景、尝试过的方法或你的思路" required /><footer><button type="button" class="plain-command" @click="showComposer = false">取消</button><button class="primary-command" type="submit"><Send :size="16" />发布</button></footer></form>
           <div class="feed-toolbar"><div class="sort-tabs"><button type="button" :class="{ active: sort === 'LATEST' }" @click="sort = 'LATEST'">最新</button><button type="button" :class="{ active: sort === 'HOT' }" @click="sort = 'HOT'"><Flame :size="15" />热门</button><button type="button" :class="{ active: sort === 'UNANSWERED' }" @click="sort = 'UNANSWERED'">未回复</button></div><select v-model="category"><option value="">全部话题</option><option v-for="item in categoryOptions.slice(1)" :key="item" :value="item">{{ item }}</option></select></div>
@@ -368,7 +402,15 @@ onMounted(async () => {
 .community-nav .create-discussion:hover { border-color: #0b7a75; background: #0b7a75; }
 .community-nav .signed-state { margin: 13px 8px 0; padding-top: 13px; border-top: 1px solid #e2e8ef; }
 .community-feed { overflow: hidden; border: 1px solid #d7e0e9; border-radius: 6px; background: #fff; box-shadow: 0 8px 22px rgba(20, 37, 56, .045); }
+.problem-scope { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 26px; border-bottom: 1px solid #dbe8e5; background: #f4faf8; }
+.problem-scope > div:first-child { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.problem-scope span { color: #087f5b; font-size: 12px; font-weight: 800; }
+.problem-scope strong { overflow: hidden; color: #294256; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.scope-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.scope-actions button { border: 0; background: transparent; color: #087f5b; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.scope-actions button:hover { color: #056d4e; text-decoration: underline; }
 .feed-heading { padding: 25px 26px 20px; background: #fff; }
+@media (max-width: 720px) { .problem-scope { align-items: flex-start; flex-direction: column; padding: 12px 16px; } .scope-actions { width: 100%; justify-content: space-between; } }
 .section-kicker { color: #0b7a75; font-size: 11px; letter-spacing: 0; }
 .feed-heading h2 { font-size: 23px; font-weight: 800; }
 .feed-heading p:not(.section-kicker) { max-width: 600px; color: #738091; }

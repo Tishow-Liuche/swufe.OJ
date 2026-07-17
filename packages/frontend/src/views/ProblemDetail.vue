@@ -11,6 +11,8 @@ import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { marked } from 'marked';
 import katex from 'katex';
+import { BookOpen, MessageCircle } from '@lucide/vue';
+import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
 import 'katex/dist/katex.min.css';
 
 const route = useRoute();
@@ -337,6 +339,14 @@ function renderMd(text: string): string {
           <span class="meta-item">🎯 {{ problem.difficulty || '-' }}</span>
           <span class="meta-item">📝 {{ (problem.tags || []).map((t: any) => t.name).join(', ') || '-' }}</span>
         </div>
+        <div class="problem-community-links">
+          <RouterLink :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }">
+            <MessageCircle :size="16" />题目讨论
+          </RouterLink>
+          <RouterLink :to="{ path: '/community', query: { panel: 'solutions', problemId: problem.id, problemTitle: problem.title } }">
+            <BookOpen :size="16" />查看题解
+          </RouterLink>
+        </div>
       </div>
 
       <div class="content-split">
@@ -400,6 +410,8 @@ function renderMd(text: string): string {
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
         </div>
       </div>
+
+      <ProblemDiscussionPanel :problem-id="problem.id" :problem-title="problem.title" />
     </template>
 
     <!-- 第三方 OJ 远程提交引导弹窗 -->
@@ -452,6 +464,9 @@ function renderMd(text: string): string {
 .problem-page { max-width: 100%; margin: 0; padding: 20px 24px; }
 .problem-header { margin-bottom: 20px; }
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
+.problem-community-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.problem-community-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid #cbdde0; border-radius: 4px; background: #f7fbfa; color: #087a70; font-size: 13px; font-weight: 700; text-decoration: none; }
+.problem-community-links a:hover { border-color: #87bdb7; background: #eaf6f3; }
 .problem-meta { display: flex; gap: 16px; flex-wrap: wrap; }
 .meta-item { font-size: 13px; color: #666; background: #f0f0f0; padding: 3px 10px; border-radius: 4px; }
 .content-split { display: grid; grid-template-columns: 1fr 480px; gap: 20px; align-items: start; }

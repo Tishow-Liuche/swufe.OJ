@@ -188,7 +188,8 @@ export class JudgeProcessor extends WorkerHost {
   }
 
   private compareOutput(actual: string, expected: string): boolean {
-    return actual === expected;
+    const normalize = (value: string) => value.replace(/\r\n/g, '\n').trimEnd();
+    return normalize(actual) === normalize(expected);
   }
 
   private checkerAccepted(result: RunResult): boolean {
