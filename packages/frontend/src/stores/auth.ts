@@ -7,6 +7,7 @@ interface AuthUser {
   username: string;
   role: string;
   nickname?: string;
+  avatar?: string | null;
   school?: string;
   studentId?: string;
   college?: string;

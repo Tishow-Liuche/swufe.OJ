@@ -1,5 +1,6 @@
 ﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { FileUploadService } from '../common/file-upload.service';
 import * as bcrypt from 'bcryptjs';
 
 type ProfileUpdateInput = {
@@ -27,10 +28,13 @@ type AwardInput = {
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly fileUpload: FileUploadService,
+  ) {}
 
   async getProfile(userId: string) {
-    return this.prisma.user.findUnique({
+    const profile = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true, username: true, email: true, nickname: true,
@@ -38,6 +42,7 @@ export class UserService {
         teacherApplicationStatus: true, createdAt: true,
       },
     });
+    return this.withDisplayAvatar(profile);
   }
 
   async getSettings(userId: string) {
@@ -83,13 +88,14 @@ export class UserService {
       updateData.email = email;
     }
 
-    return this.prisma.user.update({
+    const profile = await this.prisma.user.update({
       where: { id: userId }, data: updateData,
       select: {
         id: true, username: true, email: true, phone: true,
         nickname: true, avatar: true, role: true, school: true,
       },
     });
+    return this.withDisplayAvatar(profile);
   }
 
   async updateExternalAccounts(userId: string, data: ExternalAccountUpdateInput) {
@@ -240,6 +246,15 @@ export class UserService {
     if (value === null) return null;
     const cleaned = value.trim();
     return cleaned ? cleaned : null;
+  }
+
+  private async withDisplayAvatar<T extends { avatar?: string | null }>(profile: T | null) {
+    if (!profile || !profile.avatar || !profile.avatar.startsWith('s3://')) return profile;
+    try {
+      return { ...profile, avatar: await this.fileUpload.getPresignedUrl(profile.avatar) };
+    } catch {
+      return { ...profile, avatar: null };
+    }
   }
 
   async getStats(userId: string) {
@@ -460,6 +475,19 @@ export class UserService {
         teacherApplicationStatus: true,
       },
     });
+  }
+
+  async uploadAvatar(userId: string, file: Express.Multer.File) {
+    const avatar = await this.fileUpload.uploadAvatar(file);
+    const profile = await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatar },
+      select: {
+        id: true, username: true, email: true, phone: true,
+        nickname: true, avatar: true, role: true, school: true,
+      },
+    });
+    return this.withDisplayAvatar(profile);
   }
 
   async reviewTeacherApplication(userId: string, status: string) {

@@ -164,14 +164,20 @@ onMounted(async () => {
       </div>
 
       <div v-if="auth.isTeacher() || auth.isAdmin()" class="role-tools">
-        <button v-if="auth.isTeacher()" type="button" class="role-tool" @click="router.push('/teacher/classes')">
-          <UsersRound :size="20" aria-hidden="true" /> 班级管理
+        <button v-if="auth.isTeacher()" type="button" class="role-tool role-tool--classes" @click="router.push('/teacher/classes')">
+          <span class="role-tool-icon"><UsersRound :size="20" aria-hidden="true" /></span>
+          <span class="role-tool-copy"><strong>班级管理</strong><small>学生与教学空间</small></span>
+          <ArrowRight class="role-tool-arrow" :size="18" aria-hidden="true" />
         </button>
-        <button v-if="auth.isAdmin()" type="button" class="role-tool" @click="router.push('/admin/create-problem')">
-          <Layers3 :size="20" aria-hidden="true" /> 录入题目
+        <button v-if="auth.isAdmin()" type="button" class="role-tool role-tool--problems" @click="router.push('/admin/create-problem')">
+          <span class="role-tool-icon"><Layers3 :size="20" aria-hidden="true" /></span>
+          <span class="role-tool-copy"><strong>录入题目</strong><small>建设平台题库</small></span>
+          <ArrowRight class="role-tool-arrow" :size="18" aria-hidden="true" />
         </button>
-        <button v-if="auth.isAdmin()" type="button" class="role-tool" @click="router.push('/admin/users')">
-          <CalendarDays :size="20" aria-hidden="true" /> 用户管理
+        <button v-if="auth.isAdmin()" type="button" class="role-tool role-tool--users" @click="router.push('/admin/users')">
+          <span class="role-tool-icon"><CalendarDays :size="20" aria-hidden="true" /></span>
+          <span class="role-tool-copy"><strong>用户管理</strong><small>维护平台成员</small></span>
+          <ArrowRight class="role-tool-arrow" :size="18" aria-hidden="true" />
         </button>
       </div>
     </section>
@@ -263,16 +269,16 @@ onMounted(async () => {
   position: relative;
   z-index: 1;
   display: grid;
-  width: min(1240px, calc(100% - 40px));
-  min-height: 446px;
-  grid-template-columns: minmax(0, 0.92fr) minmax(430px, 1.08fr);
+  width: min(1680px, calc(100% - 64px));
+  min-height: clamp(500px, 34vw, 660px);
+  grid-template-columns: minmax(460px, 0.84fr) minmax(620px, 1.16fr);
   margin: 0 auto;
 }
 
 .hero-content {
   position: relative;
   z-index: 3;
-  padding: 70px 0 42px 18px;
+  padding: clamp(84px, 7.2vw, 132px) 0 56px clamp(52px, 8.25vw, 156px);
 }
 
 .hero-eyebrow {
@@ -380,7 +386,7 @@ onMounted(async () => {
 
 .hero-artwork {
   position: relative;
-  min-height: 446px;
+  min-height: clamp(500px, 34vw, 660px);
   overflow: hidden;
 }
 
@@ -546,7 +552,7 @@ onMounted(async () => {
 
 /* Learning space */
 .features {
-  width: min(1240px, calc(100% - 40px));
+  width: min(1680px, calc(100% - 64px));
   margin: 0 auto;
   padding: 62px 0 38px;
   font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
@@ -998,31 +1004,64 @@ onMounted(async () => {
 .profile-card .utility-icon { background: #ecebff; color: #5a55c6; }
 
 .role-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 15px;
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
 }
 
 .role-tool {
-  display: inline-flex;
+  display: grid;
+  min-height: 112px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border: 1px solid #cddcf4;
-  border-radius: 10px;
-  background: #f4f8ff;
-  color: #315fae;
+  gap: 13px;
+  padding: 19px 20px;
+  border: 1px solid #dce5f3;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(38, 56, 89, 0.06);
+  color: #6c7890;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  font-weight: 720;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
-.role-tool:hover { border-color: #8db1ec; background: #eaf2ff; }
+.role-tool:hover {
+  border-color: #aac7fa;
+  box-shadow: 0 14px 25px rgba(38, 56, 89, 0.1);
+  transform: translateY(-3px);
+}
+
+.role-tool-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 13px;
+  background: var(--role-icon-surface);
+  color: var(--role-icon-color);
+}
+
+.role-tool-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.role-tool-copy strong { color: #1d2c46; font-size: 15px; font-weight: 780; }
+.role-tool-copy small { overflow: hidden; color: #728097; font-family: 'Noto Sans SC Variable', sans-serif; font-size: 11px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.role-tool-arrow { color: #6c7890; }
+
+.role-tool--classes { --role-icon-surface: #e5f0ff; --role-icon-color: #2874e9; }
+.role-tool--problems { --role-icon-surface: #e4f9f3; --role-icon-color: #16866b; }
+.role-tool--users { --role-icon-surface: #ecebff; --role-icon-color: #5a55c6; }
 
 /* Quick links */
-.quick-links { max-width: 1100px; margin: 0 auto; padding: 0 20px 56px; }
+.quick-links { width: min(1440px, calc(100% - 64px)); margin: 0 auto; padding: 0 0 56px; }
 .quick-links h2 { text-align: center; font-size: 28px; color: #1a1a2e; margin-bottom: 28px; }
 .quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .quick-item {
@@ -1107,7 +1146,9 @@ onMounted(async () => {
   .feature-banner { padding: 29px 25px; border-radius: 18px; }
   .banner-copy { width: 60%; }
   .utility-grid { grid-template-columns: 1fr; }
-  .utility-card { min-height: 90px; }
+  .role-tools { grid-template-columns: 1fr; }
+  .utility-card,
+  .role-tool { min-height: 90px; }
 }
 
 @media (max-width: 560px) {

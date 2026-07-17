@@ -4,6 +4,7 @@ import { UserService } from './user.service';
 describe('UserService profile settings', () => {
   let service: UserService;
   let prisma: any;
+  let fileUpload: any;
 
   beforeEach(() => {
     prisma = {
@@ -35,7 +36,11 @@ describe('UserService profile settings', () => {
       },
       $transaction: jest.fn(async (operations: any[]) => Promise.all(operations)),
     };
-    service = new UserService(prisma);
+    fileUpload = {
+      uploadAvatar: jest.fn(),
+      getPresignedUrl: jest.fn(),
+    };
+    service = new (UserService as any)(prisma, fileUpload);
   });
 
   it('updates nickname, email and phone for the current user', async () => {
@@ -172,6 +177,32 @@ describe('UserService profile settings', () => {
     await expect(
       service.updateAward('u1', 'a2', { awardLevel: '金奖' }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('stores an uploaded avatar and returns a browser-displayable profile URL', async () => {
+    const file = {
+      originalname: 'portrait.png',
+      mimetype: 'image/png',
+      size: 2048,
+      buffer: Buffer.from('image'),
+    } as Express.Multer.File;
+    fileUpload.uploadAvatar.mockResolvedValue('s3://oj-testdata/avatars/avatar-1.png');
+    fileUpload.getPresignedUrl.mockResolvedValue('http://localhost:9000/signed/avatar-1.png');
+    prisma.user.update.mockResolvedValue({
+      id: 'u1', username: 'alice', email: 'alice@example.com', phone: null,
+      nickname: 'Alice', avatar: 's3://oj-testdata/avatars/avatar-1.png',
+      role: 'STUDENT', school: null,
+    });
+
+    const result = await (service as any).uploadAvatar('u1', file);
+
+    expect(fileUpload.uploadAvatar).toHaveBeenCalledWith(file);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { avatar: 's3://oj-testdata/avatars/avatar-1.png' },
+      select: expect.objectContaining({ id: true, avatar: true, nickname: true }),
+    });
+    expect(result.avatar).toBe('http://localhost:9000/signed/avatar-1.png');
   });
 
   it('creates a pending class application from a valid join code', async () => {

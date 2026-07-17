@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { Camera } from '@lucide/vue';
 import api from '../api/client';
+import UserAvatar from '../components/UserAvatar.vue';
+import { useAuthStore } from '../stores/auth';
 
 interface HeatDay { date: string; count: number; accepted: number; level: number }
 interface Stats {
@@ -25,6 +28,7 @@ interface Award {
 
 const stats = ref<Stats | null>(null);
 const profile = ref<any>(null);
+const auth = useAuthStore();
 const loading = ref(true);
 const error = ref('');
 const activeTab = ref<'overview' | 'submissions' | 'settings'>('overview');
@@ -36,6 +40,9 @@ const selectedSubmission = ref<any>(null);
 const settingsLoading = ref(false);
 const settingsMessage = ref('');
 const settingsError = ref('');
+const avatarInput = ref<HTMLInputElement | null>(null);
+const avatarUploading = ref(false);
+const avatarError = ref('');
 const profileForm = reactive({ nickname: '', email: '', phone: '' });
 const accountForm = reactive({ codeforcesHandle: '', luoguHandle: '' });
 const awards = ref<Award[]>([]);
@@ -102,6 +109,31 @@ async function saveProfile() {
     settingsMessage.value = '基础资料已保存';
   } catch (e: any) {
     settingsError.value = e.response?.data?.message || '保存基础资料失败';
+  }
+}
+
+function chooseAvatar() {
+  avatarError.value = '';
+  avatarInput.value?.click();
+}
+
+async function uploadAvatar(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  avatarUploading.value = true;
+  avatarError.value = '';
+  try {
+    const payload = new FormData();
+    payload.append('file', file);
+    const { data } = await api.post('/api/user/avatar', payload);
+    profile.value = { ...profile.value, ...data };
+    await auth.fetchProfile();
+  } catch (requestError: any) {
+    avatarError.value = requestError.response?.data?.message || '头像上传失败，请稍后重试';
+  } finally {
+    avatarUploading.value = false;
+    input.value = '';
   }
 }
 
@@ -261,8 +293,24 @@ function formatMemoryKb(value: unknown) {
     <div v-else-if="error" class="error-msg">{{ error }}</div>
 
     <template v-if="profile && stats">
+      <header class="profile-workspace-hero">
+        <div>
+          <p>PERSONAL WORKSPACE</p>
+          <h1>个人中心</h1>
+          <span>查看训练轨迹、提交记录和账号设置。</span>
+        </div>
+        <div class="profile-workspace-state">
+          <strong>{{ profile.role === 'ADMIN' ? '管理员空间' : profile.role === 'TEACHER' ? '教师空间' : '学习空间' }}</strong>
+          <small>账户状态正常</small>
+        </div>
+      </header>
       <div class="profile-header">
-        <div class="avatar">{{ (profile.nickname || profile.username).charAt(0).toUpperCase() }}</div>
+        <div class="profile-avatar-control">
+          <UserAvatar :name="profile.nickname || profile.username" :avatar="profile.avatar" :size="72" />
+          <input ref="avatarInput" class="avatar-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" @change="uploadAvatar" />
+          <button class="avatar-upload-button" type="button" :disabled="avatarUploading" @click="chooseAvatar"><Camera :size="14" />{{ avatarUploading ? '上传中' : '更换头像' }}</button>
+          <span v-if="avatarError" class="avatar-error">{{ avatarError }}</span>
+        </div>
         <div class="user-info">
           <h2>{{ profile.nickname || profile.username }}</h2>
           <p class="username">@{{ profile.username }}</p>
@@ -625,4 +673,25 @@ h4 { font-size: 15px; color: #333; margin: 16px 0 8px; }
   .award-row { grid-template-columns: 1fr; }
   .sub-time { display: none; }
 }
+
+/* Profile uses the same hierarchy as the learning and class workspaces. */
+.profile-page { width: min(1180px, calc(100% - 40px)); max-width: none; min-height: calc(100vh - 56px); padding: 28px 0 64px; font-family: 'Manrope Variable', 'Noto Sans SC Variable', 'Microsoft YaHei', sans-serif; }
+.profile-workspace-hero { display: flex; min-height: 158px; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 20px; padding: 28px 32px; border: 1px solid #dce5ef; border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .08); }
+.profile-workspace-hero p { margin: 0 0 7px; color: #3977aa; font-size: 11px; font-weight: 850; letter-spacing: 0; }
+.profile-workspace-hero h1 { margin: 0; color: #1f2a37; font-size: 34px; letter-spacing: 0; }
+.profile-workspace-hero > div > span { display: block; margin-top: 9px; color: #66778a; font-size: 14px; }
+.profile-workspace-state { display: grid; min-width: 150px; gap: 4px; padding: 14px 18px; border: 1px solid #dce5ef; border-radius: 8px; background: #f8faff; text-align: center; }
+.profile-workspace-state strong { color: #1f5eff; font-size: 14px; }.profile-workspace-state small { color: #728092; font-size: 11px; }
+.profile-header { margin-bottom: 18px; padding: 22px 26px; border: 1px solid #dfe7ef; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.avatar { border-radius: 8px; background: #e7efff; color: #1f5eff; }
+.profile-avatar-control { display: grid; justify-items: center; gap: 6px; flex: 0 0 92px; }
+.avatar-input { display: none; }
+.avatar-upload-button { display: inline-flex; min-height: 26px; align-items: center; justify-content: center; gap: 4px; padding: 0 7px; border: 1px solid #c9dbef; border-radius: 5px; background: #f5f9ff; color: #2469ad; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.avatar-upload-button:hover { border-color: #9abbe0; background: #eaf3ff; }.avatar-upload-button:disabled { cursor: wait; opacity: .62; }.avatar-error { max-width: 116px; color: #c64148; font-size: 10px; line-height: 1.35; text-align: center; }
+.user-info h2 { color: #24364b; }.username { color: #728092; }.join-date { color: #8290a0; }
+.stats-grid { gap: 12px; margin-bottom: 18px; }.stat-card { border: 1px solid #dfe7ef; border-top: 3px solid #8fb9dc; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .035); }.stat-card.accent-green, .stat-card.accent-blue, .stat-card.accent-purple, .stat-card.accent-teal { border-top-color: #8fb9dc; }.stat-card.accent-orange { border-top-color: #e2aa4d; }.stat-value { color: #1f5eff; }.stat-label, .stat-unit { color: #728092; }
+.panel { border: 1px solid #dfe7ef; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }.inner-panel { border-color: #e2eaf1; background: #fbfcfe; }.panel h3, .section-title { color: #24364b; }.difficulty-panel { background: #fbfcfe; }.diff-bar { background: #2469ad; box-shadow: none; }.dist-count, .sub-title { color: #24364b; }
+.tabs { border: 1px solid #dfe7ef; border-radius: 7px; background: #f4f7fb; }.tabs button { border-radius: 5px; color: #66778a; }.tabs button.active { background: #e7efff; color: #1f5eff; box-shadow: none; }.tabs button:hover:not(.active) { color: #1f5eff; background: #edf4ff; }
+.sub-row { border-bottom-color: #e9eef3; }.sub-row:hover { background: #f7faff; }.sub-lang { background: #edf3fa; color: #526f8d; }.settings-card { border-color: #dfe7ef; border-radius: 8px; background: #fbfcfe; }.settings-card input, .settings-card select { border-color: #ccd9e6; border-radius: 6px; }.settings-card input:focus, .settings-card select:focus { border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }.primary-btn { border-radius: 6px; background: #2469ad; }.primary-btn:hover { background: #1b578f; }.ghost-btn { border-radius: 6px; background: #e7efff; color: #1f5eff; }.danger-btn { border-radius: 6px; }
+@media (max-width: 560px) { .profile-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.profile-workspace-hero { align-items: stretch; flex-direction: column; padding: 22px; }.profile-workspace-hero h1 { font-size: 29px; }.profile-workspace-state { width: 100%; }.profile-header { padding: 20px; }.profile-avatar-control { flex-basis: 82px; } }
 </style>

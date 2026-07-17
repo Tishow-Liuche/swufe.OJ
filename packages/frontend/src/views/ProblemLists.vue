@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useStorage } from '@vueuse/core';
 import { BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, NotebookTabs, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
 import CheckInModal from '../components/CheckInModal.vue';
 import LearningProgress from '../components/LearningProgress.vue';
@@ -14,8 +14,18 @@ type Tab = 'overview' | 'lists' | 'plans' | 'library' | 'notes';
 type ListSort = 'difficulty' | 'number' | 'joined';
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
-const activeTab = ref<Tab>('overview');
+const workspaceTabIds: Tab[] = ['overview', 'lists', 'plans', 'library', 'notes'];
+
+function tabFromQuery(value: unknown): Tab {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return typeof candidate === 'string' && workspaceTabIds.includes(candidate as Tab)
+    ? candidate as Tab
+    : 'overview';
+}
+
+const activeTab = ref<Tab>(tabFromQuery(route.query.tab));
 const sidebarCollapsed = useStorage('swufe-oj:learning-sidebar-collapsed', false);
 const loading = ref(true);
 const saving = ref(false);
@@ -280,6 +290,14 @@ function reverseListSort() {
   listSortDirection.value = listSortDirection.value === 'asc' ? 'desc' : 'asc';
 }
 
+function selectTab(tab: Tab) {
+  activeTab.value = tab;
+  const query = { ...route.query };
+  if (tab === 'overview') delete query.tab;
+  else query.tab = tab;
+  void router.replace({ query });
+}
+
 function openProblem(problemId: string) { router.push(`/problems/${problemId}`); }
 
 async function openPublicList(id: string) {
@@ -421,6 +439,7 @@ async function archiveNote(note: any) {
 }
 
 onMounted(loadAll);
+watch(() => route.query.tab, (value) => { activeTab.value = tabFromQuery(value); });
 </script>
 
 <template>
@@ -433,7 +452,7 @@ onMounted(loadAll);
       </div>
       <p class="learning-sidebar-label">学习模块</p>
       <nav class="workspace-nav" aria-label="学习工作台">
-        <button v-for="item in workspaceTabs" :key="item.id" :title="sidebarCollapsed ? item.label : undefined" :class="{ active: activeTab === item.id }" @click="activeTab = item.id">
+        <button v-for="item in workspaceTabs" :key="item.id" :title="sidebarCollapsed ? item.label : undefined" :class="{ active: activeTab === item.id }" @click="selectTab(item.id)">
           <component :is="item.icon" :size="18" />
           <span><strong>{{ item.label }}</strong><small>{{ item.detail }}</small></span>
           <b v-if="item.count !== undefined">{{ item.count }}</b>
@@ -450,7 +469,7 @@ onMounted(loadAll);
       </div>
       <div class="header-actions">
         <button class="secondary-btn" @click="router.push('/problems')"><BookOpenCheck :size="17" />进入题库</button>
-        <button v-if="auth.isLoggedIn()" class="primary-btn" @click="activeTab = 'notes'"><NotebookTabs :size="17" />今日复习 {{ dueNotes.length }}</button>
+        <button v-if="auth.isLoggedIn()" class="primary-btn" @click="selectTab('notes')"><NotebookTabs :size="17" />今日复习 {{ dueNotes.length }}</button>
       </div>
     </header>
 
@@ -490,7 +509,7 @@ onMounted(loadAll);
             </div>
           </section>
           <section class="panel quick-panel">
-            <div class="panel-heading"><div><span class="section-kicker">YOUR LIBRARY</span><h2>继续学习</h2></div><button class="text-btn" @click="activeTab = 'library'">查看全部</button></div>
+            <div class="panel-heading"><div><span class="section-kicker">YOUR LIBRARY</span><h2>继续学习</h2></div><button class="text-btn" @click="selectTab('library')">查看全部</button></div>
             <div class="quick-list">
               <button v-for="item in continueItems" :key="item.problemId" class="quick-row" @click="openProblem(item.problemId)"><span class="quick-icon">{{ item.types.includes('错题') ? '✓' : '☆' }}</span><span><strong>{{ item.problem?.title }}</strong><small><b>{{ item.types.join(' / ') }}</b> · {{ item.problem?.difficulty || '未分级' }}</small></span><span>›</span></button>
               <div v-if="!continueItems.length" class="empty-state">收藏和错题会集中出现在这里。</div>
@@ -498,7 +517,7 @@ onMounted(loadAll);
           </section>
         </div>
         <section class="public-section">
-          <div class="panel-heading"><div><span class="section-kicker">COMMUNITY LISTS</span><h2>公开题单</h2></div><button class="text-btn" @click="activeTab = 'lists'">管理题单</button></div>
+          <div class="panel-heading"><div><span class="section-kicker">COMMUNITY LISTS</span><h2>公开题单</h2></div><button class="text-btn" @click="selectTab('lists')">管理题单</button></div>
           <div class="public-grid"><button v-for="list in publicLists.slice(0, 6)" :key="list.id" class="public-list" @click="openPublicList(list.id)"><strong>{{ list.name }}</strong><span>{{ list._count?.items || 0 }} 道题</span><small>{{ list.description || '暂无说明' }}</small></button><div v-if="!publicLists.length" class="empty-state">还没有公开题单。</div></div>
         </section>
       </section>
@@ -779,4 +798,28 @@ input:focus,textarea:focus { border-color:#3979ad; box-shadow:0 0 0 2px #deedf9;
 .public-list:hover { border-color:#8fb7d8; box-shadow:0 10px 22px rgba(23,59,102,.09); }
 .modal { border-radius:8px; }
 @media(max-width:860px){.learning-page{display:block}.learning-main{padding:18px 16px 52px}.learning-sidebar,.learning-page.sidebar-collapsed .learning-sidebar{position:static;width:auto;height:auto;padding:12px;border-right:0}.learning-sidebar-title{display:none}.workspace-nav{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:5px;border:1px solid var(--workspace-line);border-radius:8px;background:#fff}.workspace-nav button,.sidebar-collapsed .workspace-nav button{grid-template-columns:22px minmax(0,1fr) auto;justify-items:initial;min-height:46px;padding:7px 10px}.workspace-nav button:last-child{grid-column:1/-1}.workspace-nav button small,.sidebar-collapsed .workspace-nav button small,.sidebar-collapsed .workspace-nav button>span,.sidebar-collapsed .workspace-nav button>b{display:initial}.workspace-nav button>span,.sidebar-collapsed .workspace-nav button>span{display:grid}.workspace-nav button>b,.sidebar-collapsed .workspace-nav button>b{display:grid}.learning-content{margin-top:20px!important}.learning-header{align-items:flex-start;flex-direction:column}.learning-header h1{font-size:29px}}
+/* Match the problem library's white surfaces and pale-blue selected state. */
+.learning-header {
+  border: 1px solid #dce5ef;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
+  color: #1f2a37;
+}
+.learning-header .eyebrow { color: #3977aa; }
+.learning-header h1 { color: #1f2a37; }
+.learning-header p { color: #66778a; }
+.header-actions .secondary-btn,
+.header-actions .primary-btn {
+  border-color: #aec7f4;
+  background: #e7efff;
+  color: #1f5eff;
+  box-shadow: none;
+}
+.workspace-nav button.active {
+  background: #e7efff;
+  color: #1f5eff;
+  box-shadow: none;
+}
+.workspace-nav button.active small { color: #1f5eff; }
+.workspace-nav button.active b { background: #dce9ff; color: #1f5eff; }
 </style>

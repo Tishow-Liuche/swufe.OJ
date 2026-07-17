@@ -86,6 +86,12 @@ export class CommunityController {
     return this.community.markNotificationRead(id, req.user.id);
   }
 
+  @Post('notifications/read-all')
+  @UseGuards(AuthGuard('jwt'))
+  markAllNotificationsRead(@Req() req: any) {
+    return this.community.markAllNotificationsRead(req.user.id);
+  }
+
   @Post('announcements')
   @UseGuards(AuthGuard('jwt'))
   createAnnouncement(@Req() req: any, @Body() body: any) {

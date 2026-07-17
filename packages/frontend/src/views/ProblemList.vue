@@ -409,7 +409,7 @@ function requireLogin(redirect: string) {
 
           <router-link
             v-if="auth.isLoggedIn()"
-            to="/problem-lists"
+            :to="{ path: '/problem-lists', query: { tab: 'lists' } }"
             class="sidebar-link"
             aria-label="我的题单"
             :title="sidebarCollapsed ? '我的题单' : undefined"
@@ -425,7 +425,7 @@ function requireLogin(redirect: string) {
             class="sidebar-link"
             aria-label="登录后查看我的题单"
             :title="sidebarCollapsed ? '登录后查看我的题单' : undefined"
-            @click="requireLogin('/problem-lists')"
+            @click="requireLogin('/problem-lists?tab=lists')"
           >
             <BookOpen :size="18" aria-hidden="true" />
             <span class="sidebar-link-label">我的题单</span>

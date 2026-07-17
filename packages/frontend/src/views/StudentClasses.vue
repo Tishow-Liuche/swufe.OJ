@@ -202,4 +202,18 @@ h1 { color:#fff; font-size:34px; letter-spacing:0; }
 .class-mark { color:#205f96; background:#e3effa; }
 .refresh-button { color:#285d8a; }
 @media(max-width:760px){.membership-list{grid-template-columns:1fr}.page-heading{align-items:stretch;flex-direction:column}.summary-strip{width:100%}}
+/* Replace the dark class summary with the shared light workspace surface. */
+.page-heading {
+  border: 1px solid #dce5ef;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
+  color: #1f2a37;
+}
+.eyebrow { color: #3977aa; }
+h1 { color: #1f2a37; }
+.page-heading p { color: #66778a; }
+.summary-strip { border-color: #dce5ef; background: #f8faff; }
+.summary-strip div + div { border-left-color: #e4ebf3; }
+.summary-strip strong { color: #1f5eff; }
+.summary-strip span { color: #728092; }
 </style>

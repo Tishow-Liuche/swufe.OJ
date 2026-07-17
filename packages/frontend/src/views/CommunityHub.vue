@@ -11,6 +11,7 @@ import {
 } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
+import FilterSelect from '../components/FilterSelect.vue';
 
 type Panel = 'feed' | 'solutions' | 'announcements' | 'help';
 type Post = Record<string, any>;
@@ -59,6 +60,11 @@ const feedDescription = computed(() => panel.value === 'solutions'
     : '提问、拆解思路、分享训练经验。题目内讨论请在对应题目页发起。');
 const authorName = computed(() => auth.user?.nickname || auth.user?.username || '未登录');
 const categoryOptions = ['全部', '学习交流', '算法讨论', '平台建议', '组队交流'];
+const composerCategoryOptions = categoryOptions.slice(1).map((item) => ({ value: item, label: item }));
+const topicFilterOptions = [
+  { value: '', label: '全部话题' },
+  ...composerCategoryOptions,
+];
 
 function formatDate(value?: string) {
   if (!value) return '';
@@ -338,8 +344,8 @@ onMounted(async () => {
             </div>
           </div>
           <div class="feed-heading"><div><p class="section-kicker">{{ panel === 'solutions' ? '通过后解锁' : '学习社区' }}</p><h2>{{ feedTitle }}</h2><p>{{ feedDescription }}</p></div><button v-if="panel === 'feed'" class="primary-command" type="button" @click="showComposer = !showComposer"><MessageSquarePlus :size="17" />发起讨论</button></div>
-          <form v-if="showComposer && panel === 'feed'" class="discussion-composer" @submit.prevent="publishPost"><input v-model="postForm.title" maxlength="120" placeholder="用一句话说清你的讨论主题" required><div><select v-model="postForm.category"><option>学习交流</option><option>算法讨论</option><option>平台建议</option><option>组队交流</option></select><span>公开发布，请勿在普通讨论区直接公布完整题解。</span></div><textarea v-model="postForm.content" maxlength="12000" placeholder="描述背景、尝试过的方法或你的思路" required /><footer><button type="button" class="plain-command" @click="showComposer = false">取消</button><button class="primary-command" type="submit"><Send :size="16" />发布</button></footer></form>
-          <div class="feed-toolbar"><div class="sort-tabs"><button type="button" :class="{ active: sort === 'LATEST' }" @click="sort = 'LATEST'">最新</button><button type="button" :class="{ active: sort === 'HOT' }" @click="sort = 'HOT'"><Flame :size="15" />热门</button><button type="button" :class="{ active: sort === 'UNANSWERED' }" @click="sort = 'UNANSWERED'">未回复</button></div><select v-model="category"><option value="">全部话题</option><option v-for="item in categoryOptions.slice(1)" :key="item" :value="item">{{ item }}</option></select></div>
+          <form v-if="showComposer && panel === 'feed'" class="discussion-composer" @submit.prevent="publishPost"><input v-model="postForm.title" maxlength="120" placeholder="用一句话说清你的讨论主题" required><div><FilterSelect v-model="postForm.category" class="composer-category-select" :options="composerCategoryOptions" label="讨论分类" /><span>公开发布，请勿在普通讨论区直接公布完整题解。</span></div><textarea v-model="postForm.content" maxlength="12000" placeholder="描述背景、尝试过的方法或你的思路" required /><footer><button type="button" class="plain-command" @click="showComposer = false">取消</button><button class="primary-command" type="submit"><Send :size="16" />发布</button></footer></form>
+          <div class="feed-toolbar"><div class="sort-tabs"><button type="button" :class="{ active: sort === 'LATEST' }" @click="sort = 'LATEST'">最新</button><button type="button" :class="{ active: sort === 'HOT' }" @click="sort = 'HOT'"><Flame :size="15" />热门</button><button type="button" :class="{ active: sort === 'UNANSWERED' }" @click="sort = 'UNANSWERED'">未回复</button></div><FilterSelect v-model="category" class="topic-filter-select" :options="topicFilterOptions" label="话题筛选" /></div>
           <div v-if="loading" class="empty-feed">正在加载社区内容...</div>
           <article v-for="post in posts" :key="post.id" class="feed-post"><button class="post-body" type="button" @click="openPost(post)"><div class="author-avatar" :title="post.author?.nickname || post.author?.username">{{ initials(post.author?.nickname || post.author?.username) }}</div><div class="post-copy"><div class="post-labels"><span>{{ post.category || (post.type === 'SOLUTION' ? '题解复盘' : '学习交流') }}</span><span v-if="post.problem" class="problem-link">关联题目：{{ post.problem.title }}</span><span v-if="post.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span><span v-if="post.contentLocked" class="locked"><LockKeyhole :size="13" />通过后可见</span></div><h3>{{ post.title || (post.type === 'SOLUTION' ? '题解复盘' : '题目讨论') }}</h3><p>{{ post.contentPreview }}</p><footer><span>{{ post.author?.nickname || post.author?.username }}</span><span class="author-separator"></span><time>{{ formatDate(post.updatedAt) }}</time></footer></div></button><div class="post-metrics"><button type="button" :class="{ reacted: post.viewerReacted }" title="点赞" @click="toggleReaction(post)"><ThumbsUp :size="16" />{{ post.reactionCount || 0 }}</button><button type="button" title="查看回复" @click="openPost(post)"><MessageCircle :size="16" />{{ post.replyCount || 0 }}</button><span>{{ post.viewCount || 0 }} 浏览</span></div></article>
           <div v-if="!loading && !posts.length" class="empty-feed"><MessageCircle :size="26" /><b>{{ panel === 'solutions' ? '暂无可展示的题解' : '还没有讨论' }}</b><span>{{ panel === 'solutions' ? '在题目页通过题目后可发布题解。' : '发起一个有上下文的问题，通常更容易获得有效回复。' }}</span></div>
@@ -491,4 +497,62 @@ onMounted(async () => {
 .notification-popover,.post-dialog { border-radius:8px; }
 @media(max-width:1050px){.community-layout{grid-template-columns:minmax(0,1fr)}.community-aside{display:none}}
 @media(max-width:860px){.community-hub{display:block}.community-main{padding:18px 16px 46px}.community-nav,.community-hub.sidebar-collapsed .community-nav{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:auto;height:auto;padding:12px;border-right:0}.community-nav-title,.community-nav .nav-rule,.community-nav .signed-state{display:none}.community-nav>button,.community-hub.sidebar-collapsed .community-nav>button{grid-template-columns:22px minmax(0,1fr) auto;justify-items:initial;padding:7px 10px}.community-nav>button>span,.community-hub.sidebar-collapsed .community-nav>button>span{display:grid}.community-nav>button>b,.community-hub.sidebar-collapsed .community-nav>button>b{display:grid}.community-nav .create-discussion{grid-column:1/-1}.community-topbar{align-items:stretch;flex-direction:column;padding:20px}.topbar-actions{width:100%}.search-field{width:auto;flex:1}.community-layout{display:block;margin-top:18px}.community-feed{width:100%}}
+/* Community keeps its information architecture while sharing the light library skin. */
+.community-topbar {
+  border: 1px solid #dce5ef;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
+}
+.brand-block p { color: #3977aa; }
+.brand-block h1 { color: #1f2a37; }
+.brand-title-row span { color: #66778a; }
+.brand-title-row i { background: #1f5eff; box-shadow: 0 0 0 4px #e7efff; }
+.community-nav > button.active {
+  border-color: #aec7f4;
+  background: #e7efff;
+  color: #1f5eff;
+  box-shadow: none;
+}
+.community-nav > button.active small { color: #1f5eff; }
+.community-nav > button.active b { background: #dce9ff; color: #1f5eff; }
+.community-nav .create-discussion {
+  border-color: #aec7f4;
+  background: #e7efff;
+  color: #1f5eff;
+}
+.community-nav .create-discussion:hover { border-color: #8fb8ef; background: #dce9ff; color: #164fc9; }
+/* The white header needs stronger utility contrast than the former dark treatment. */
+.topbar-actions .search-field {
+  border-color: #bfd0e1;
+  background: #f8fbfe;
+  color: #34536f;
+}
+.topbar-actions .search-field svg { color: #34536f; }
+.topbar-actions .search-field input { color: #24364b; }
+.topbar-actions .search-field input::placeholder { color: #5e7087; opacity: 1; }
+.topbar-actions .icon-command {
+  border-color: #bfd0e1;
+  background: #f8fbfe;
+  color: #34536f;
+}
+.topbar-actions .icon-command:hover {
+  border-color: #8fb8ef;
+  background: #e7efff;
+  color: #1f5eff;
+}
+.discussion-composer .composer-category-select { width: 148px; height: 36px; flex: 0 0 148px; }
+.discussion-composer .composer-category-select :deep(.filter-select__trigger) { padding: 0 9px; border-color: #bcd5ea; border-radius: 6px; background: #fff; color: #34536f; font-size: 12px; }
+.discussion-composer .composer-category-select :deep(.filter-select__trigger:hover),
+.discussion-composer .composer-category-select :deep(.filter-select.is-open .filter-select__trigger) { border-color: #8fb8ef; background: #f8fbfe; box-shadow: 0 0 0 3px rgba(31, 94, 255, .09); }
+.discussion-composer .composer-category-select :deep(.filter-select__menu) { border-color: #bfd0e1; border-radius: 7px; box-shadow: 0 10px 24px rgba(31, 66, 104, .12); }
+.discussion-composer .composer-category-select :deep(.filter-select__option.is-selected) { background: #e7efff; color: #1f5eff; }
+.feed-toolbar .topic-filter-select { width: 124px; height: 32px; flex: 0 0 124px; }
+.feed-toolbar .topic-filter-select :deep(.filter-select__trigger) { padding: 0 8px; border-color: #bfd0e1; border-radius: 6px; background: #fff; color: #34536f; font-size: 12px; }
+.feed-toolbar .topic-filter-select :deep(.filter-select__trigger:hover),
+.feed-toolbar .topic-filter-select :deep(.filter-select.is-open .filter-select__trigger) { border-color: #8fb8ef; background: #f8fbfe; box-shadow: 0 0 0 3px rgba(31, 94, 255, .09); }
+.feed-toolbar .topic-filter-select :deep(.filter-select__menu) { min-width: 148px; border-color: #bfd0e1; border-radius: 7px; }
+.feed-toolbar .topic-filter-select :deep(.filter-select__option.is-selected) { background: #e7efff; color: #1f5eff; }
+@media (max-width: 720px) {
+  .discussion-composer .composer-category-select { flex: 0 0 36px; }
+}
 </style>

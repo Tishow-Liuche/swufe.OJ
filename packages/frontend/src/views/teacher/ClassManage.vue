@@ -485,4 +485,32 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 .report-toolbar { display:flex; gap:9px; margin-bottom:14px; }.report-toolbar select { flex:1; max-width:620px; }.report-surface { padding:0; overflow:hidden; }.report-summary { display:grid; grid-template-columns:180px 130px minmax(0,1fr); gap:1px; background:#dce5ed; }.report-summary div { display:grid; gap:3px; padding:15px 17px; background:#f8fbfe; }.report-summary strong { color:#214f79; font-size:16px; }.report-summary span { color:#7e8b9a; font-size:10px; }.report-table { overflow:auto; }.report-table table { min-width:900px; }.judge-state { display:inline-block; padding:3px 6px; border-radius:5px; font-size:10px; }.judge-state.ok { color:#17704e; background:#e5f5ec; }.judge-state.bad { color:#a43d36; background:#fdecea; }.judge-state.pending { color:#8a6200; background:#fff2c9; }.judge-state.muted { color:#748293; background:#edf1f5; }.report-table td small { display:block; margin-top:3px; color:#8995a3; font-size:9px; }
 @media(max-width:980px){.teacher-workspace{display:block}.workspace-sidebar{position:static;width:auto;height:auto;padding:12px}.sidebar-brand,.sidebar-label,.sidebar-divider,.class-switcher,.sidebar-overview{display:none}.workspace-nav{grid-template-columns:repeat(3,1fr)}.workspace-nav button{grid-template-columns:20px 1fr}.workspace-nav button small,.workspace-nav button b{display:none}.workspace-main{padding:18px 16px 48px}.class-grid{grid-template-columns:repeat(2,1fr)}.access-grid{grid-template-columns:1fr}}
 @media(max-width:620px){.workspace-nav{grid-template-columns:repeat(2,1fr)}.workspace-hero{align-items:flex-start;flex-direction:column;padding:22px}.workspace-hero h1{font-size:28px}.hero-facts{width:100%}.hero-facts div{min-width:0;flex:1}.view-heading,.create-class,.report-toolbar,.import-footer,.builder-footer,.import-heading{align-items:stretch;flex-direction:column}.create-class input{width:100%}.class-grid{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.application-list article{grid-template-columns:40px 1fr}.application-list footer{grid-column:1/-1}.report-summary{grid-template-columns:1fr}.import-mode{display:grid}.import-mode button{min-width:0}.format-strip{grid-template-columns:1fr 1fr}.format-strip span:nth-child(3){border-left:0;border-top:1px solid #dce6ef}.format-strip span:nth-child(4){border-top:1px solid #dce6ef}.excel-dropzone{min-height:140px;padding:18px}.preview-summary{align-items:flex-start;flex-wrap:wrap}.preview-summary strong{width:100%;margin:0}.preview-table-wrap table{min-width:0;table-layout:fixed}.preview-table-wrap th,.preview-table-wrap td{padding:8px 5px;white-space:normal;overflow-wrap:anywhere}.preview-table-wrap th:nth-child(1){width:26px}.preview-table-wrap th:nth-child(2){width:70px}.preview-table-wrap th:nth-child(3){width:52px}.preview-table-wrap th:nth-child(4),.preview-table-wrap td:nth-child(4),.preview-table-wrap th:nth-child(5),.preview-table-wrap td:nth-child(5){display:none}}
+/* Teacher tools use the same white hero and pale-blue selected state as the problem library. */
+.sidebar-brand > span {
+  background: #e7efff;
+  color: #1f5eff;
+}
+.workspace-nav button.active {
+  background: #e7efff;
+  color: #1f5eff;
+  box-shadow: none;
+}
+.workspace-nav button.active small { color: #1f5eff; }
+.workspace-hero {
+  border: 1px solid #dce5ef;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
+  color: #1f2a37;
+}
+.workspace-hero p,
+.view-heading p { color: #3977aa; }
+.workspace-hero h1 { color: #1f2a37; }
+.workspace-hero > div > span { color: #66778a; }
+.hero-facts {
+  border-color: #dce5ef;
+  background: #f8faff;
+}
+.hero-facts div + div { border-left-color: #e4ebf3; }
+.hero-facts strong { color: #1f5eff; }
+.hero-facts small { color: #728092; }
 </style>
