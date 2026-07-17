@@ -6,11 +6,11 @@ services:
     container_name: oj-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: oj
-      POSTGRES_PASSWORD: oj_dev_2024
-      POSTGRES_DB: oj_platform
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in config/infra.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in config/infra.env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in config/infra.env}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,16 +25,20 @@ services:
     restart: unless-stopped
     command: >
       redis-server
+      --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in config/infra.env}
+      --protected-mode yes
       --appendonly yes
       --appendfsync everysec
       --maxmemory 512mb
       --maxmemory-policy noeviction
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in config/infra.env}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -45,11 +49,11 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin_dev
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in config/infra.env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in config/infra.env}
     ports:
-      - "9000:9000" # S3 API
-      - "9001:9001" # Web Console
+      - "127.0.0.1:9000:9000" # S3 API
+      - "127.0.0.1:9001:9001" # Web Console
     volumes:
       - minio_data:/data
     healthcheck:
@@ -83,8 +87,8 @@ services:
       -force-gc-interval 5s
       -pre-fork 0
     ports:
-      - "5050:5050"
-      - "5052:5052"
+      - "127.0.0.1:5050:5050"
+      - "127.0.0.1:5052:5052"
     shm_size: 512m
 
 volumes:

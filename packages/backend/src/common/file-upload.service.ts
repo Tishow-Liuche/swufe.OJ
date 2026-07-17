@@ -12,13 +12,13 @@ export class FileUploadService {
 
   constructor(private config: ConfigService) {
     this.client = new Minio.Client({
-      endPoint: config.get('S3_ENDPOINT', 'localhost'),
-      port: parseInt(config.get('S3_PORT', '9000')),
+      endPoint: config.getOrThrow<string>('S3_ENDPOINT'),
+      port: Number(config.getOrThrow<string>('S3_PORT')),
       useSSL: config.get('S3_USE_SSL', 'false') === 'true',
-      accessKey: config.get('S3_ACCESS_KEY', 'minioadmin'),
-      secretKey: config.get('S3_SECRET_KEY', 'minioadmin_dev'),
+      accessKey: config.getOrThrow<string>('S3_ACCESS_KEY'),
+      secretKey: config.getOrThrow<string>('S3_SECRET_KEY'),
     });
-    this.bucket = config.get('S3_BUCKET', 'oj-testdata');
+    this.bucket = config.getOrThrow<string>('S3_BUCKET');
     this.ensureBucket();
   }
 

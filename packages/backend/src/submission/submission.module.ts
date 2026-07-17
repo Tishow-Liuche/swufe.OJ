@@ -19,10 +19,20 @@ import { QojModule } from '../qoj/qoj.module';
     JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule, QojModule,
     BullModule.registerQueueAsync({
       name: 'judge', imports: [ConfigModule], inject: [ConfigService],
-      useFactory: (c: ConfigService) => ({
-        connection: { host: c.get('REDIS_HOST', 'localhost'), port: c.get('REDIS_PORT', 6379) },
-        defaultJobOptions: { removeOnComplete: 100, removeOnFail: 200, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-      }),
+      useFactory: (c: ConfigService) => {
+        const port = Number(c.getOrThrow<string>('REDIS_PORT'));
+        if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+          throw new Error('REDIS_PORT must be a valid TCP port');
+        }
+        return {
+          connection: {
+            host: c.getOrThrow<string>('REDIS_HOST'),
+            port,
+            password: c.getOrThrow<string>('REDIS_PASSWORD'),
+          },
+          defaultJobOptions: { removeOnComplete: 100, removeOnFail: 200, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+        };
+      },
     }),
   ],
   controllers: [SubmissionController, CfHelperController, LuoguHelperController, QojHelperController],

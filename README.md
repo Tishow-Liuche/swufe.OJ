@@ -125,8 +125,10 @@ cd swufe-oj
 ### 启动基础设施
 
 ```bash
-docker compose up -d
-# 启动 PostgreSQL 16 + Redis 7 + MinIO + go-judge
+cp config/infra.env.example config/infra.env
+# 编辑 config/infra.env，为 PostgreSQL、Redis 和 MinIO 填入不同的随机强密码
+docker compose --env-file config/infra.env up -d
+# 启动 PostgreSQL 16 + Redis 7 + MinIO + go-judge；端口仅绑定本机回环地址
 ```
 
 ### 初始化后端
@@ -134,6 +136,7 @@ docker compose up -d
 ```bash
 cd packages/backend
 cp ../../config/.env.example .env
+# 将 .env 中的数据库、Redis 和 MinIO 密钥替换为 config/infra.env 对应值
 npm install
 npx prisma migrate deploy
 npx prisma generate
