@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { Camera } from '@lucide/vue';
+import { Award as AwardIcon, Camera, KeyRound, Mail, Phone, ShieldCheck, Trophy, UserRound } from '@lucide/vue';
+import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
 import UserAvatar from '../components/UserAvatar.vue';
 import { useAuthStore } from '../stores/auth';
@@ -26,12 +27,20 @@ interface Award {
   status: string;
 }
 
+type MainTab = 'overview' | 'submissions' | 'settings';
+type SettingsTab = 'profile' | 'awards' | 'security';
+
 const stats = ref<Stats | null>(null);
 const profile = ref<any>(null);
 const auth = useAuthStore();
+const route = useRoute();
+const router = useRouter();
 const loading = ref(true);
 const error = ref('');
-const activeTab = ref<'overview' | 'submissions' | 'settings'>('overview');
+const activeTab = ref<MainTab>(route.query.tab === 'settings' ? 'settings' : 'overview');
+const settingsTab = ref<SettingsTab>(
+  route.query.settings === 'awards' || route.query.settings === 'security' ? route.query.settings : 'profile',
+);
 
 const allSubmissions = ref<any[]>([]);
 const subsLoading = ref(false);
@@ -98,6 +107,19 @@ async function loadSettings() {
   } finally {
     settingsLoading.value = false;
   }
+}
+
+function selectSettingsTab(tab: SettingsTab) {
+  settingsTab.value = tab;
+  settingsMessage.value = '';
+  settingsError.value = '';
+}
+
+function goToPasswordChange() {
+  router.push({
+    path: '/change-password',
+    query: { redirect: '/profile?tab=settings&settings=security' },
+  });
 }
 
 async function saveProfile() {
@@ -190,6 +212,7 @@ function editAward(award: Award) {
   awardForm.rank = award.rank || null;
   awardForm.certificateUrl = award.certificateUrl || '';
   activeTab.value = 'settings';
+  settingsTab.value = 'awards';
 }
 
 async function deleteAward(id: string) {
@@ -285,6 +308,21 @@ function formatMemoryKb(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? `${(n / 1024).toFixed(1)}MB` : '-';
 }
+
+function maskEmail(value?: string | null) {
+  if (!value) return '未绑定';
+  const [local, domain] = value.split('@');
+  if (!domain) return value;
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${'*'.repeat(Math.max(2, local.length - visible.length))}@${domain}`;
+}
+
+function maskPhone(value?: string | null) {
+  if (!value) return '未绑定';
+  const digits = value.replace(/\s/g, '');
+  if (digits.length < 7) return value;
+  return `${digits.slice(0, 3)}****${digits.slice(-4)}`;
+}
 </script>
 
 <template>
@@ -295,51 +333,50 @@ function formatMemoryKb(value: unknown) {
     <template v-if="profile && stats">
       <header class="profile-workspace-hero">
         <div>
-          <p>PERSONAL WORKSPACE</p>
-          <h1>个人中心</h1>
-          <span>查看训练轨迹、提交记录和账号设置。</span>
+          <p>{{ activeTab === 'settings' ? 'ACCOUNT SETTINGS' : 'PERSONAL WORKSPACE' }}</p>
+          <h1>{{ activeTab === 'settings' ? '用户设置' : '个人中心' }}</h1>
+          <span>{{ activeTab === 'settings' ? '集中管理个人资料、奖项认证与账户安全。' : '查看训练轨迹、提交记录和账号设置。' }}</span>
         </div>
         <div class="profile-workspace-state">
-          <strong>{{ profile.role === 'ADMIN' ? '管理员空间' : profile.role === 'TEACHER' ? '教师空间' : '学习空间' }}</strong>
-          <small>账户状态正常</small>
+          <strong>{{ activeTab === 'settings' ? '3 个设置板块' : profile.role === 'ADMIN' ? '管理员空间' : profile.role === 'TEACHER' ? '教师空间' : '学习空间' }}</strong>
+          <small>{{ activeTab === 'settings' ? '资料、认证与账户安全' : '账户状态正常' }}</small>
         </div>
       </header>
-      <div class="profile-header">
-        <div class="profile-avatar-control">
-          <UserAvatar :name="profile.nickname || profile.username" :avatar="profile.avatar" :size="72" />
-          <input ref="avatarInput" class="avatar-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" @change="uploadAvatar" />
-          <button class="avatar-upload-button" type="button" :disabled="avatarUploading" @click="chooseAvatar"><Camera :size="14" />{{ avatarUploading ? '上传中' : '更换头像' }}</button>
-          <span v-if="avatarError" class="avatar-error">{{ avatarError }}</span>
-        </div>
-        <div class="user-info">
-          <h2>{{ profile.nickname || profile.username }}</h2>
-          <p class="username">@{{ profile.username }}</p>
-          <div class="identity-row">
-            <span class="role-badge" :class="profile.role?.toLowerCase()">
-              {{ profile.role === 'ADMIN' ? '管理员' : profile.role === 'TEACHER' ? '教师' : '学生' }}
-            </span>
-            <span v-if="profile.school" class="school-name">{{ profile.school }}</span>
-            <span v-if="profile.email" class="school-name">{{ profile.email }}</span>
+      <template v-if="activeTab !== 'settings'">
+        <div class="profile-header">
+          <div class="profile-avatar-control">
+            <UserAvatar :name="profile.nickname || profile.username" :avatar="profile.avatar" :size="72" />
           </div>
-          <p class="join-date">加入于 {{ new Date(profile.createdAt).toLocaleDateString('zh-CN') }}</p>
+          <div class="user-info">
+            <h2>{{ profile.nickname || profile.username }}</h2>
+            <p class="username">@{{ profile.username }}</p>
+            <div class="identity-row">
+              <span class="role-badge" :class="profile.role?.toLowerCase()">
+                {{ profile.role === 'ADMIN' ? '管理员' : profile.role === 'TEACHER' ? '教师' : '学生' }}
+              </span>
+              <span v-if="profile.school" class="school-name">{{ profile.school }}</span>
+              <span v-if="profile.email" class="school-name">{{ profile.email }}</span>
+            </div>
+            <p class="join-date">加入于 {{ new Date(profile.createdAt).toLocaleDateString('zh-CN') }}</p>
+          </div>
         </div>
-      </div>
 
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value">{{ stats.overview.totalSubmissions }}</div><div class="stat-label">总提交</div></div>
-        <div class="stat-card accent-green"><div class="stat-value">{{ stats.overview.acceptRate }}%</div><div class="stat-label">通过率</div></div>
-        <div class="stat-card accent-blue"><div class="stat-value">{{ stats.overview.solvedCount }}</div><div class="stat-label">已解决</div></div>
-        <div class="stat-card accent-orange"><div class="stat-value">{{ stats.overview.triedCount }}</div><div class="stat-label">尝试过</div></div>
-        <div class="stat-card accent-purple"><div class="stat-value">{{ stats.overview.activeDays }}</div><div class="stat-label">活跃天数</div></div>
-        <div class="stat-card accent-teal"><div class="stat-value">{{ stats.overview.currentStreak }}<span class="stat-unit">天</span></div><div class="stat-label">连续打卡</div></div>
-      </div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-value">{{ stats.overview.totalSubmissions }}</div><div class="stat-label">总提交</div></div>
+          <div class="stat-card accent-green"><div class="stat-value">{{ stats.overview.acceptRate }}%</div><div class="stat-label">通过率</div></div>
+          <div class="stat-card accent-blue"><div class="stat-value">{{ stats.overview.solvedCount }}</div><div class="stat-label">已解决</div></div>
+          <div class="stat-card accent-orange"><div class="stat-value">{{ stats.overview.triedCount }}</div><div class="stat-label">尝试过</div></div>
+          <div class="stat-card accent-purple"><div class="stat-value">{{ stats.overview.activeDays }}</div><div class="stat-label">活跃天数</div></div>
+          <div class="stat-card accent-teal"><div class="stat-value">{{ stats.overview.currentStreak }}<span class="stat-unit">天</span></div><div class="stat-label">连续打卡</div></div>
+        </div>
+      </template>
 
-      <div class="panel submissions-panel">
+      <div class="panel submissions-panel" :class="{ 'settings-mode': activeTab === 'settings' }">
         <div class="sub-header">
           <div class="tabs">
             <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">数据概览</button>
             <button :class="{ active: activeTab === 'submissions' }" @click="loadAllSubmissions">提交记录</button>
-            <button :class="{ active: activeTab === 'settings' }" @click="loadSettings">设置</button>
+            <button :class="{ active: activeTab === 'settings' }" @click="loadSettings"><ShieldCheck :size="15" aria-hidden="true" />用户设置</button>
           </div>
           <span v-if="activeTab === 'submissions'" class="sub-count">{{ allSubmissions.length }} 条</span>
         </div>
@@ -434,65 +471,189 @@ function formatMemoryKb(value: unknown) {
           <div v-if="!subsLoading && allSubmissions.length === 0" class="no-data">暂无提交记录</div>
         </div>
 
-        <div v-if="activeTab === 'settings'" class="settings">
-          <div v-if="settingsLoading" class="no-data">加载设置中...</div>
+        <section v-if="activeTab === 'settings'" class="settings-workspace">
+          <nav class="settings-tabs" aria-label="用户设置板块" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="settingsTab === 'profile'"
+              :class="{ active: settingsTab === 'profile' }"
+              @click="selectSettingsTab('profile')"
+            ><UserRound :size="17" aria-hidden="true" />个人信息</button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="settingsTab === 'awards'"
+              :class="{ active: settingsTab === 'awards' }"
+              @click="selectSettingsTab('awards')"
+            ><AwardIcon :size="17" aria-hidden="true" />奖项认证</button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="settingsTab === 'security'"
+              :class="{ active: settingsTab === 'security' }"
+              @click="selectSettingsTab('security')"
+            ><ShieldCheck :size="17" aria-hidden="true" />安全设置</button>
+          </nav>
+
           <div v-if="settingsMessage" class="success-msg">{{ settingsMessage }}</div>
           <div v-if="settingsError" class="error-msg compact">{{ settingsError }}</div>
+          <div v-if="settingsLoading" class="no-data">加载设置中...</div>
 
-          <div class="settings-grid">
-            <section class="settings-card">
-              <h3>基础资料</h3>
-              <label>昵称<input v-model="profileForm.nickname" placeholder="显示在个人中心和榜单上的名字" /></label>
-              <label>邮箱<input v-model="profileForm.email" type="email" placeholder="用于绑定和通知" /></label>
-              <label>电话号码<input v-model="profileForm.phone" placeholder="可选，用于身份联系" /></label>
-              <button class="primary-btn" @click="saveProfile">保存基础资料</button>
-            </section>
-
-            <section class="settings-card">
-              <h3>OJ 账号绑定</h3>
-              <label>Codeforces 账号<input v-model="accountForm.codeforcesHandle" placeholder="例如 tourist" /></label>
-              <label>洛谷账号<input v-model="accountForm.luoguHandle" placeholder="填写洛谷用户名或 UID" /></label>
-              <p class="hint">这里保存的是你的远程 OJ 身份，提交跳转和结果回传会优先使用这些绑定信息。</p>
-              <button class="primary-btn" @click="saveAccounts">保存 OJ 账号</button>
-            </section>
-          </div>
-
-          <section class="settings-card awards-card">
-            <div class="card-header">
-              <h3>ICPC / CCPC 奖项认定</h3>
-              <button v-if="awardForm.id" class="ghost-btn" @click="resetAwardForm">取消编辑</button>
-            </div>
-            <div class="award-form">
-              <label>赛事
-                <select v-model="awardForm.competition">
-                  <option value="ICPC">ICPC</option>
-                  <option value="CCPC">CCPC</option>
-                </select>
-              </label>
-              <label>年份<input v-model.number="awardForm.year" type="number" min="1970" max="2100" /></label>
-              <label>赛季/届次<input v-model="awardForm.season" placeholder="如 2025-2026" /></label>
-              <label>赛区<input v-model="awardForm.region" placeholder="如 成都、沈阳、女生赛" /></label>
-              <label>奖项<input v-model="awardForm.awardLevel" placeholder="如 金奖 / 银奖 / 铜奖" /></label>
-              <label>队名<input v-model="awardForm.teamName" placeholder="可选" /></label>
-              <label>排名<input v-model.number="awardForm.rank" type="number" min="1" placeholder="可选" /></label>
-              <label>证书/榜单链接<input v-model="awardForm.certificateUrl" placeholder="可选，建议填写证明链接" /></label>
-            </div>
-            <button class="primary-btn" @click="saveAward">{{ awardForm.id ? '更新认定' : '提交认定' }}</button>
-
-            <div class="award-list">
-              <div v-for="award in awards" :key="award.id" class="award-row">
+          <template v-else>
+            <section v-if="settingsTab === 'profile'" class="settings-surface" aria-label="个人信息">
+              <div class="settings-section-heading">
                 <div>
-                  <strong>{{ award.competition }} {{ award.year || '' }} {{ award.awardLevel }}</strong>
-                  <p>{{ award.region || '未填赛区' }} · {{ award.teamName || '未填队名' }}<span v-if="award.rank"> · 第 {{ award.rank }} 名</span></p>
+                  <p class="section-kicker">个人档案</p>
+                  <h2>个人信息</h2>
+                  <span>维护公开资料与平台账号。</span>
                 </div>
-                <span class="award-status" :class="award.status.toLowerCase()">{{ awardStatusLabels[award.status] || award.status }}</span>
-                <button class="ghost-btn" @click="editAward(award)">编辑</button>
-                <button class="danger-btn" @click="deleteAward(award.id)">删除</button>
+                <span class="section-state">资料可随时更新</span>
               </div>
-              <div v-if="awards.length === 0" class="no-data-sm">还没有提交 ICPC/CCPC 奖项认定</div>
-            </div>
-          </section>
-        </div>
+
+              <div class="profile-settings-layout">
+                <div class="avatar-settings">
+                  <span class="setting-label">头像</span>
+                  <UserAvatar :name="profile.nickname || profile.username" :avatar="profile.avatar" :size="96" />
+                  <input ref="avatarInput" class="avatar-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" @change="uploadAvatar" />
+                  <button class="avatar-upload-button" type="button" :disabled="avatarUploading" @click="chooseAvatar"><Camera :size="15" aria-hidden="true" />{{ avatarUploading ? '上传中' : '更换头像' }}</button>
+                  <span v-if="avatarError" class="avatar-error">{{ avatarError }}</span>
+                </div>
+
+                <div class="settings-form-area">
+                  <div class="settings-field-grid">
+                    <label class="setting-field">账号
+                      <input :value="profile.username" readonly aria-readonly="true" />
+                    </label>
+                    <label class="setting-field">昵称
+                      <input v-model="profileForm.nickname" placeholder="请输入显示名称" />
+                    </label>
+                    <label class="setting-field">邮箱
+                      <input v-model="profileForm.email" type="email" placeholder="请输入邮箱" />
+                    </label>
+                    <label class="setting-field">手机号
+                      <input v-model="profileForm.phone" inputmode="tel" placeholder="请输入手机号" />
+                    </label>
+                  </div>
+                  <div class="settings-actions">
+                    <button class="primary-btn" type="button" @click="saveProfile">保存个人信息</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-divider"></div>
+
+              <div class="settings-section-heading compact-heading">
+                <div>
+                  <p class="section-kicker">平台账号</p>
+                  <h2>OJ 账号绑定</h2>
+                  <span>用于关联你在第三方题库中的身份。</span>
+                </div>
+              </div>
+              <div class="settings-field-grid account-settings-grid">
+                <label class="setting-field">Codeforces
+                  <input v-model="accountForm.codeforcesHandle" placeholder="例如 tourist" />
+                </label>
+                <label class="setting-field">洛谷
+                  <input v-model="accountForm.luoguHandle" placeholder="用户名或 UID" />
+                </label>
+              </div>
+              <div class="settings-actions">
+                <button class="primary-btn" type="button" @click="saveAccounts">保存平台账号</button>
+              </div>
+            </section>
+
+            <section v-else-if="settingsTab === 'awards'" class="settings-surface" aria-label="奖项认证">
+              <div class="settings-section-heading">
+                <div>
+                  <p class="section-kicker">竞赛荣誉</p>
+                  <h2>奖项认证</h2>
+                  <span>提交后将进入管理员审核流程。</span>
+                </div>
+                <span class="section-state award-state"><Trophy :size="15" aria-hidden="true" />ICPC / CCPC</span>
+              </div>
+
+              <div class="award-form">
+                <label class="setting-field">赛事
+                  <select v-model="awardForm.competition">
+                    <option value="ICPC">ICPC</option>
+                    <option value="CCPC">CCPC</option>
+                  </select>
+                </label>
+                <label class="setting-field">年份<input v-model.number="awardForm.year" type="number" min="1970" max="2100" /></label>
+                <label class="setting-field">赛季/届次<input v-model="awardForm.season" placeholder="如 2025-2026" /></label>
+                <label class="setting-field">赛区<input v-model="awardForm.region" placeholder="如 成都、沈阳、女生赛" /></label>
+                <label class="setting-field">奖项<input v-model="awardForm.awardLevel" placeholder="如 金奖 / 银奖 / 铜奖" /></label>
+                <label class="setting-field">队名<input v-model="awardForm.teamName" placeholder="选填" /></label>
+                <label class="setting-field">排名<input v-model.number="awardForm.rank" type="number" min="1" placeholder="选填" /></label>
+                <label class="setting-field">证书或榜单链接<input v-model="awardForm.certificateUrl" placeholder="选填" /></label>
+              </div>
+              <div class="settings-actions">
+                <button class="primary-btn" type="button" @click="saveAward">{{ awardForm.id ? '更新认定' : '提交认定' }}</button>
+                <button v-if="awardForm.id" class="ghost-btn" type="button" @click="resetAwardForm">取消编辑</button>
+              </div>
+
+              <div class="settings-divider"></div>
+              <div class="award-list-heading">
+                <h3>我的认证</h3>
+                <span>{{ awards.length }} 条</span>
+              </div>
+              <div class="award-list">
+                <div v-for="award in awards" :key="award.id" class="award-row">
+                  <div>
+                    <strong>{{ award.competition }} {{ award.year || '' }} {{ award.awardLevel }}</strong>
+                    <p>{{ award.region || '未填赛区' }} · {{ award.teamName || '未填队名' }}<span v-if="award.rank"> · 第 {{ award.rank }} 名</span></p>
+                  </div>
+                  <span class="award-status" :class="award.status.toLowerCase()">{{ awardStatusLabels[award.status] || award.status }}</span>
+                  <div class="award-actions">
+                    <button class="ghost-btn" type="button" @click="editAward(award)">编辑</button>
+                    <button class="danger-btn" type="button" @click="deleteAward(award.id)">删除</button>
+                  </div>
+                </div>
+                <div v-if="awards.length === 0" class="award-empty">
+                  <AwardIcon :size="30" aria-hidden="true" />
+                  <strong>暂未提交奖项认证</strong>
+                  <span>填写上方资料后即可提交审核。</span>
+                </div>
+              </div>
+            </section>
+
+            <section v-else class="settings-surface security-surface" aria-label="安全设置">
+              <div class="settings-section-heading">
+                <div>
+                  <p class="section-kicker">账户保护</p>
+                  <h2>安全设置</h2>
+                  <span>管理登录凭据与安全联系方式。</span>
+                </div>
+                <span class="section-state security-state"><ShieldCheck :size="15" aria-hidden="true" />账户状态正常</span>
+              </div>
+
+              <div class="security-list">
+                <div class="security-item">
+                  <div class="security-item-copy">
+                    <span class="security-item-icon"><KeyRound :size="20" aria-hidden="true" /></span>
+                    <div><strong>登录密码</strong><p>定期更新密码可以更好地保护账号安全。</p></div>
+                  </div>
+                  <button class="primary-btn" type="button" @click="goToPasswordChange">修改密码</button>
+                </div>
+                <div class="security-item">
+                  <div class="security-item-copy">
+                    <span class="security-item-icon"><Mail :size="20" aria-hidden="true" /></span>
+                    <div><strong>安全邮箱</strong><p>{{ maskEmail(profileForm.email) }}</p></div>
+                  </div>
+                  <button class="ghost-btn" type="button" @click="selectSettingsTab('profile')">{{ profileForm.email ? '修改邮箱' : '绑定邮箱' }}</button>
+                </div>
+                <div class="security-item">
+                  <div class="security-item-copy">
+                    <span class="security-item-icon"><Phone :size="20" aria-hidden="true" /></span>
+                    <div><strong>安全手机</strong><p>{{ maskPhone(profileForm.phone) }}</p></div>
+                  </div>
+                  <button class="ghost-btn" type="button" @click="selectSettingsTab('profile')">{{ profileForm.phone ? '修改手机' : '绑定手机' }}</button>
+                </div>
+              </div>
+            </section>
+          </template>
+        </section>
       </div>
 
       <div v-if="selectedSubmission" class="modal-overlay" @click.self="selectedSubmission = null">
@@ -694,4 +855,82 @@ h4 { font-size: 15px; color: #333; margin: 16px 0 8px; }
 .tabs { border: 1px solid #dfe7ef; border-radius: 7px; background: #f4f7fb; }.tabs button { border-radius: 5px; color: #66778a; }.tabs button.active { background: #e7efff; color: #1f5eff; box-shadow: none; }.tabs button:hover:not(.active) { color: #1f5eff; background: #edf4ff; }
 .sub-row { border-bottom-color: #e9eef3; }.sub-row:hover { background: #f7faff; }.sub-lang { background: #edf3fa; color: #526f8d; }.settings-card { border-color: #dfe7ef; border-radius: 8px; background: #fbfcfe; }.settings-card input, .settings-card select { border-color: #ccd9e6; border-radius: 6px; }.settings-card input:focus, .settings-card select:focus { border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }.primary-btn { border-radius: 6px; background: #2469ad; }.primary-btn:hover { background: #1b578f; }.ghost-btn { border-radius: 6px; background: #e7efff; color: #1f5eff; }.danger-btn { border-radius: 6px; }
 @media (max-width: 560px) { .profile-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.profile-workspace-hero { align-items: stretch; flex-direction: column; padding: 22px; }.profile-workspace-hero h1 { font-size: 29px; }.profile-workspace-state { width: 100%; }.profile-header { padding: 20px; }.profile-avatar-control { flex-basis: 82px; } }
+
+/* User settings is a dedicated workspace, not a collection of nested cards. */
+.submissions-panel.settings-mode { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.submissions-panel.settings-mode .sub-header { margin: 0 0 12px; }
+.tabs button { display: inline-flex; align-items: center; gap: 6px; }
+.settings-workspace { display: grid; gap: 12px; }
+.settings-tabs { display: flex; min-height: 52px; align-items: end; gap: 30px; padding: 0 6px; border-bottom: 1px solid #dce5ef; overflow-x: auto; background: #fff; }
+.settings-tabs button { display: inline-flex; flex: 0 0 auto; min-height: 52px; align-items: center; gap: 7px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #66778a; font: inherit; font-size: 14px; font-weight: 750; cursor: pointer; transition: color .18s ease, border-color .18s ease; }
+.settings-tabs button:hover { color: #2469ad; }
+.settings-tabs button.active { border-bottom-color: #1f5eff; color: #1f5eff; }
+.settings-surface { border: 1px solid #dfe7ef; border-radius: 8px; padding: 30px 32px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .045); }
+.settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; margin-bottom: 28px; }
+.settings-section-heading h2 { margin: 2px 0 7px; color: #24364b; font-size: 22px; line-height: 1.25; letter-spacing: 0; }
+.settings-section-heading > div > span { color: #728092; font-size: 13px; line-height: 1.6; }
+.section-kicker { margin: 0; color: #3977aa; font-size: 11px; font-weight: 850; letter-spacing: .08em; }
+.section-state { display: inline-flex; min-height: 28px; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid #dce8f5; border-radius: 5px; background: #f5f9ff; color: #3977aa; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.profile-settings-layout { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 34px; align-items: start; }
+.avatar-settings { display: grid; justify-items: start; gap: 10px; padding-right: 30px; border-right: 1px solid #e7edf3; }
+.setting-label, .setting-field { color: #4d6072; font-size: 13px; font-weight: 750; }
+.avatar-input { display: none; }
+.avatar-upload-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid #c9dbef; border-radius: 5px; background: #f5f9ff; color: #2469ad; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; white-space: nowrap; }
+.avatar-upload-button:hover { border-color: #9abbe0; background: #eaf3ff; }
+.avatar-upload-button:disabled { cursor: wait; opacity: .62; }
+.avatar-error { max-width: 150px; color: #c64148; font-size: 11px; line-height: 1.45; }
+.settings-form-area { min-width: 0; }
+.settings-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; }
+.setting-field { display: grid; min-width: 0; gap: 7px; }
+.setting-field input, .setting-field select { width: 100%; min-width: 0; height: 40px; border: 1px solid #ccd9e6; border-radius: 6px; padding: 0 11px; background: #fff; color: #24364b; font: inherit; font-size: 14px; font-weight: 500; box-sizing: border-box; transition: border-color .18s ease, box-shadow .18s ease; }
+.setting-field input[readonly] { background: #f6f8fb; color: #728092; cursor: default; }
+.setting-field input:focus, .setting-field select:focus { outline: none; border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.primary-btn, .ghost-btn, .danger-btn { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; border: 0; border-radius: 6px; padding: 0 14px; font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; transition: background .18s ease, border-color .18s ease, color .18s ease; }
+.primary-btn { background: #2469ad; color: #fff; }.primary-btn:hover { background: #1b578f; }
+.ghost-btn { background: #e7efff; color: #1f5eff; }.ghost-btn:hover { background: #dbe9ff; }
+.danger-btn { background: #fff0ef; color: #c64148; }.danger-btn:hover { background: #ffe1df; }
+.settings-divider { height: 1px; margin: 34px 0; background: #e7edf3; }
+.compact-heading { margin-bottom: 20px; }
+.account-settings-grid { max-width: 640px; }
+.award-state { color: #a06a19; border-color: #f1dfbc; background: #fff9ed; }
+.award-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 18px; }
+.award-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.award-list-heading h3 { margin: 0; color: #24364b; font-size: 16px; }
+.award-list-heading span { color: #8290a0; font-size: 12px; }
+.award-list { margin-top: 8px; border-top: 1px solid #e7edf3; }
+.award-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid #e9eef3; }
+.award-row strong { color: #24364b; font-size: 14px; }
+.award-row p { margin: 5px 0 0; color: #728092; font-size: 12px; line-height: 1.5; }
+.award-status { display: inline-flex; min-height: 26px; align-items: center; justify-content: center; padding: 0 8px; border-radius: 5px; background: #fff7e6; color: #a06a19; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.award-status.approved { background: #eef9f1; color: #218c4a; }.award-status.rejected { background: #fff0ef; color: #c64148; }
+.award-actions { display: flex; gap: 8px; }.award-actions .ghost-btn, .award-actions .danger-btn { min-height: 30px; padding: 0 10px; font-size: 12px; }
+.award-empty { display: grid; justify-items: center; gap: 7px; padding: 48px 18px; color: #8290a0; text-align: center; }
+.award-empty svg { color: #8fb9dc; }.award-empty strong { color: #526f8d; font-size: 14px; }.award-empty span { font-size: 12px; }
+.security-state { color: #218c4a; border-color: #cfe9d6; background: #f2fbf4; }
+.security-list { border-top: 1px solid #e7edf3; }
+.security-item { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 98px; border-bottom: 1px solid #e7edf3; }
+.security-item-copy { display: flex; min-width: 0; align-items: center; gap: 14px; }
+.security-item-icon { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; border: 1px solid #dce8f5; border-radius: 6px; background: #f5f9ff; color: #3977aa; }
+.security-item-copy strong { color: #24364b; font-size: 14px; }.security-item-copy p { margin: 5px 0 0; color: #728092; font-size: 13px; line-height: 1.5; }
+@media (max-width: 900px) {
+  .settings-surface { padding: 26px; }
+  .profile-settings-layout { grid-template-columns: 136px minmax(0, 1fr); gap: 24px; }
+  .avatar-settings { padding-right: 24px; }
+  .award-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .settings-tabs { gap: 22px; padding: 0 2px; }
+  .settings-surface { padding: 22px 18px; }
+  .settings-section-heading { gap: 14px; margin-bottom: 22px; }
+  .settings-section-heading h2 { font-size: 20px; }
+  .section-state { display: none; }
+  .profile-settings-layout { grid-template-columns: 1fr; gap: 22px; }
+  .avatar-settings { justify-items: start; padding: 0 0 20px; border-right: 0; border-bottom: 1px solid #e7edf3; }
+  .settings-field-grid, .award-form { grid-template-columns: 1fr; }
+  .award-row { grid-template-columns: 1fr; gap: 10px; }
+  .award-actions { justify-content: flex-start; }
+  .security-item { align-items: flex-start; flex-direction: column; gap: 14px; padding: 18px 0; }
+  .security-item .primary-btn, .security-item .ghost-btn { width: 100%; }
+}
 </style>
