@@ -101,6 +101,19 @@ export class FileUploadService {
     return this.uploadFile(file, 'images');
   }
 
+  /** 上传用户头像，限制为可安全展示的常见位图格式。 */
+  async uploadAvatar(file: Express.Multer.File): Promise<string> {
+    if (!file) throw new BadRequestException('请选择头像图片');
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new BadRequestException('头像仅支持 PNG/JPEG/GIF/WebP 图片');
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      throw new BadRequestException('头像图片不能超过 2MB');
+    }
+    return this.uploadFile(file, 'avatars');
+  }
+
   private async validateZip(file: Express.Multer.File) {
     // 检查 ZIP 文件头
     if (file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b) {

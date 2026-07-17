@@ -154,6 +154,7 @@ export class CommunityService {
       include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
     });
     await this.audit(viewer.id, 'COMMUNITY_POST_CREATE', 'CommunityPost', post.id, { type, problemId });
+    await this.notifyMentions(content, viewer, `/community?post=${post.id}`);
     return post;
   }
 
@@ -172,6 +173,7 @@ export class CommunityService {
     if (post.authorId !== viewer.id) {
       await this.notify(post.authorId, 'POST_REPLY', '你的帖子收到了新回复', content.slice(0, 120), `/community?post=${postId}`);
     }
+    await this.notifyMentions(content, viewer, `/community?post=${postId}`, [post.authorId]);
     return reply;
   }
 
@@ -256,6 +258,14 @@ export class CommunityService {
     });
     if (!updated.count) throw new NotFoundException('通知不存在');
     return { ok: true };
+  }
+
+  async markAllNotificationsRead(userId: string) {
+    const updated = await this.prisma.notification.updateMany({
+      where: { userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { ok: true, count: updated.count };
   }
 
   async createAnnouncement(viewer: Viewer, body: any) {
@@ -404,6 +414,31 @@ export class CommunityService {
 
   private async notify(userId: string, type: string, title: string, content?: string, link?: string) {
     await this.prisma.notification.create({ data: { userId, type, title, content, link } });
+  }
+
+  private async notifyMentions(content: string, viewer: Viewer, link: string, excludedUserIds: string[] = []) {
+    const usernames = [...new Set(
+      [...content.matchAll(/@([a-zA-Z0-9_-]{2,32})/g)].map((match) => match[1]),
+    )];
+    if (!usernames.length) return;
+    const [actor, users] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: viewer.id },
+        select: { username: true, nickname: true },
+      }),
+      this.prisma.user.findMany({
+        where: { username: { in: usernames }, id: { notIn: [viewer.id, ...excludedUserIds] } },
+        select: { id: true, username: true, nickname: true },
+      }),
+    ]);
+    const actorName = actor?.nickname || actor?.username || '有人';
+    await Promise.all(users.map((user) => this.notify(
+      user.id,
+      'MENTION',
+      `${actorName} 在社区中 @ 了你`,
+      content.slice(0, 160),
+      link,
+    )));
   }
 
   private async audit(userId: string, action: string, resource: string, resourceId: string, detail: Record<string, unknown>) {

@@ -133,8 +133,9 @@ function renderMd(text: string): string {
   <div class="editor-page">
     <div class="page-header">
       <div>
-        <h2>创建题目</h2>
-        <p>先选择普通题或 SPJ，再上传包含测试点文件的 ZIP 包。</p>
+        <p class="workspace-kicker">PROBLEM STUDIO</p>
+        <h2>录入题目</h2>
+        <p>在一个工作区内完成命题、测试数据和题面编辑。</p>
       </div>
       <button class="btn-back" @click="router.push('/problems')">返回题库</button>
     </div>
@@ -330,4 +331,31 @@ function renderMd(text: string): string {
   .page-header, .card-header { flex-direction: column; align-items: stretch; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* Recording problems shares the same quiet workspace language as the main product. */
+.editor-page { width: min(1180px, calc(100% - 40px)); max-width: none; padding: 28px 0 64px; font-family: 'Manrope Variable', 'Noto Sans SC Variable', 'Microsoft YaHei', sans-serif; }
+.page-header { min-height: 158px; margin-bottom: 20px; padding: 28px 32px; border: 1px solid #dce5ef; border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .08); }
+.workspace-kicker { margin: 0 0 7px; color: #3977aa; font-size: 11px; font-weight: 850; letter-spacing: 0; }
+.page-header h2 { color: #1f2a37; font-size: 34px; letter-spacing: 0; }
+.page-header p:not(.workspace-kicker) { color: #66778a; font-size: 14px; line-height: 1.65; }
+.btn-back { border: 1px solid #aec7f4; border-radius: 6px; background: #e7efff; color: #1f5eff; font-weight: 750; }
+.btn-back:hover { border-color: #8fb8ef; background: #dce9ff; }
+.card { margin-bottom: 18px; padding: 24px; border: 1px solid #dfe7ef; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.card h3 { color: #24364b; font-size: 17px; }
+.card-header { padding-bottom: 14px; border-bottom: 1px solid #e6edf4; }
+.btn-toggle { border: 1px solid #c6daf2; border-radius: 6px; background: #f4f8ff; color: #1f5eff; font-weight: 750; }
+.form-group label { color: #52677c; }
+.form-group input, .form-group select, .form-group textarea { border-color: #ccd9e6; border-radius: 6px; color: #24364b; }
+.main-editor { border-color: #ccd9e6; border-radius: 7px; background: #fbfcfe; }
+.main-editor:focus, textarea:focus, input:focus, select:focus { border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }
+.preview-area { border-color: #dce5ef; border-radius: 7px; background: #fbfcfe; }
+.preview-area :deep(h3) { color: #24364b; border-bottom-color: #e6edf4; }
+.preview-area :deep(code) { background: #edf3fa; color: #34536f; }
+.format-box, .format-box.spj { border-color: #b9d3ef; border-radius: 7px; background: #f5f9fe; color: #34536f; }
+.format-box pre { border: 1px solid #d6e3f0; background: #eef4fb; color: #34536f; }
+.btn-primary { border-radius: 7px; background: #2469ad; color: #fff; box-shadow: none; }
+.btn-primary:hover { background: #1b578f; }
+.result-card { border-color: #b9dec9; background: #f3fbf6; }
+.error-card { border-color: #f0c8c6; background: #fff5f4; }
+@media (max-width: 700px) { .editor-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.page-header { min-height: auto; padding: 22px; }.page-header h2 { font-size: 29px; }.btn-back { width: fit-content; } }
 </style>

@@ -1,5 +1,9 @@
-import { Controller, Get, Post, Patch, Put, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller, Get, Post, Patch, Put, Delete, Body, Param, UseGuards, Req,
+  UseInterceptors, UploadedFile,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UserService } from './user.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -21,6 +25,13 @@ export class UserController {
     @Body() data: { nickname?: string | null; avatar?: string | null; email?: string; phone?: string | null },
   ) {
     return this.userService.updateProfile(req.user.id, data);
+  }
+
+  @Post('avatar')
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
+  uploadAvatar(@Req() req: any, @UploadedFile() file: Express.Multer.File) {
+    return this.userService.uploadAvatar(req.user.id, file);
   }
 
   @Get('settings')

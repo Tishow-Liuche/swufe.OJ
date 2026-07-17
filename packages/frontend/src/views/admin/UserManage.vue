@@ -81,7 +81,17 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
 
 <template>
   <div class="page">
-    <h2>用户管理</h2>
+    <header class="page-hero">
+      <div>
+        <p>ADMIN WORKSPACE</p>
+        <h2>用户与审核管理</h2>
+        <span>集中处理教师申请、班级启用和账号权限。</span>
+      </div>
+      <div class="hero-facts">
+        <div><strong>{{ users.length }}</strong><small>用户</small></div>
+        <div><strong>{{ classApplications.filter((item) => item.status === 'PENDING').length }}</strong><small>待审班级</small></div>
+      </div>
+    </header>
     <p v-if="msg" class="msg">{{ msg }}</p>
     <section class="class-review">
       <header><div><h3>班级创建审核</h3><p>仅审核通过的班级可以导入学生和发布教学内容。</p></div><span><Clock3 :size="15" />{{ classApplications.filter((item) => item.status === 'PENDING').length }} 待审核</span></header>
@@ -186,4 +196,42 @@ h2 { margin-bottom: 16px; }
 .reset-row { display: flex; gap: 4px; align-items: center; }
 .reset-row input { padding: 3px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
 .class-review { margin:0 0 18px; padding:18px; border:1px solid #dfe8ef; border-radius:12px; background:#fff; box-shadow:0 4px 14px rgba(31,64,95,.04); }.class-review header { display:flex; align-items:center; justify-content:space-between; gap:15px; }.class-review h3 { margin:0; font-size:16px; }.class-review header p { margin:4px 0 0; color:#8290a0; font-size:12px; }.class-review header>span { display:flex; align-items:center; gap:5px; padding:6px 8px; color:#98600c; border-radius:6px; background:#fff1d8; font-size:11px; font-weight:800; }.class-application-list { display:grid; gap:9px; margin-top:15px; }.class-application { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:12px; border:1px solid #edf0f3; border-radius:9px; background:#fcfdff; }.class-application strong { display:block; margin-top:7px; font-size:14px; }.class-application p,.class-application small { margin:5px 0 0; color:#7f8e9d; font-size:11px; }.class-review-actions { display:flex; gap:7px; }.class-review-actions button { padding:6px 9px; border-radius:6px; font-size:12px; font-weight:800; cursor:pointer; }.approve-btn { color:#fff; border:1px solid #197452; background:#21845f; }.reject-btn { color:#9d3933; border:1px solid #e5bfbc; background:#fff; }.class-review-actions button:disabled { opacity:.5; cursor:wait; }.empty-review { margin:16px 0 0; color:#8e9aa7; font-size:13px; }@media(max-width:700px){.class-application{align-items:flex-start;flex-direction:column}.class-review header{align-items:flex-start;flex-direction:column}}
+
+/* Administration now follows the shared white hero and light work-surface system. */
+.page { width: min(1180px, calc(100% - 40px)); max-width: none; min-height: calc(100vh - 56px); padding: 28px 0 64px; font-family: 'Manrope Variable', 'Noto Sans SC Variable', 'Microsoft YaHei', sans-serif; }
+.page-hero { display: flex; min-height: 158px; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 20px; padding: 28px 32px; border: 1px solid #dce5ef; border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .08); }
+.page-hero p { margin: 0 0 7px; color: #3977aa; font-size: 11px; font-weight: 850; letter-spacing: 0; }
+.page-hero h2 { margin: 0; color: #1f2a37; font-size: 34px; letter-spacing: 0; }
+.page-hero > div > span { display: block; margin-top: 9px; color: #66778a; font-size: 14px; }
+.hero-facts { display: flex; overflow: hidden; border: 1px solid #dce5ef; border-radius: 8px; background: #f8faff; }
+.hero-facts div { display: grid; min-width: 102px; gap: 3px; padding: 13px 16px; text-align: center; }
+.hero-facts div + div { border-left: 1px solid #e4ebf3; }
+.hero-facts strong { color: #1f5eff; font-size: 24px; line-height: 1; }
+.hero-facts small { color: #728092; font-size: 11px; }
+.msg { margin-bottom: 14px; border: 1px solid #bfd6ef; border-radius: 7px; background: #f3f8fe; color: #245f94; }
+.class-review { padding: 22px; border-color: #dfe7ef; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.class-review h3 { color: #24364b; font-size: 17px; }
+.class-application { border-color: #e3eaf1; border-radius: 7px; background: #fbfcfe; }
+.approve-btn { border-color: #2469ad; background: #2469ad; }.approve-btn:hover { background: #1b578f; }
+.table-wrap { border: 1px solid #dfe7ef; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.table { box-shadow: none; }.table th { background: #f8faff; color: #52677c; }.table th, .table td { border-bottom-color: #e8edf2; }.table tr:hover { background: #f7faff; }
+.actions select, .btn-sm, .reset-row input { border-color: #cbd9e6; border-radius: 6px; color: #34536f; }.btn-sm:hover { border-color: #aec7f4; background: #e7efff; color: #1f5eff; }.btn-green { border-color: #2469ad; background: #2469ad; }.btn-green:hover { background: #1b578f; color: #fff; }
+@media (max-width: 700px) {
+  .page { width: min(100% - 28px, 1180px); padding-top: 18px; }
+  .page-hero { align-items: stretch; flex-direction: column; padding: 22px; }
+  .page-hero h2 { font-size: 29px; }
+  .hero-facts { width: 100%; }.hero-facts div { flex: 1; }
+  .table-wrap { overflow: visible; border: 0; background: transparent; box-shadow: none; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table { background: transparent; }
+  .table thead { display: none; }
+  .table tr { margin-bottom: 12px; padding: 8px 14px; border: 1px solid #dfe7ef; border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+  .table td { display: flex; min-height: 40px; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid #e8edf2; text-align: right; }
+  .table td:last-child { border-bottom: 0; }
+  .table td::before { flex: 0 0 auto; color: #728092; content: attr(data-label); font-size: 12px; font-weight: 750; text-align: left; }
+  .table td:nth-child(1)::before { content: '用户'; }.table td:nth-child(2)::before { content: '学校'; }.table td:nth-child(3)::before { content: '当前角色'; }.table td:nth-child(4)::before { content: '教师申请'; }.table td:nth-child(5)::before { content: '提交数'; }.table td:nth-child(6)::before { content: '加入时间'; }.table td:nth-child(7)::before { content: '操作'; }
+  .table td strong, .table td small { white-space: normal; text-align: right; }
+  .application-cell, .review-actions, .actions { justify-content: flex-end; }
+  .actions { flex-wrap: wrap; }
+}
 </style>
