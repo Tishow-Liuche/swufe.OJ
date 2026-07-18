@@ -39,6 +39,6 @@ describe('cf statement formatting', () => {
     expect(result.hint).toBe('For 8, split into 4 and 4.');
     expect(result.dataRange).toBe('Time: 1000ms, Memory: 64MB');
     expect(result.tags).toEqual(['math', 'brute force']);
-    expect(result.difficulty).toBe('BEGINNER');
+    expect(result.difficulty).toBe('POINT_0');
   });
 });

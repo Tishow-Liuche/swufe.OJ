@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import AdmZip from 'adm-zip';
 import { ProblemService } from './problem.service';
 
@@ -15,19 +15,31 @@ describe('ProblemService createFull with judge data', () => {
         count: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        delete: jest.fn(),
       },
       problemVersion: {
         findFirst: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+        create: jest.fn(),
       },
       problemTestCase: {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
         count: jest.fn(),
       },
+      problemTag: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      checker: {
+        upsert: jest.fn(),
+      },
       testGroup: {
         deleteMany: jest.fn(),
         create: jest.fn(),
       },
+      $transaction: jest.fn(async (fn: any) => fn(prisma)),
     };
     service = new ProblemService(prisma, {} as any);
   });
@@ -68,7 +80,7 @@ describe('ProblemService createFull with judge data', () => {
     prisma.problem.findMany.mockResolvedValue([]);
     prisma.problem.count.mockResolvedValue(0);
 
-    await service.findAll({ keyword: 'P10001', pageSize: 12, status: 'DRAFT' });
+    await service.findAll({ keyword: 'P10001', pageSize: 12 });
 
     const expectedWhere = {
       status: 'PUBLISHED',
@@ -78,6 +90,34 @@ describe('ProblemService createFull with judge data', () => {
         { sourceInfo: { is: { remoteProblemId: { contains: 'P10001', mode: 'insensitive' } } } },
         { sourceInfo: { is: { remoteUrl: { contains: 'P10001', mode: 'insensitive' } } } },
       ],
+    };
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
+    expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('filters published problems by SWUFE Point difficulty values', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ difficulty: 'POINT_1', pageSize: 12 });
+
+    const expectedWhere = {
+      status: 'PUBLISHED',
+      difficulty: 'POINT_1',
+    };
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
+    expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('normalizes legacy difficulty filters before querying published problems', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ difficulty: 'POPULAR', pageSize: 12 });
+
+    const expectedWhere = {
+      status: 'PUBLISHED',
+      difficulty: 'POINT_1',
     };
     expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
     expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
@@ -204,6 +244,187 @@ describe('ProblemService createFull with judge data', () => {
     expect(result.testCount).toBe(2);
   });
 
+  it('stores the author when creating a local problem', async () => {
+    prisma.problem.create.mockResolvedValue({ id: 'p-owned' });
+
+    await service.createFull({
+      title: 'Owned Problem',
+      description: 'desc',
+      judgeMode: 'STANDARD',
+      status: 'DRAFT',
+    } as any, 'teacher-1');
+
+    expect(prisma.problem.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        createdBy: 'teacher-1',
+      }),
+    }));
+  });
+
+  it('lists only authored local problems for teachers', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAuthored({ keyword: 'math', status: 'DRAFT', pageSize: 8 } as any, {
+      id: 'teacher-1',
+      role: 'TEACHER',
+    });
+
+    const expectedWhere = {
+      source: 'LOCAL',
+      createdBy: 'teacher-1',
+      status: 'DRAFT',
+      OR: [
+        { title: { contains: 'math', mode: 'insensitive' } },
+        { id: { contains: 'math', mode: 'insensitive' } },
+      ],
+    };
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 8 }));
+    expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('does not expose contest reserved problems through the public problem list', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ status: 'CONTEST_RESERVED', pageSize: 12 });
+
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: 'PUBLISHED' },
+    }));
+    expect(prisma.problem.count).toHaveBeenCalledWith({ where: { status: 'PUBLISHED' } });
+  });
+
+  it('lists all local problems for admins', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAuthored({ pageSize: 20 } as any, { id: 'admin-1', role: 'ADMIN' });
+
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { source: 'LOCAL' },
+    }));
+  });
+
+  it('rejects teacher edits for local problems owned by another user', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p-other', source: 'LOCAL', createdBy: 'teacher-2' });
+
+    await expect(service.update('p-other', { title: 'Hack' } as any, { id: 'teacher-1', role: 'TEACHER' }))
+      .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('updates base fields, current version, tags, and checker for an authored local problem', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'LOCAL', createdBy: 'teacher-1' });
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      checker: { type: 'STANDARD', language: null, sourceCode: null },
+    });
+    prisma.problem.update.mockResolvedValue({ id: 'p1', title: 'New Title' });
+
+    await service.update('p1', {
+      title: 'New Title',
+      difficulty: 'IMPROVE',
+      timeLimit: 2000,
+      memoryLimit: 512,
+      outputLimit: 128,
+      description: 'new statement',
+      inputFormat: 'input',
+      outputFormat: 'output',
+      sampleInput: '1 2\n',
+      sampleOutput: '3\n',
+      hint: 'hint',
+      dataRange: 'n <= 10',
+      tags: ['math', 'prefix'],
+      judgeMode: 'SPJ',
+      spjLanguage: 'python',
+      spjSourceCode: 'print(True)',
+    } as any, { id: 'teacher-1', role: 'TEACHER' });
+
+    expect(prisma.problem.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: {
+        title: 'New Title',
+        difficulty: 'POINT_2',
+        timeLimit: 2000,
+        memoryLimit: 512,
+        outputLimit: 128,
+      },
+    });
+    expect(prisma.problemVersion.update).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      data: {
+        description: 'new statement',
+        inputFormat: 'input',
+        outputFormat: 'output',
+        sampleInput: '1 2\n',
+        sampleOutput: '3\n',
+        hint: 'hint',
+        dataRange: 'n <= 10',
+      },
+    });
+    expect(prisma.problemTag.deleteMany).toHaveBeenCalledWith({ where: { problemId: 'p1' } });
+    expect(prisma.problemTag.createMany).toHaveBeenCalledWith({
+      data: [
+        { problemId: 'p1', name: 'math', type: 'TAG' },
+        { problemId: 'p1', name: 'prefix', type: 'TAG' },
+      ],
+    });
+    expect(prisma.checker.upsert).toHaveBeenCalledWith({
+      where: { problemVersionId: 'v1' },
+      create: {
+        problemVersionId: 'v1',
+        type: 'SPJ',
+        language: 'python',
+        sourceCode: 'print(True)',
+      },
+      update: {
+        type: 'SPJ',
+        language: 'python',
+        sourceCode: 'print(True)',
+      },
+    });
+  });
+
+  it('rejects publishing through full update when test data is missing', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p7', source: 'LOCAL', createdBy: 'teacher-1' });
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      id: 'v7',
+      checker: { type: 'STANDARD' },
+    });
+    prisma.problemTestCase.count.mockResolvedValue(0);
+
+    await expect(service.update('p7', { status: 'PUBLISHED' } as any, {
+      id: 'teacher-1',
+      role: 'TEACHER',
+    })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('fills sample input and output from the first standard zip test when samples are empty', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p1' });
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      sampleInput: null,
+      sampleOutput: '',
+      checker: { type: 'STANDARD' },
+    });
+    prisma.problemTestCase.createMany.mockResolvedValue({ count: 2 });
+
+    await service.uploadTestData('p1', zipFile({
+      '1.in': '1 2\n',
+      '1.out': '3\n',
+      '2.in': '2 5\n',
+      '2.out': '7\n',
+    }));
+
+    expect(prisma.problemVersion.update).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      data: {
+        sampleInput: '1 2\n',
+        sampleOutput: '3\n',
+      },
+    });
+  });
+
   it('imports SPJ zip files from numbered .in files without output files', async () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p2' });
     prisma.problemVersion.findFirst.mockResolvedValue({
@@ -242,5 +463,58 @@ describe('ProblemService createFull with judge data', () => {
     prisma.problemTestCase.count.mockResolvedValue(0);
 
     await expect(service.updateStatus('p4', 'PUBLISHED')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('prevents moving local problems into contest reserved before test data is imported', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p4', source: 'LOCAL', status: 'DRAFT' });
+    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v4' });
+    prisma.problemTestCase.count.mockResolvedValue(0);
+
+    await expect(service.updateStatus('p4', 'CONTEST_RESERVED')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('hides draft and contest reserved problem detail from public access', async () => {
+    prisma.problem.findUnique.mockResolvedValue({
+      id: 'p-secret',
+      status: 'CONTEST_RESERVED',
+      versions: [],
+      tags: [],
+      sourceInfo: null,
+    });
+
+    await expect(service.findOne('p-secret')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('allows the author to load contest reserved problem detail for editing', async () => {
+    prisma.problem.findUnique.mockResolvedValue({
+      id: 'p-secret',
+      source: 'LOCAL',
+      status: 'CONTEST_RESERVED',
+      createdBy: 'teacher-1',
+      versions: [],
+      tags: [],
+      sourceInfo: null,
+    });
+
+    await expect(service.findManageable('p-secret', { id: 'teacher-1', role: 'TEACHER' }))
+      .resolves.toEqual(expect.objectContaining({ id: 'p-secret', status: 'CONTEST_RESERVED' }));
+  });
+
+  it('rejects test data upload for another teacher author', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p5', source: 'LOCAL', createdBy: 'teacher-2' });
+
+    await expect(service.uploadTestData('p5', zipFile({ '1.in': '1\n', '1.out': '1\n' }), {
+      id: 'teacher-1',
+      role: 'TEACHER',
+    })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects publishing another teacher author problem', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p6', source: 'LOCAL', createdBy: 'teacher-2' });
+
+    await expect(service.updateStatus('p6', 'PUBLISHED', {
+      id: 'teacher-1',
+      role: 'TEACHER',
+    })).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

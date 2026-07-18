@@ -42,6 +42,8 @@ export class LuoguTaskLeaseService {
       throw new NotFoundException('No pending Luogu task for problem ' + problemId);
     }
 
+    await this.retireOlderLoginRetryTasks(problemId, task);
+
     const token = task.nonce || randomBytes(16).toString('hex');
     if (!task.nonce) {
       await this.prisma.remoteSubmissionTask.update({
@@ -58,6 +60,52 @@ export class LuoguTaskLeaseService {
       status: task.status,
       token,
     };
+  }
+
+  private async retireOlderLoginRetryTasks(
+    problemId: string,
+    latestTask: { submissionId: string; createdAt?: Date | string | null },
+  ) {
+    if (!latestTask.createdAt) return;
+    const older = await this.prisma.remoteSubmissionTask.findMany({
+      where: {
+        platformCode: 'LUOGU',
+        status: { in: ['PENDING', 'PROCESSING'] },
+        remoteProblemId: problemId,
+        remoteSubmissionId: null,
+        submissionId: { not: latestTask.submissionId },
+        createdAt: { lt: latestTask.createdAt },
+        OR: [
+          { helperStage: null },
+          { helperStage: 'LOGIN_REQUIRED' },
+          { helperStage: 'LEASED', leaseExpiresAt: { lt: new Date() } },
+        ],
+      },
+      select: { submissionId: true },
+    });
+    const submissionIds = older.map((task) => task.submissionId).filter(Boolean);
+    if (!submissionIds.length) return;
+
+    await this.prisma.remoteSubmissionTask.updateMany({
+      where: { submissionId: { in: submissionIds } },
+      data: {
+        status: 'FAILED',
+        helperStage: 'LOGIN_RETRY_REPLACED',
+        remoteSubmissionId: null,
+      },
+    });
+    await this.prisma.remoteJudgeJob.updateMany({
+      where: { submissionId: { in: submissionIds } },
+      data: {
+        rawStatus: 'LOGIN_RETRY_REPLACED',
+        finishedAt: new Date(),
+        remoteSubmissionId: null,
+      },
+    });
+    await this.prisma.submission.updateMany({
+      where: { id: { in: submissionIds } },
+      data: { status: 'REMOTE_ERROR', judgedAt: new Date() },
+    });
   }
 
   async acquireLease(submissionId: string, token: string, replayLeaseNonce?: string) {
@@ -112,6 +160,24 @@ export class LuoguTaskLeaseService {
     const task = await this.loadTask(submissionId, token);
     if (task.leaseNonce && task.leaseNonce !== leaseNonce) {
       throw new ConflictException('Lease nonce mismatch');
+    }
+    if (task.remoteSubmissionId) {
+      if (task.remoteSubmissionId === rid) {
+        return { ok: true, submissionId, remoteSubmissionId: rid, status: 'JUDGING' };
+      }
+      throw new ConflictException('Task already has a different remote submission ID');
+    }
+
+    const duplicate = await this.prisma.remoteSubmissionTask.findFirst({
+      where: {
+        platformCode: 'LUOGU',
+        remoteSubmissionId: rid,
+        submissionId: { not: submissionId },
+      },
+      select: { submissionId: true },
+    });
+    if (duplicate) {
+      throw new ConflictException('Remote submission ID is already bound to another task');
     }
 
     await this.prisma.$transaction(async (tx) => {

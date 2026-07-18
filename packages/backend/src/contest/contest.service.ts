@@ -348,7 +348,7 @@ export class ContestService {
     const where: any = {};
     if (userIds) where.userId = { in: userIds };
     if (problemIds) where.problemId = { in: problemIds };
-    const [users, submissions] = await Promise.all([
+    const [users, submissions, externalSolved] = await Promise.all([
       this.prisma.user.findMany({
         where: userIds ? { id: { in: userIds } } : {},
         select: { id: true, username: true, nickname: true, avatar: true, role: true },
@@ -357,23 +357,35 @@ export class ContestService {
         where,
         select: { userId: true, problemId: true, status: true },
       }),
+      this.prisma.externalSolvedProblem.findMany({
+        where,
+        select: { userId: true, problemId: true },
+      }),
     ]);
     const byUser = new Map<string, any[]>();
+    const externalAcceptedByUser = new Map<string, Set<string>>();
     submissions.forEach((submission) => {
       const items = byUser.get(submission.userId) || [];
       items.push(submission);
       byUser.set(submission.userId, items);
     });
+    externalSolved.forEach((solved) => {
+      const items = externalAcceptedByUser.get(solved.userId) || new Set<string>();
+      items.add(solved.problemId);
+      externalAcceptedByUser.set(solved.userId, items);
+    });
     const rows = users.map((user) => {
       const items = byUser.get(user.id) || [];
       const accepted = items.filter((item) => item.status === 'ACCEPTED');
+      const solvedProblemIds = new Set(accepted.map((item) => item.problemId));
+      for (const problemId of externalAcceptedByUser.get(user.id) || []) solvedProblemIds.add(problemId);
       return {
         userId: user.id,
         username: user.username,
         nickname: user.nickname || user.username,
         avatar: user.avatar,
         role: user.role,
-        solvedCount: new Set(accepted.map((item) => item.problemId)).size,
+        solvedCount: solvedProblemIds.size,
         submissionCount: items.length,
         acceptRate: items.length ? Math.round((accepted.length / items.length) * 100) : 0,
       };

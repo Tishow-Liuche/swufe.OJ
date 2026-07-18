@@ -6,18 +6,22 @@ function makePrisma(task: any) {
   const prisma: any = {
     remoteSubmissionTask: {
       findFirst: jest.fn(async () => state.task),
+      findMany: jest.fn(async () => []),
       findUnique: jest.fn(async () => state.task),
       update: jest.fn(async ({ data }: any) => {
         state.task = { ...state.task, ...data, updatedAt: new Date('2026-07-14T12:00:00Z') };
         state.updates.push(data);
         return state.task;
       }),
+      updateMany: jest.fn(async () => ({ count: 0 })),
     },
     remoteJudgeJob: {
       update: jest.fn(async ({ data }: any) => ({ ...data })),
+      updateMany: jest.fn(async () => ({ count: 0 })),
     },
     submission: {
       update: jest.fn(async ({ data }: any) => ({ ...data })),
+      updateMany: jest.fn(async () => ({ count: 0 })),
     },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     __state: state,
@@ -244,6 +248,67 @@ describe('CfTaskLeaseService', () => {
     expect(prisma.remoteSubmissionTask.update).toHaveBeenCalledWith({
       where: { submissionId: 'sub_1' },
       data: { nonce: result.token },
+    });
+  });
+
+  it('retires older unleased tasks for the same problem during lookup after a login retry', async () => {
+    const latest = {
+      submissionId: 'sub_new',
+      platformCode: 'CODEFORCES',
+      status: 'PENDING',
+      remoteProblemId: '4A',
+      language: 'cpp',
+      sourceCode: 'int main(){return 0;}',
+      nonce: 'new-token',
+      remoteSubmissionId: null,
+      createdAt: new Date('2026-07-14T12:05:00Z'),
+      expiresAt: new Date('2026-07-14T12:35:00Z'),
+    };
+    const prisma = makePrisma(latest);
+    prisma.remoteSubmissionTask.findMany = jest.fn(async () => [
+      { submissionId: 'sub_old_1' },
+      { submissionId: 'sub_old_2' },
+    ]);
+    const service = new CfTaskLeaseService(prisma);
+
+    const result = await service.lookup('4A');
+
+    expect(result.submissionId).toBe('sub_new');
+    expect(prisma.remoteSubmissionTask.findMany).toHaveBeenCalledWith({
+      where: {
+        platformCode: 'CODEFORCES',
+        status: { in: ['PENDING', 'PROCESSING'] },
+        remoteProblemId: '4A',
+        remoteSubmissionId: null,
+        submissionId: { not: 'sub_new' },
+        createdAt: { lt: latest.createdAt },
+        OR: [
+          { helperStage: null },
+          { helperStage: 'LOGIN_REQUIRED' },
+          { helperStage: 'LEASED', leaseExpiresAt: { lt: now } },
+        ],
+      },
+      select: { submissionId: true },
+    });
+    expect(prisma.remoteSubmissionTask.updateMany).toHaveBeenCalledWith({
+      where: { submissionId: { in: ['sub_old_1', 'sub_old_2'] } },
+      data: {
+        status: 'FAILED',
+        helperStage: 'LOGIN_RETRY_REPLACED',
+        remoteSubmissionId: null,
+      },
+    });
+    expect(prisma.remoteJudgeJob.updateMany).toHaveBeenCalledWith({
+      where: { submissionId: { in: ['sub_old_1', 'sub_old_2'] } },
+      data: {
+        rawStatus: 'LOGIN_RETRY_REPLACED',
+        finishedAt: now,
+        remoteSubmissionId: null,
+      },
+    });
+    expect(prisma.submission.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['sub_old_1', 'sub_old_2'] } },
+      data: { status: 'REMOTE_ERROR', judgedAt: now },
     });
   });
 });

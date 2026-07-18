@@ -244,7 +244,7 @@ async function downloadExcelTemplate() {
   sheet['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 30 }];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, '学生名单');
-  XLSX.writeFile(workbook, '西财OJ_学生导入模板.xlsx');
+  XLSX.writeFile(workbook, 'SWUFE_Singularity_OJ_学生导入模板.xlsx');
 }
 async function importExcelStudents() {
   if (!excelRows.value.length || invalidExcelRows.value.length) return showMessage('请先上传并修正 Excel 中的异常行');

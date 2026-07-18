@@ -47,6 +47,6 @@ async function bootstrap() {
 
   const port = process.env.APP_PORT || 3000;
   await app.listen(port);
-  console.log(`\n  🚀  西财 OJ → http://localhost:${port}\n`);
+  console.log(`\n  🚀  SWUFE Singularity OJ（西财奇点OJ）→ http://localhost:${port}\n`);
 }
 bootstrap();

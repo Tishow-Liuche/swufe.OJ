@@ -438,13 +438,14 @@ export class CfWorkerService implements OnModuleInit {
     }
 
     // ── Map verdict ────────────────────────────────────────────────────────
-    const status = this.verdict.mapVerdict(match.verdict);
-    const score = this.verdict.verdictScore(status);
-    const timeUsed = match.timeConsumedMillis ?? 0;
-    const memoryUsed = match.memoryConsumedBytes
+    const remoteStatus = this.verdict.mapVerdict(match.verdict);
+    const status = isConfirmed ? remoteStatus : 'JUDGING';
+    const score = isConfirmed ? this.verdict.verdictScore(status) : 0;
+    const timeUsed = isConfirmed ? (match.timeConsumedMillis ?? 0) : 0;
+    const memoryUsed = isConfirmed && match.memoryConsumedBytes
       ? Math.round(match.memoryConsumedBytes / 1024)
       : 0;
-    const isTerminal = this.verdict.isTerminal(status);
+    const isTerminal = isConfirmed && this.verdict.isTerminal(status);
 
     // Bug 1 fix: Only set COMPLETED when the SID is confirmed.
     // Tentative problem+time matches stay PROCESSING so a later SID
@@ -489,7 +490,7 @@ export class CfWorkerService implements OnModuleInit {
     await this.prisma.remoteJudgeJob.update({
       where: { submissionId: task.submissionId },
       data: {
-        remoteSubmissionId: String(match.id),
+        remoteSubmissionId: isConfirmed ? String(match.id) : undefined,
         rawStatus: match.verdict ?? null,
         finishedAt:
           isTerminal && isConfirmed ? new Date() : undefined,
@@ -501,7 +502,7 @@ export class CfWorkerService implements OnModuleInit {
       where: { id: task.id },
       data: {
         status: taskStatus,
-        remoteSubmissionId: String(match.id),
+        remoteSubmissionId: isConfirmed ? String(match.id) : undefined,
       },
     });
   }

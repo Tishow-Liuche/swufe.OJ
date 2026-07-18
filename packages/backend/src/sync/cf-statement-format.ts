@@ -1,3 +1,5 @@
+import { mapCfRatingToPointDifficulty } from '../problem/point-difficulty';
+
 export interface CfProblemJson {
   contestId?: number;
   index?: string;
@@ -125,10 +127,5 @@ function cleanText(value?: string | null): string {
 }
 
 function mapRating(rating?: number): string {
-  if (!rating) return 'POPULAR';
-  if (rating <= 1000) return 'BEGINNER';
-  if (rating <= 1600) return 'POPULAR';
-  if (rating <= 2200) return 'IMPROVE';
-  if (rating <= 2600) return 'PROVINCIAL';
-  return 'NOI';
+  return mapCfRatingToPointDifficulty(rating);
 }

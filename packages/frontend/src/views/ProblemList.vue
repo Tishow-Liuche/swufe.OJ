@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useDebounceFn, useStorage } from '@vueuse/core';
 import { useRoute, useRouter } from 'vue-router';
@@ -29,6 +29,12 @@ import '@fontsource-variable/noto-sans-sc/wght.css';
 import api from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
 import { useAuthStore } from '../stores/auth';
+import {
+  normalizePointDifficulty,
+  pointDifficultyClass,
+  pointDifficultyOptions,
+  pointDifficultyShortLabel,
+} from '../utils/pointDifficulty';
 
 interface ProblemTag {
   name: string;
@@ -62,11 +68,7 @@ type PageToken = number | 'start-ellipsis' | 'end-ellipsis';
 
 const difficultyOptions = [
   { value: '', label: '全部' },
-  { value: 'BEGINNER', label: '入门' },
-  { value: 'POPULAR', label: '普及' },
-  { value: 'IMPROVE', label: '提高' },
-  { value: 'PROVINCIAL', label: '省选' },
-  { value: 'NOI', label: 'NOI' },
+  ...pointDifficultyOptions.map((item) => ({ value: item.value, label: item.shortLabel })),
 ];
 
 const sourceOptions = [
@@ -164,7 +166,7 @@ const metadataScopeLabel = computed(() => {
 const difficultyDistribution = computed(() => difficultyOptions.slice(1)
   .map((option) => ({
     ...option,
-    count: metadataProblems.value.filter((problem) => problem.difficulty === option.value).length,
+    count: metadataProblems.value.filter((problem) => normalizePointDifficulty(problem.difficulty) === option.value).length,
   }))
   .filter((option) => option.count > 0));
 
@@ -342,12 +344,12 @@ function handleProblemRowClick(event: MouseEvent, problemId: string) {
   openProblem(problemId);
 }
 
-function difficultyLabel(value: string | null) {
-  return difficultyOptions.find((option) => option.value === value)?.label || '未分级';
+function difficultyShortLabel(value: string | null) {
+  return pointDifficultyShortLabel(value);
 }
 
 function difficultyClass(value: string | null) {
-  return value?.toLowerCase() || 'unrated';
+  return pointDifficultyClass(value);
 }
 
 function problemPlatform(problem: ProblemItem) {
@@ -570,7 +572,7 @@ function requireLogin(redirect: string) {
             </div>
             <div class="active-filters" aria-live="polite">
               <span v-if="keyword" class="filter-chip">“{{ keyword }}”</span>
-              <span v-if="difficulty" class="filter-chip">{{ difficultyLabel(difficulty) }}</span>
+              <span v-if="difficulty" class="filter-chip">{{ difficultyShortLabel(difficulty) }}</span>
               <span v-if="source" class="filter-chip">{{ sourceLabel(source) }}</span>
               <span v-if="selectedTag" class="filter-chip">{{ selectedTag }}</span>
             </div>
@@ -632,7 +634,7 @@ function requireLogin(redirect: string) {
                     </td>
                     <td>
                       <span class="difficulty-badge" :class="difficultyClass(problem.difficulty)">
-                        {{ difficultyLabel(problem.difficulty) }}
+                        {{ difficultyShortLabel(problem.difficulty) }}
                       </span>
                     </td>
                     <td class="tags-column">
@@ -671,7 +673,7 @@ function requireLogin(redirect: string) {
                 <div class="mobile-problem-heading">
                   <span class="mobile-problem-title">{{ problem.title }}</span>
                   <span class="difficulty-badge" :class="difficultyClass(problem.difficulty)">
-                    {{ difficultyLabel(problem.difficulty) }}
+                    {{ difficultyShortLabel(problem.difficulty) }}
                   </span>
                 </div>
                 <div class="mobile-tag-list">
@@ -1474,35 +1476,41 @@ function requireLogin(redirect: string) {
   white-space: nowrap;
 }
 
-.difficulty-badge.beginner {
+.difficulty-badge.point-0 {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.difficulty-badge.point-1 {
   border-color: #b9dec8;
   background: #e8f5ed;
   color: #17613e;
 }
 
-.difficulty-badge.popular {
+.difficulty-badge.point-2 {
   border-color: #b8cdfd;
   background: #e6edff;
   color: #234fa8;
 }
 
-.difficulty-badge.improve {
-  border-color: #f1cf9d;
-  background: #fff1dc;
-  color: #9a570b;
+.difficulty-badge.point-3 {
+  border-color: #f5d37d;
+  background: #fff7d6;
+  color: #8a5a00;
 }
 
-.difficulty-badge.provincial {
-  border-color: #edb9b4;
-  background: #ffebe9;
-  color: #a3312a;
+.difficulty-badge.point-4 {
+  border-color: #f1b07d;
+  background: #fff0df;
+  color: #a64b00;
 }
 
-.difficulty-badge.noi,
+.difficulty-badge.point-5,
 .difficulty-badge.unrated {
-  border-color: #c9c2dc;
-  background: #f0edf7;
-  color: #5d526f;
+  border-color: #e8a1b5;
+  background: #fff0f4;
+  color: #b4234f;
 }
 
 .tag-list,
@@ -1740,21 +1748,12 @@ function requireLogin(redirect: string) {
   background: var(--primary);
 }
 
-.distribution-fill.beginner {
-  background: var(--success);
-}
-
-.distribution-fill.improve {
-  background: var(--accent);
-}
-
-.distribution-fill.provincial {
-  background: var(--danger);
-}
-
-.distribution-fill.noi {
-  background: #65558f;
-}
+.distribution-fill.point-0 { background: #94a3b8; }
+.distribution-fill.point-1 { background: #35b76f; }
+.distribution-fill.point-2 { background: #2f7cf2; }
+.distribution-fill.point-3 { background: #f2b72f; }
+.distribution-fill.point-4 { background: #f28a2f; }
+.distribution-fill.point-5 { background: #d9365f; }
 
 .distribution-row strong {
   font-family: 'Manrope Variable', sans-serif;

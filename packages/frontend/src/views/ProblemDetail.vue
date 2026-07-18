@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../api/client';
 import { basicSetup } from 'codemirror';
@@ -9,11 +9,8 @@ import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
 import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { marked } from 'marked';
-import katex from 'katex';
-import { BookOpen, MessageCircle } from '@lucide/vue';
-import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
-import 'katex/dist/katex.min.css';
+import { renderMarkdownWithMath } from '../utils/markdown';
+import { pointDifficultyLabel } from '../utils/pointDifficulty';
 
 const route = useRoute();
 const problem = ref<any>(null);
@@ -29,6 +26,22 @@ let pollTimer: any = null;
 let visibilityCleanupId: any = null;
 const editorHost = ref<HTMLElement | null>(null);
 const pollExhausted = ref(false);
+const currentVersion = computed(() => problem.value?.versions?.[0] || {});
+const sampleExamples = computed(() => {
+  const version = currentVersion.value;
+  const inputs = splitSampleSections(version.sampleInput);
+  const outputs = splitSampleSections(version.sampleOutput);
+  const count = Math.max(inputs.length, outputs.length);
+  const examples = [];
+  for (let i = 0; i < count; i += 1) {
+    const input = inputs[i] || '';
+    const output = outputs[i] || '';
+    if (!input.trim() && !output.trim()) continue;
+    if (descriptionAlreadyContainsSample(version.description, input, output)) continue;
+    examples.push({ index: i + 1, input, output });
+  }
+  return examples;
+});
 
 const languageTemplates: Record<string, string> = {
   cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n',
@@ -49,7 +62,7 @@ const statusLabels: Record<string, string> = {
   RUNTIME_ERROR: 'RE', COMPILE_ERROR: 'CE', MEMORY_LIMIT_EXCEEDED: 'MLE',
   PENDING: '等待中', QUEUING: '排队中', JUDGING: '评测中',
   SUBMITTING: '提交中', COMPILING: '编译中', RUNNING: '运行中',
-  SYSTEM_ERROR: '系统错误', REMOTE_ERROR: '远程错误', CANCELLED: '已取消',
+  SYSTEM_ERROR: '系统错误', REMOTE_ERROR: 'RMR', REMOTE_REEOR: 'RMR', CANCELLED: '已取消',
 };
 const statusColors: Record<string, string> = {
   ACCEPTED: '#27ae60', WRONG_ANSWER: '#e74c3c', TIME_LIMIT_EXCEEDED: '#f39c12',
@@ -57,7 +70,7 @@ const statusColors: Record<string, string> = {
   CANCELLED: '#95a5a6',
   PENDING: '#95a5a6', QUEUING: '#3498db', JUDGING: '#3498db',
   SUBMITTING: '#3498db', COMPILING: '#3498db', RUNNING: '#3498db',
-  SYSTEM_ERROR: '#e74c3c', REMOTE_ERROR: '#e74c3c',
+  SYSTEM_ERROR: '#e74c3c', REMOTE_ERROR: '#e74c3c', REMOTE_REEOR: '#e74c3c',
 };
 
 function hasMetric(value: unknown) {
@@ -167,9 +180,7 @@ async function submitCode() {
   result.value = null;
   isExternal.value = false;
   try {
-    const contestId = typeof route.query.contestId === 'string' ? route.query.contestId : '';
-    const endpoint = contestId ? `/api/contests/${contestId}/submit` : '/api/submissions';
-    const { data } = await api.post(endpoint, {
+    const { data } = await api.post('/api/submissions', {
       problemId: problem.value.id,
       language: language.value,
       sourceCode: code.value,
@@ -286,45 +297,21 @@ function startPolling(id: string) {
 }
 
 function renderMd(text: string): string {
-  if (!text) return '';
-  try {
-    // Step 1: 在 raw Markdown 上先渲染 LaTeX，用唯一占位符保护
-    const placeholderMap = new Map<string, string>();
-    let counter = 0;
+  return renderMarkdownWithMath(text);
+}
 
-    let raw = text;
-    // 先处理块级公式 $$...$$（保护起来避免 marked 破坏 $/$ 符号）
-    raw = raw.replace(/\$\$([\s\S]+?)\$\$/g, (_, formula) => {
-      const key = `[[KATEX:${counter++}]]`;
-      try {
-        placeholderMap.set(key, katex.renderToString(formula.trim(), { throwOnError: false, displayMode: true }));
-      } catch { placeholderMap.set(key, `<div style="text-align:center"><em>${formula}</em></div>`); }
-      return key;
-    });
-    // 再处理行内公式 $...$
-    raw = raw.replace(/\$([^$]+?)\$/g, (_, formula) => {
-      const key = `[[KATEX:${counter++}]]`;
-      try {
-        placeholderMap.set(key, katex.renderToString(formula.trim(), { throwOnError: false, displayMode: false }));
-      } catch { placeholderMap.set(key, `<em>${formula}</em>`); }
-      return key;
-    });
+function splitSampleSections(text?: string | null): string[] {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (!normalized.trim()) return [];
+  return normalized.split(/\n---\n/g).map((part) => part.replace(/^\n+|\n+$/g, ''));
+}
 
-    // Step 2: 用 marked 渲染剩余 Markdown
-    let html = marked.parse(raw, { async: false }) as string;
-
-    // Step 3: 把占位符替换回 KaTeX HTML
-    placeholderMap.forEach((rendered, key) => {
-      html = html.replace(key, rendered);
-    });
-
-    return html;
-  } catch {
-    return text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-      .replace(/\n/g, '<br>');
-  }
+function descriptionAlreadyContainsSample(description: string | undefined, input: string, output: string): boolean {
+  const normalizedDescription = String(description || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalizedInput = input.trim();
+  const normalizedOutput = output.trim();
+  return (!normalizedInput || normalizedDescription.includes(normalizedInput))
+    && (!normalizedOutput || normalizedDescription.includes(normalizedOutput));
 }
 </script>
 
@@ -338,23 +325,28 @@ function renderMd(text: string): string {
         <div class="problem-meta">
           <span class="meta-item">⏱ {{ problem.timeLimit }}ms</span>
           <span class="meta-item">📦 {{ problem.memoryLimit }}MB</span>
-          <span class="meta-item">🎯 {{ problem.difficulty || '-' }}</span>
+          <span class="meta-item">🎯 {{ pointDifficultyLabel(problem.difficulty) }}</span>
           <span class="meta-item">📝 {{ (problem.tags || []).map((t: any) => t.name).join(', ') || '-' }}</span>
-        </div>
-        <div class="problem-community-links">
-          <RouterLink :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }">
-            <MessageCircle :size="16" />题目讨论
-          </RouterLink>
-          <RouterLink :to="{ path: '/community', query: { panel: 'solutions', problemId: problem.id, problemTitle: problem.title } }">
-            <BookOpen :size="16" />查看题解
-          </RouterLink>
         </div>
       </div>
 
       <div class="content-split">
         <div class="problem-content">
           <div class="card">
-            <div class="desc" v-html="renderMd(problem.versions?.[0]?.description)"></div>
+            <div class="desc" v-html="renderMd(currentVersion.description)"></div>
+            <div v-if="sampleExamples.length" class="sample-section">
+              <h3>样例</h3>
+              <div v-for="sample in sampleExamples" :key="sample.index" class="sample-pair">
+                <div v-if="sample.input.trim()" class="sample-block">
+                  <div class="sample-title">输入样例 #{{ sample.index }}</div>
+                  <pre>{{ sample.input }}</pre>
+                </div>
+                <div v-if="sample.output.trim()" class="sample-block">
+                  <div class="sample-title">输出样例 #{{ sample.index }}</div>
+                  <pre>{{ sample.output }}</pre>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -412,8 +404,6 @@ function renderMd(text: string): string {
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
         </div>
       </div>
-
-      <ProblemDiscussionPanel :problem-id="problem.id" :problem-title="problem.title" />
     </template>
 
     <!-- 第三方 OJ 远程提交引导弹窗 -->
@@ -466,9 +456,6 @@ function renderMd(text: string): string {
 .problem-page { max-width: 100%; margin: 0; padding: 20px 24px; }
 .problem-header { margin-bottom: 20px; }
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
-.problem-community-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.problem-community-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid #cbdde0; border-radius: 4px; background: #f7fbfa; color: #087a70; font-size: 13px; font-weight: 700; text-decoration: none; }
-.problem-community-links a:hover { border-color: #87bdb7; background: #eaf6f3; }
 .problem-meta { display: flex; gap: 16px; flex-wrap: wrap; }
 .meta-item { font-size: 13px; color: #666; background: #f0f0f0; padding: 3px 10px; border-radius: 4px; }
 .content-split { display: grid; grid-template-columns: 1fr 480px; gap: 20px; align-items: start; }
@@ -493,6 +480,34 @@ function renderMd(text: string): string {
 .desc :deep(.katex-display) { margin: 12px 0; text-align: center; }
 /* handle overflow for wide formulas */
 .desc :deep(.katex-display > .katex) { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.sample-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid #edf0f4; }
+.sample-section h3 { margin: 0 0 14px; color: #1f2d3d; font-size: 18px; }
+.sample-pair + .sample-pair { margin-top: 18px; }
+.sample-block + .sample-block { margin-top: 12px; }
+.sample-title {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #24639b;
+  background: #edf6ff;
+  font-size: 13px;
+  font-weight: 800;
+}
+.sample-block pre {
+  margin: 0;
+  padding: 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  color: #d4d4d4;
+  background: #1e1e1e;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .editor-card { padding: 0; overflow: hidden; }
 .editor-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #282c34; border-bottom: 1px solid #333; }

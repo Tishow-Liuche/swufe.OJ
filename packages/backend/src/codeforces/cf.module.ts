@@ -5,6 +5,7 @@ import { CfVerdictMapper } from './cf-verdict.mapper';
 import { CfSubmissionService } from './cf-submission.service';
 import { CfWorkerService } from './cf-worker.service';
 import { CfTaskLeaseService } from './cf-task-lease.service';
+import { CfAcceptedSyncService } from './cf-accepted-sync.service';
 
 /**
  * Codeforces remote-judge module.
@@ -24,7 +25,8 @@ import { CfTaskLeaseService } from './cf-task-lease.service';
     CfSubmissionService,
     CfWorkerService,
     CfTaskLeaseService,
+    CfAcceptedSyncService,
   ],
-  exports: [CfSubmissionService, CfTaskLeaseService],
+  exports: [CfSubmissionService, CfTaskLeaseService, CfAcceptedSyncService],
 })
 export class CodeforcesModule {}

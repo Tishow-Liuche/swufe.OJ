@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Luogu Helper
 // @namespace    https://oj.example.com
-// @version      1.3
+// @version      1.4
 // @description  自动填表 + 自动提交 + 回传洛谷结果 + 自动关闭洛谷标签页
 // @author       OJ Team
 // @downloadURL  http://localhost:5173/luogu-helper.user.js
@@ -22,8 +22,10 @@
 'use strict';
 
 var API = 'http://127.0.0.1:3000';
+var HELPER_VERSION = '1.4';
 var STATE_KEY = 'swufe_luogu_auto_state';
 var SUBMIT_ONCE_KEY_PREFIX = 'swufe_luogu_submit_once_';
+var LOGIN_REQUIRED_KEY = 'swufe_luogu_login_required_at';
 
 function gv(k, d) { return GM_getValue(k, d != null ? d : ''); }
 function sv(k, v) { GM_setValue(k, v); }
@@ -35,11 +37,33 @@ function loadState() {
 }
 
 function saveState(next) {
-  sv(STATE_KEY, JSON.stringify(next || {}));
+  var state = next || {};
+  state.helperVersion = HELPER_VERSION;
+  sv(STATE_KEY, JSON.stringify(state));
 }
 
 function clearState() {
   dv(STATE_KEY);
+}
+
+function markLoginRequired() {
+  var st = loadState();
+  if (st.submissionId || st.submittedAt || st.leaseNonce || st.reportedId) clearState();
+  sv(LOGIN_REQUIRED_KEY, String(Date.now()));
+}
+
+function isActiveTaskState(st) {
+  var now = Math.floor(Date.now() / 1000);
+  return !!(
+    st &&
+    st.helperVersion === HELPER_VERSION &&
+    st.submissionId &&
+    st.problemId &&
+    st.token &&
+    st.leaseNonce &&
+    st.submittedAt &&
+    st.submittedAt >= now - 1800
+  );
 }
 
 function banner(text, bg) {
@@ -294,6 +318,7 @@ function parseRemoteId() {
 }
 
 function reportId(id) {
+  if (!isActiveTaskState(loadState())) return;
   var st = loadState();
   if (!id || !st.submissionId || !st.token || !st.leaseNonce) return;
   if (st.reportedId === id) return;
@@ -309,6 +334,7 @@ function reportId(id) {
 }
 
 function reportResult(status, rawText) {
+  if (!isActiveTaskState(loadState())) return;
   var st = loadState();
   if (!st.submissionId || !st.token || !st.leaseNonce) return;
   rawText = document.body.innerText || rawText || '';
@@ -379,6 +405,7 @@ function startSubmitFlow() {
   if (!pid) return;
 
   if (!isLoggedIn()) {
+    markLoginRequired();
     banner('请先登录洛谷，然后刷新此页继续自动提交。', '#e74c3c');
     return;
   }
@@ -405,6 +432,7 @@ function startSubmitFlow() {
       submissionId: task.submissionId,
       problemId: pid,
       token: task.token,
+      helperVersion: HELPER_VERSION,
       leaseNonce: st.leaseNonce || '',
       submittedAt: st.submittedAt || 0,
       reportedId: st.reportedId || ''
@@ -461,7 +489,11 @@ function startSubmitFlow() {
 }
 
 if (/\/record\//i.test(location.pathname) || /\/submission\//i.test(location.pathname)) {
-  watchResult();
+  if (isActiveTaskState(loadState())) watchResult();
+  else {
+    clearState();
+    banner('No active OJ Luogu submission state. Return to SWUFE OJ and submit again after logging in to Luogu.', '#f39c12');
+  }
   return;
 }
 

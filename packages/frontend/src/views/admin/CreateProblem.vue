@@ -2,6 +2,8 @@
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import api from '../../api/client';
+import { renderMarkdownWithMath } from '../../utils/markdown';
+import { pointDifficultyOptions } from '../../utils/pointDifficulty';
 
 type JudgeMode = 'STANDARD' | 'SPJ';
 
@@ -10,7 +12,7 @@ const router = useRouter();
 const form = reactive({
   title: '',
   description: `## 题目描述\n\n\n## 输入格式\n\n\n## 输出格式\n\n\n## 样例\n### 输入 #1\n\`\`\`\n\n\`\`\`\n### 输出 #1\n\`\`\`\n\n\`\`\`\n\n## 数据范围\n\n\n## 提示\n`,
-  difficulty: 'POPULAR',
+  difficulty: 'POINT_1',
   timeLimit: 1000,
   memoryLimit: 256,
   tags: '',
@@ -23,7 +25,7 @@ const form = reactive({
   status: 'DRAFT',
   judgeMode: 'STANDARD' as JudgeMode,
   spjLanguage: 'python',
-  spjSourceCode: 'import sys\n# stdin 是用户程序输出\nprint(sys.stdin.read().strip() == "答案")\n',
+  spjSourceCode: 'import sys\nfrom pathlib import Path\n\n# 平台兼容两种 SPJ 协议：\n# 1. stdin 是用户程序输出；输出 true / 1 / ac 表示通过\n# 2. 当前目录存在 input、output、user_output 文件；退出码 0 表示通过，非 0 表示 WA\nuser_output = Path("user_output").read_text(encoding="utf-8") if Path("user_output").exists() else sys.stdin.read()\ninput_data = Path("input").read_text(encoding="utf-8") if Path("input").exists() else ""\n\nprint(user_output.strip() == "答案")\n',
 });
 
 const testDataFile = ref<File | null>(null);
@@ -33,13 +35,7 @@ const uploadResult = ref<any>(null);
 const error = ref('');
 const preview = ref(false);
 
-const difficulties = [
-  { value: 'BEGINNER', label: '入门' },
-  { value: 'POPULAR', label: '普及' },
-  { value: 'IMPROVE', label: '提高' },
-  { value: 'PROVINCIAL', label: '省选' },
-  { value: 'NOI', label: 'NOI' },
-];
+const difficulties = pointDifficultyOptions;
 
 const languages = [
   { value: 'python', label: 'Python 3' },
@@ -91,9 +87,9 @@ async function createProblem() {
     });
     uploadResult.value = imported;
 
-    if (form.status === 'PUBLISHED') {
-      await api.patch(`/api/problems/${created.id}/status`, { status: 'PUBLISHED' });
-      result.value = { ...created, status: 'PUBLISHED' };
+    if (['PUBLISHED', 'CONTEST_RESERVED'].includes(form.status)) {
+      await api.patch(`/api/problems/${created.id}/status`, { status: form.status });
+      result.value = { ...created, status: form.status };
     }
   } catch (e: any) {
     error.value = e.response?.data?.message || '创建或上传测试数据失败';
@@ -116,16 +112,7 @@ async function publishProblem() {
 }
 
 function renderMd(text: string): string {
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .replace(/\*(.+?)\*/g, '<i>$1</i>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-    .replace(/\n/g, '<br>');
+  return renderMarkdownWithMath(text);
 }
 </script>
 
@@ -158,6 +145,7 @@ function renderMd(text: string): string {
           <label>初始状态</label>
           <select v-model="form.status">
             <option value="DRAFT">草稿</option>
+            <option value="CONTEST_RESERVED">比赛预备题库（赛后再加入题库）</option>
             <option value="PUBLISHED">上传成功后直接发布</option>
           </select>
         </div>
@@ -297,38 +285,33 @@ function renderMd(text: string): string {
   font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
   font-size: 13px; resize: vertical; line-height: 1.6;
 }
-.required { color: #e74c3c; }
-.main-editor {
-  width: 100%; padding: 16px; border: 1px solid #e0e0e0; border-radius: 8px;
-  box-sizing: border-box; background: #fafbfc;
-}
-.main-editor:focus, textarea:focus, input:focus, select:focus {
+.main-editor { width: 100%; min-height: 360px; box-sizing: border-box; background: #fafbfc; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus, .main-editor:focus {
   outline: none; border-color: #4fc3f7; box-shadow: 0 0 0 3px rgba(79,195,247,0.14);
 }
 .preview-area { padding: 16px; border: 1px solid #e0e0e0; border-radius: 8px; min-height: 300px; background: #fafbfc; line-height: 1.7; }
+.preview-area :deep(h2) { font-size: 20px; color: #222; margin: 22px 0 12px; }
 .preview-area :deep(h3) { font-size: 17px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 4px; }
 .preview-area :deep(code) { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
 .preview-area :deep(pre), .format-box pre { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; overflow-x: auto; }
+.preview-area :deep(.katex) { font-size: 1.05em; }
+.preview-area :deep(.katex-display) { margin: 12px 0; text-align: center; }
+.preview-area :deep(.katex-display > .katex) { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.preview-area :deep(.math-fallback) { color: #c62828; font-family: 'Cascadia Code', 'Fira Code', monospace; }
 .hint { font-size: 13px; color: #888; margin: 0 0 12px; line-height: 1.6; }
 .hint.danger { color: #d93025; text-align: center; margin-top: 10px; }
 .format-box { border: 1px dashed #9cc7ff; background: #f7fbff; border-radius: 10px; padding: 14px; margin-bottom: 14px; color: #3a4a5f; }
 .format-box.spj { border-color: #c7a4ff; background: #fbf8ff; }
-.format-box p { margin: 8px 0 0; color: #66717e; font-size: 13px; }
-.file-name { color: #2e7d32; font-size: 13px; margin: 10px 0 0; }
-.actions { margin-bottom: 20px; }
-.btn-primary {
-  width: 100%; padding: 14px; background: #4fc3f7; color: #1a1a2e;
-  border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
-}
-.btn-primary:hover { background: #29b6f6; }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
-.btn-publish { padding: 12px 32px; background: #27ae60; color: #fff; font-size: 15px; border: none; border-radius: 7px; cursor: pointer; font-weight: 600; }
-.btn-publish:hover { background: #219a52; }
-.result-card { background: #e8f5e9; border: 1px solid #a5d6a7; }
-.error-card { background: #fce4ec; border: 1px solid #ef9a9a; color: #c62828; }
-.publish-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid #c8e6c9; }
-@media (max-width: 700px) {
-  .page-header, .card-header { flex-direction: column; align-items: stretch; }
+.file-name { margin-top: 10px; color: #2e7d32; font-size: 13px; }
+.actions { text-align: center; margin: 24px 0; }
+.btn-primary, .btn-publish { padding: 12px 24px; background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%); color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-publish { margin-top: 12px; }
+.result-card { background: #f1fff5; border: 1px solid #b7ebc6; }
+.error-card { background: #fff1f0; color: #d93025; border: 1px solid #ffd6d2; }
+.required { color: #d93025; }
+@media (max-width: 720px) {
+  .page-header { flex-direction: column; align-items: flex-start; }
   .form-grid { grid-template-columns: 1fr; }
 }
 

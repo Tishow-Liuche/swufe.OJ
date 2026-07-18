@@ -1,11 +1,11 @@
-const { PrismaClient } = require('@prisma/client');
+﻿const { PrismaClient } = require('@prisma/client');
 const fs = require('fs');
 const zlib = require('zlib');
 const readline = require('readline');
 
 const prisma = new PrismaClient();
 const gzPath = process.env.TEMP + '/luogu-latest.ndjson.gz';
-const DIFF_MAP = { 0: 'BEGINNER', 1: 'BEGINNER', 2: 'POPULAR', 3: 'POPULAR', 4: 'IMPROVE', 5: 'IMPROVE', 6: 'PROVINCIAL', 7: 'PROVINCIAL', 8: 'NOI', 9: 'NOI' };
+const DIFF_MAP = { 0: 'POINT_0', 1: 'POINT_0', 2: 'POINT_1', 3: 'POINT_1', 4: 'POINT_2', 5: 'POINT_3', 6: 'POINT_4', 7: 'POINT_5', 8: 'POINT_5' };
 
 async function main() {
   let count = 0, updated = 0, skipped = 0, missing = 0;
@@ -96,7 +96,7 @@ async function main() {
     const sampleOutput = (p.samples || []).map(function (s) { return (s[1] || '').trim(); }).join('\n---\n');
     const timeLimit = p.limits && p.limits.time ? p.limits.time[0] : 1000;
     const memoryLimit = p.limits && p.limits.memory ? Math.round(p.limits.memory[0] / 1024) : 256;
-    const diff = DIFF_MAP[p.difficulty] || 'POPULAR';
+    const diff = DIFF_MAP[p.difficulty] || 'POINT_1';
     const tagNames = (p.tags || []).map(function (t) { return typeof t === 'string' ? t : (t && t.name); }).filter(Boolean);
 
     batch.push({
@@ -122,3 +122,4 @@ async function main() {
 }
 
 main().catch(function (e) { console.error(e); process.exit(1); });
+

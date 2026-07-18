@@ -27,6 +27,11 @@ interface RunResult {
   output: string;
 }
 
+interface ProblemTestCaseForJudge {
+  input: string;
+  expectedOutput: string;
+}
+
 @Processor('judge')
 export class JudgeProcessor extends WorkerHost {
   private readonly logger = new Logger(JudgeProcessor.name);
@@ -120,7 +125,7 @@ export class JudgeProcessor extends WorkerHost {
         let caseStatus = result.status;
         if (caseStatus === 'ACCEPTED') {
           caseStatus = useSpj && checkerCompileResult
-            ? await this.judgeWithSpj(checker, checkerCompileResult, result.output, data)
+            ? await this.judgeWithSpj(checker, checkerCompileResult, result.output, tc, data)
             : this.compareOutput(result.output, tc.expectedOutput)
               ? 'ACCEPTED'
               : 'WRONG_ANSWER';
@@ -174,9 +179,25 @@ export class JudgeProcessor extends WorkerHost {
     checker: { language?: string | null; sourceCode?: string | null },
     checkerCompileResult: CompileResult,
     userOutput: string,
+    testCase: ProblemTestCaseForJudge,
     data: JudgeJob,
   ) {
-    const checkerResult: RunResult = await this.judge.run(
+    const runWithFiles = (this.judge as any).runWithFiles?.bind(this.judge);
+    const checkerResult: RunResult = runWithFiles
+      ? await runWithFiles(
+          checker.language || 'python',
+          userOutput,
+          data.timeLimit,
+          data.memoryLimit,
+          checkerCompileResult.fileId,
+          checker.sourceCode || '',
+          {
+            input: testCase.input,
+            output: testCase.expectedOutput || '',
+            user_output: userOutput,
+          },
+        )
+      : await this.judge.run(
       checker.language || 'python',
       userOutput,
       data.timeLimit,
@@ -188,13 +209,21 @@ export class JudgeProcessor extends WorkerHost {
   }
 
   private compareOutput(actual: string, expected: string): boolean {
-    const normalize = (value: string) => value.replace(/\r\n/g, '\n').trimEnd();
-    return normalize(actual) === normalize(expected);
+    return this.normalizeOutput(actual) === this.normalizeOutput(expected);
+  }
+
+  private normalizeOutput(output: string): string {
+    return String(output ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/[ \t\n]+$/g, '');
   }
 
   private checkerAccepted(result: RunResult): boolean {
     if (result.status !== 'ACCEPTED') return false;
     const answer = String(result.output || '').trim().toLowerCase();
+    if (!answer) return true;
+    if (['false', '0', 'no', 'wa', 'wrong', 'wrong_answer', 'incorrect'].includes(answer)) return false;
     return ['true', '1', 'yes', 'ac', 'accepted', 'correct'].includes(answer);
   }
 

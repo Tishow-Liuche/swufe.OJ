@@ -32,6 +32,8 @@ export class CfTaskLeaseService {
       throw new NotFoundException('No pending CF task for problem ' + problemId);
     }
 
+    await this.retireOlderLoginRetryTasks(problemId, task);
+
     const token = task.nonce || randomBytes(16).toString('hex');
     if (!task.nonce) {
       await this.prisma.remoteSubmissionTask.update({
@@ -48,6 +50,52 @@ export class CfTaskLeaseService {
       status: task.status,
       token,
     };
+  }
+
+  private async retireOlderLoginRetryTasks(
+    problemId: string,
+    latestTask: { submissionId: string; createdAt?: Date | string | null },
+  ) {
+    if (!latestTask.createdAt) return;
+    const older = await this.prisma.remoteSubmissionTask.findMany({
+      where: {
+        platformCode: 'CODEFORCES',
+        status: { in: OPEN_STATUSES },
+        remoteProblemId: problemId,
+        remoteSubmissionId: null,
+        submissionId: { not: latestTask.submissionId },
+        createdAt: { lt: latestTask.createdAt },
+        OR: [
+          { helperStage: null },
+          { helperStage: 'LOGIN_REQUIRED' },
+          { helperStage: 'LEASED', leaseExpiresAt: { lt: new Date() } },
+        ],
+      },
+      select: { submissionId: true },
+    });
+    const submissionIds = older.map((task) => task.submissionId).filter(Boolean);
+    if (!submissionIds.length) return;
+
+    await this.prisma.remoteSubmissionTask.updateMany({
+      where: { submissionId: { in: submissionIds } },
+      data: {
+        status: 'FAILED',
+        helperStage: 'LOGIN_RETRY_REPLACED',
+        remoteSubmissionId: null,
+      },
+    });
+    await this.prisma.remoteJudgeJob.updateMany({
+      where: { submissionId: { in: submissionIds } },
+      data: {
+        rawStatus: 'LOGIN_RETRY_REPLACED',
+        finishedAt: new Date(),
+        remoteSubmissionId: null,
+      },
+    });
+    await this.prisma.submission.updateMany({
+      where: { id: { in: submissionIds } },
+      data: { status: 'REMOTE_ERROR', judgedAt: new Date() },
+    });
   }
 
   async acquireLease(

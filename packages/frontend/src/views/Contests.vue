@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router';
 import { CalendarClock, Flag, ListFilter, PanelLeftClose, PanelLeftOpen, PlayCircle, Trophy } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
+import { pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
 type Contest = {
   id: string; contestNo: number; title: string; description?: string; mode: 'ACM' | 'IOI'; visibility: string;
@@ -226,7 +227,7 @@ onUnmounted(() => {
           <div class="panel">
             <div class="panel-title">比赛题目 <small>{{ selected.problems.length }} PROBLEMS</small></div>
             <button v-for="(item, index) in selected.problems" :key="item.id" class="problem" :disabled="selected.state !== 'RUNNING' || !selected.participant" @click="enterProblem(item.problem.id)">
-              <strong>{{ String.fromCharCode(65 + index) }}</strong><span>{{ item.problem.title }}</span><small>{{ selected.mode === 'IOI' ? item.score + ' 分' : item.problem.difficulty }}</small>
+              <strong>{{ String.fromCharCode(65 + index) }}</strong><span>{{ item.problem.title }}</span><small>{{ selected.mode === 'IOI' ? item.score + ' 分' : pointDifficultyShortLabel(item.problem.difficulty) }}</small>
             </button>
             <p v-if="selected.state !== 'RUNNING'" class="tip">比赛开始后可进入题目；赛后可通过虚拟比赛补题。</p>
           </div>
@@ -278,7 +279,7 @@ onUnmounted(() => {
           <label>封榜时间<input v-model="form.freezeTime" type="datetime-local" /></label><label class="check"><input v-model="form.allowUpsolve" type="checkbox" /> 允许赛后虚拟比赛</label>
           <label class="check"><input v-model="form.teamMode" type="checkbox" /> 团队公开赛</label><label class="check"><input v-model="form.isRated" type="checkbox" /> Rated（计入评级标识）</label>
         </div>
-        <div class="picker"><b>选择比赛题目</b><small>可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problem.title }} <em>{{ problem.difficulty }}</em></label><p v-if="!problems.length">暂无已发布题目，请先在题库中发布题目。</p></div>
+        <div class="picker"><b>选择比赛题目</b><small>可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problem.title }} <em>{{ pointDifficultyShortLabel(problem.difficulty) }}</em></label><p v-if="!problems.length">暂无已发布题目，请先在题库中发布题目。</p></div>
         <footer><button type="button" class="cancel" @click="showCreator = false">取消</button><button class="gold" :disabled="actionLoading">创建比赛</button></footer>
       </form>
     </div>

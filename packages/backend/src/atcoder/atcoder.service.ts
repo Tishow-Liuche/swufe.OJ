@@ -131,7 +131,7 @@ export class AtCoderService implements OnModuleInit {
           title: metadata!.title,
           source: 'EXTERNAL',
           status: 'PUBLISHED',
-          difficulty: 'UNRATED',
+          difficulty: 'POINT_1',
           timeLimit: metadata!.timeLimitMs,
           memoryLimit: metadata!.memoryLimitMb,
           allowLanguages: [],

@@ -1,8 +1,9 @@
-import { Body, Controller, Logger, Post, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Logger, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../prisma/prisma.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { mapLuoguDifficultyToPointDifficulty } from '../problem/point-difficulty';
 import { SyncService } from './sync.service';
 
 @Controller('api/sync')
@@ -90,7 +91,7 @@ export class SyncController {
       data: {
         title,
         source: 'EXTERNAL',
-        difficulty: 'NOI',
+        difficulty: 'POINT_4',
         timeLimit: body.timeLimit || 1000,
         memoryLimit: body.memoryLimit || 1024,
         status: 'PUBLISHED',
@@ -174,12 +175,7 @@ export class SyncController {
 
     // 更新难度
     if (body.difficulty !== undefined) {
-      const diffMap: Record<number, string> = {
-        0: 'BEGINNER', 1: 'BEGINNER', 2: 'POPULAR', 3: 'POPULAR',
-        4: 'IMPROVE', 5: 'IMPROVE', 6: 'PROVINCIAL', 7: 'PROVINCIAL',
-        8: 'NOI', 9: 'NOI',
-      };
-      const d = diffMap[body.difficulty] || 'POPULAR';
+      const d = mapLuoguDifficultyToPointDifficulty(body.difficulty);
       await this.prisma.problem.update({
         where: { id: source.problemId },
         data: { difficulty: d },

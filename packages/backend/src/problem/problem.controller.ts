@@ -8,7 +8,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ProblemService } from './problem.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { CreateProblemDto, UpdateProblemDto, QueryProblemDto } from './dto';
+import { CreateProblemDto, UpdateProblemDto, QueryProblemDto, QueryAuthoredProblemDto } from './dto';
 
 @Controller('api/problems')
 export class ProblemController {
@@ -27,8 +27,8 @@ export class ProblemController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
-  uploadTestData(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
-    return this.problem.uploadTestData(id, file);
+  uploadTestData(@Param('id') id: string, @UploadedFile() file: Express.Multer.File, @Req() req: any) {
+    return this.problem.uploadTestData(id, file, req.user);
   }
 
   /** 上传图片 */
@@ -56,6 +56,21 @@ export class ProblemController {
     return this.problem.findAll(query);
   }
 
+  /** 历史录题列表 */
+  @Get('mine/created')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('TEACHER', 'ADMIN')
+  findAuthored(@Query() query: QueryAuthoredProblemDto, @Req() req: any) {
+    return this.problem.findAuthored(query, req.user);
+  }
+
+  @Get('mine/created/:id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('TEACHER', 'ADMIN')
+  findAuthoredOne(@Param('id') id: string, @Req() req: any) {
+    return this.problem.findManageable(id, req.user);
+  }
+
   /** 题目详情（公开） */
   @Get(':id')
   findOne(@Param('id') id: string) {
@@ -66,23 +81,23 @@ export class ProblemController {
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdateProblemDto) {
-    return this.problem.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateProblemDto, @Req() req: any) {
+    return this.problem.update(id, dto, req.user);
   }
 
   /** 删除题目（教师/管理员） */
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  delete(@Param('id') id: string) {
-    return this.problem.delete(id);
+  delete(@Param('id') id: string, @Req() req: any) {
+    return this.problem.delete(id, req.user);
   }
 
   /** 修改题目状态（教师/管理员） */
   @Patch(':id/status')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  updateStatus(@Param('id') id: string, @Body('status') status: string) {
-    return this.problem.updateStatus(id, status);
+  updateStatus(@Param('id') id: string, @Body('status') status: string, @Req() req: any) {
+    return this.problem.updateStatus(id, status, req.user);
   }
 }

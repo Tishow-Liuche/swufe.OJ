@@ -49,6 +49,12 @@ export class UserController {
     return this.userService.updateExternalAccounts(req.user.id, data);
   }
 
+  @Post('external-accounts/codeforces/sync')
+  @UseGuards(AuthGuard('jwt'))
+  syncCodeforcesAccepted(@Req() req: any) {
+    return this.userService.syncCodeforcesAccepted(req.user.id);
+  }
+
   @Get('awards')
   @UseGuards(AuthGuard('jwt'))
   listAwards(@Req() req: any) {
@@ -91,6 +97,12 @@ export class UserController {
     return this.userService.getStats(req.user.id);
   }
 
+  @Get('accepted-problems')
+  @UseGuards(AuthGuard('jwt'))
+  listAcceptedProblems(@Req() req: any) {
+    return this.userService.listAcceptedProblems(req.user.id);
+  }
+
   // === 管理员接口 ===
 
   @Get('admin/list')
@@ -109,8 +121,8 @@ export class UserController {
 
   @Post('password')
   @UseGuards(AuthGuard('jwt'))
-  changeOwnPassword(@Req() req: any, @Body('password') password: string) {
-    return this.userService.changeOwnPassword(req.user.id, password);
+  changeOwnPassword(@Req() req: any, @Body() data: { currentPassword?: string; password?: string }) {
+    return this.userService.changeOwnPassword(req.user.id, data);
   }
 
   @Patch('admin/:id/teacher-application')

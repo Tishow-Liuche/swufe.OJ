@@ -322,7 +322,7 @@ onMounted(async () => {
 
     <main class="community-main">
       <header class="community-topbar">
-      <div class="brand-block"><p>WESTFIN OJ · LEARNING NETWORK</p><div class="brand-title-row"><h1>社区工作台</h1><span><i></i>实时同步</span></div></div>
+      <div class="brand-block"><p>SWUFE SINGULARITY OJ · LEARNING NETWORK</p><div class="brand-title-row"><h1>社区工作台</h1><span><i></i>实时同步</span></div></div>
       <div class="topbar-actions">
         <div class="search-field"><Search :size="17" /><input v-model="keyword" type="search" placeholder="搜索帖子、关键词" @keyup.enter="loadPosts"></div>
         <div class="notification-anchor"><button class="icon-command" type="button" title="站内通知" @click="notificationsOpen = !notificationsOpen"><Bell :size="19" /><span v-if="unreadCount" class="counter">{{ unreadCount > 9 ? '9+' : unreadCount }}</span></button><div v-if="notificationsOpen" class="notification-popover"><header>站内通知</header><button v-for="item in notifications" :key="item.id" type="button" :class="{ unread: !item.readAt }" @click="markNotificationRead(item)"><strong>{{ item.title }}</strong><span>{{ item.content || '点击查看' }}</span><time>{{ formatDate(item.createdAt) }}</time></button><p v-if="!notifications.length">暂无新通知</p></div></div>

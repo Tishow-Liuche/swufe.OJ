@@ -1,6 +1,7 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref } from 'vue';
 import api from '../api/client';
+import { pointDifficultyOptions, pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
 // 导入状态
 const importing = ref(false);
@@ -11,7 +12,7 @@ const error = ref('');
 const manualProblem = ref({
   title: '',
   description: '',
-  difficulty: 'POPULAR',
+  difficulty: 'POINT_1',
   timeLimit: 1000,
   memoryLimit: 256,
   tags: '',
@@ -20,19 +21,13 @@ const qojRemoteId = ref('1');
 const qojPage = ref(1);
 const qojPageSize = ref(20);
 
-const difficulties = [
-  { value: 'BEGINNER', label: '入门' },
-  { value: 'POPULAR', label: '普及' },
-  { value: 'IMPROVE', label: '提高' },
-  { value: 'PROVINCIAL', label: '省选' },
-  { value: 'NOI', label: 'NOI' },
-];
+const difficulties = pointDifficultyOptions;
 
 // P1000-P1010 洛谷题目数据
 const luoguSeedData = [
   {
     title: 'P1000 超级玛丽游戏',
-    difficulty: 'POPULAR',
+    difficulty: 'POINT_1',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['模拟', '字符串', '入门'],
@@ -41,7 +36,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1001 A+B Problem',
-    difficulty: 'BEGINNER',
+    difficulty: 'POINT_0',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['模拟', '入门', '数学'],
@@ -56,7 +51,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1002 [NOIP2002 普及组] 过河卒',
-    difficulty: 'POPULAR',
+    difficulty: 'POINT_1',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['动态规划', '递推', 'NOIP'],
@@ -69,7 +64,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1003 [NOIP2011 提高组] 铺地毯',
-    difficulty: 'POPULAR',
+    difficulty: 'POINT_1',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['模拟', '枚举', 'NOIP'],
@@ -81,7 +76,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1004 [NOIP2000 提高组] 方格取数',
-    difficulty: 'IMPROVE',
+    difficulty: 'POINT_2',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['动态规划', '多维DP', 'NOIP'],
@@ -90,7 +85,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1005 [NOIP2007 提高组] 矩阵取数游戏',
-    difficulty: 'IMPROVE',
+    difficulty: 'POINT_2',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['动态规划', '区间DP', '高精度', 'NOIP'],
@@ -99,7 +94,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1006 [NOIP2008 提高组] 传纸条',
-    difficulty: 'IMPROVE',
+    difficulty: 'POINT_2',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['动态规划', '多维DP', 'NOIP'],
@@ -108,7 +103,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1007 独木桥',
-    difficulty: 'POPULAR',
+    difficulty: 'POINT_1',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['思维', '模拟', '贪心'],
@@ -117,7 +112,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1008 [NOIP1998 普及组] 三连击',
-    difficulty: 'POPULAR',
+    difficulty: 'POINT_1',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['枚举', '暴力', 'DFS', 'NOIP'],
@@ -126,7 +121,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1009 [NOIP1998 普及组] 阶乘之和',
-    difficulty: 'POPULAR',
+    difficulty: 'POINT_1',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['高精度', '数学', 'NOIP'],
@@ -138,7 +133,7 @@ const luoguSeedData = [
   },
   {
     title: 'P1010 [NOIP1998 普及组] 幂次方',
-    difficulty: 'POPULAR',
+    difficulty: 'POINT_1',
     timeLimit: 1000,
     memoryLimit: 125,
     tags: ['递归', '模拟', '分治', 'NOIP'],
@@ -184,7 +179,7 @@ async function importSingle() {
       manualProblem.value = {
         title: '',
         description: '',
-        difficulty: 'POPULAR',
+        difficulty: 'POINT_1',
         timeLimit: 1000,
         memoryLimit: 256,
         tags: '',
@@ -261,7 +256,7 @@ async function syncQojBatch() {
       <div class="quick-scan">
         <div v-for="p in luoguSeedData" :key="p.title" class="problem-preview">
           <span class="preview-title">{{ p.title }}</span>
-          <span class="preview-meta">{{ p.difficulty }} · {{ p.timeLimit }}ms · {{ p.tags.join(', ') }}</span>
+          <span class="preview-meta">{{ pointDifficultyShortLabel(p.difficulty) }} · {{ p.timeLimit }}ms · {{ p.tags.join(', ') }}</span>
         </div>
       </div>
       <button class="btn-primary" @click="importLuogu" :disabled="importing">

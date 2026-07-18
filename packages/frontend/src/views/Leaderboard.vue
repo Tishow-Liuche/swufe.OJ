@@ -1,132 +1,534 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { BarChart3, Medal, Sparkles, Target, Trophy } from '@lucide/vue';
 import api from '../api/client';
-import { useAuthStore } from '../stores/auth';
 import FilterSelect from '../components/FilterSelect.vue';
+
+type LeaderboardScope = 'GLOBAL' | 'CONTEST' | 'OVERALL';
 
 const route = useRoute();
 const router = useRouter();
-const auth = useAuthStore();
-const scope = ref<'GLOBAL' | 'CLASS' | 'LIST' | 'CONTEST'>(route.query.contestId ? 'CONTEST' : 'GLOBAL');
+const scope = ref<LeaderboardScope>(route.query.contestId ? 'CONTEST' : 'GLOBAL');
 const targetId = ref(String(route.query.contestId || ''));
 const rows = ref<any[]>([]);
-const options = ref<{ classes: any[]; problemLists: any[] }>({ classes: [], problemLists: [] });
+const contests = ref<any[]>([]);
 const contest = ref<any>(null);
 const loading = ref(true);
 const error = ref('');
 
-const scopeLabel = computed(() => ({ GLOBAL: '全站练习榜', CLASS: '班级练习榜', LIST: '题单练习榜', CONTEST: contest.value?.title || '比赛排行榜' } as Record<string, string>)[scope.value]);
-const selectableOptions = computed(() => scope.value === 'CLASS' ? options.value.classes : options.value.problemLists);
-const selectOptions = computed(() => [
-  { value: '', label: scope.value === 'CLASS' ? '选择班级' : '选择题单' },
-  ...selectableOptions.value.map((item: any) => ({ value: item.id, label: item.name })),
+const scopeMeta = computed(() => ({
+  GLOBAL: {
+    title: '全站过题数排名',
+    kicker: 'SOLVE COUNT',
+    desc: '按照全站真实 AC 题目数排名，提交数与用户名作为并列时的辅助排序。',
+    icon: Target,
+  },
+  CONTEST: {
+    title: contest.value?.title || '比赛排名',
+    kicker: 'CONTEST STANDINGS',
+    desc: '查看单场比赛榜单。ACM 模式展示过题数与罚时，IOI 模式展示得分。',
+    icon: Trophy,
+  },
+  OVERALL: {
+    title: '综合排名',
+    kicker: 'SINGULARITY SCORE',
+    desc: '综合积分榜框架已预留，等你给出积分公式后接入正式计算。',
+    icon: Sparkles,
+  },
+})[scope.value]);
+
+const contestOptions = computed(() => [
+  { value: '', label: '选择比赛' },
+  ...contests.value.map((item: any) => ({ value: item.id, label: item.title })),
 ]);
 
-async function loadOptions() {
-  if (!auth.token) return;
+const boardColumns = computed(() => {
+  if (scope.value === 'CONTEST' && contest.value?.mode === 'ACM') {
+    return ['排名', '选手', '已解决', '罚时'];
+  }
+  if (scope.value === 'CONTEST' && contest.value?.mode === 'IOI') {
+    return ['排名', '选手', '得分', '已解决'];
+  }
+  if (scope.value === 'OVERALL') {
+    return ['排名', '用户', '综合积分', '构成'];
+  }
+  return ['排名', '用户', '已解决', '提交数', '通过率'];
+});
+
+async function loadContests() {
   try {
-    if (!auth.user) await auth.fetchProfile();
-    const { data } = await api.get('/api/contests/leaderboards/options');
-    options.value = data;
-  } catch { /* 登录用户的可选范围加载失败不影响全站榜 */ }
+    const { data } = await api.get('/api/contests');
+    contests.value = Array.isArray(data) ? data : data.items || [];
+  } catch {
+    contests.value = [];
+  }
 }
+
 async function load() {
-  loading.value = true; error.value = ''; contest.value = null;
+  loading.value = true;
+  error.value = '';
+  contest.value = null;
+
   try {
     if (scope.value === 'GLOBAL') {
       const { data } = await api.get('/api/leaderboard');
       rows.value = data;
     } else if (scope.value === 'CONTEST') {
-      const { data } = await api.get('/api/contests/' + targetId.value + '/standings');
+      if (!targetId.value) {
+        rows.value = [];
+        return;
+      }
+      const { data } = await api.get(`/api/contests/${targetId.value}/standings`);
       contest.value = data.contest;
       rows.value = (data.rows || []).map((row: any) => ({
         ...row,
-        nickname: row.user.nickname || row.user.username,
-        username: row.user.username,
-        solvedCount: row.solvedCount,
-        score: row.score,
-        penalty: row.penalty,
+        nickname: row.user?.nickname || row.user?.username || row.nickname || row.username,
+        username: row.user?.username || row.username,
       }));
     } else {
-      if (!targetId.value) { rows.value = []; return; }
-      const path = scope.value === 'CLASS'
-        ? '/api/contests/classes/' + targetId.value + '/leaderboard'
-        : '/api/contests/problem-lists/' + targetId.value + '/leaderboard';
-      const { data } = await api.get(path);
-      rows.value = data;
+      rows.value = [];
     }
   } catch (e: any) {
     error.value = e.response?.data?.message || '排行榜加载失败';
-  } finally { loading.value = false; }
+  } finally {
+    loading.value = false;
+  }
 }
-function switchScope(next: 'GLOBAL' | 'CLASS' | 'LIST') {
+
+function switchScope(next: LeaderboardScope) {
   scope.value = next;
-  targetId.value = next === 'CLASS' ? options.value.classes[0]?.id || '' : next === 'LIST' ? options.value.problemLists[0]?.id || '' : '';
-  router.replace({ query: {} });
-  load();
+  if (next !== 'CONTEST') {
+    targetId.value = '';
+    contest.value = null;
+    void router.replace({ query: {} });
+  } else if (targetId.value) {
+    void router.replace({ query: { contestId: targetId.value } });
+  }
+  void load();
 }
-function selectTarget(value: string) {
+
+function selectContest(value: string) {
   targetId.value = value;
-  load();
+  if (value) void router.replace({ query: { contestId: value } });
+  else void router.replace({ query: {} });
+  void load();
 }
-onMounted(async () => { await loadOptions(); await load(); });
+
+function rankMedal(rank: number) {
+  return rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
+}
+
+onMounted(async () => {
+  await loadContests();
+  await load();
+});
 </script>
 
 <template>
   <main class="leaderboard-page">
-    <section class="head">
-      <div><p class="eyebrow">LEARN · SOLVE · RISE</p><h1>{{ scopeLabel }}</h1><p>按真实提交与解决题目统计。不同训练范围各自拥有独立的成长坐标。</p></div>
-      <div class="trophy">🏆</div>
+    <section class="leaderboard-hero">
+      <div>
+        <p class="eyebrow"><BarChart3 :size="16" /> LEADERBOARD</p>
+        <h1>{{ scopeMeta.title }}</h1>
+        <p>{{ scopeMeta.desc }}</p>
+      </div>
+      <div class="hero-orb">
+        <component :is="scopeMeta.icon" :size="54" />
+      </div>
     </section>
 
-    <div class="scope-bar">
-      <button :class="{ active: scope === 'GLOBAL' }" @click="switchScope('GLOBAL')">全站</button>
-      <button :class="{ active: scope === 'CLASS' }" :disabled="!auth.token" @click="switchScope('CLASS')">班级</button>
-      <button :class="{ active: scope === 'LIST' }" :disabled="!auth.token" @click="switchScope('LIST')">题单</button>
+    <section class="rank-switcher" aria-label="排行榜类型">
+      <button :class="{ active: scope === 'GLOBAL' }" @click="switchScope('GLOBAL')">
+        <Target :size="18" />
+        <span>
+          <strong>全站过题数排名</strong>
+          <small>按 AC 题目数排序</small>
+        </span>
+      </button>
+      <button :class="{ active: scope === 'CONTEST' }" @click="switchScope('CONTEST')">
+        <Trophy :size="18" />
+        <span>
+          <strong>比赛排名</strong>
+          <small>选择一场比赛查看榜单</small>
+        </span>
+      </button>
+      <button :class="{ active: scope === 'OVERALL' }" @click="switchScope('OVERALL')">
+        <Sparkles :size="18" />
+        <span>
+          <strong>综合排名</strong>
+          <small>积分公式待接入</small>
+        </span>
+      </button>
+    </section>
+
+    <div v-if="scope === 'CONTEST'" class="contest-picker">
       <FilterSelect
-        v-if="scope === 'CLASS' || scope === 'LIST'"
-        class="scope-select"
+        class="contest-select"
         :model-value="targetId"
-        :options="selectOptions"
-        :label="scope === 'CLASS' ? '选择班级' : '选择题单'"
-        @update:model-value="selectTarget"
+        :options="contestOptions"
+        label="选择比赛"
+        @update:model-value="selectContest"
       />
-      <button v-if="scope === 'CONTEST'" class="back" @click="switchScope('GLOBAL')">← 返回练习榜</button>
+      <span v-if="!contests.length">暂无可选择比赛，或比赛列表加载失败。</span>
     </div>
+
+    <section v-if="scope === 'OVERALL'" class="overall-placeholder">
+      <div class="placeholder-icon"><Medal :size="34" /></div>
+      <div>
+        <p class="eyebrow">FRAME READY</p>
+        <h2>综合积分榜框架已搭好</h2>
+        <p>后续只需要补充你的积分公式，我会把“过题、比赛、奖项、活跃度”等指标映射成统一积分，并在这里展示正式排名。</p>
+      </div>
+    </section>
 
     <p v-if="error" class="notice">{{ error }}</p>
     <div v-if="loading" class="state">正在计算排行榜…</div>
-    <div v-else-if="!rows.length" class="state">暂无可展示的提交数据</div>
-    <section v-else class="board">
-      <div class="board-head"><span>排名</span><span>学习者</span><span v-if="scope === 'CONTEST' && contest?.mode === 'IOI'">得分</span><span v-else>已解决</span><span v-if="scope === 'CONTEST' && contest?.mode === 'ACM'">罚时</span><span v-else-if="scope !== 'CONTEST'">提交数</span><span v-if="scope !== 'CONTEST'">通过率</span></div>
-      <div v-for="row in rows" :key="row.userId" class="board-row" :class="{ top: row.rank <= 3 }">
-        <span class="rank"><i v-if="row.rank <= 3">{{ ['🥇','🥈','🥉'][row.rank - 1] }}</i><b v-else>{{ row.rank }}</b></span>
-        <span class="user"><strong>{{ row.nickname }}</strong><small>@{{ row.username }}</small></span>
-        <strong>{{ scope === 'CONTEST' && contest?.mode === 'IOI' ? row.score + ' 分' : row.solvedCount }}</strong>
+    <div v-else-if="scope !== 'OVERALL' && !rows.length" class="state">
+      {{ scope === 'CONTEST' && !targetId ? '请选择一场比赛查看排名' : '暂无可展示的排名数据' }}
+    </div>
+
+    <section v-else-if="scope !== 'OVERALL'" class="board">
+      <div class="board-head" :class="{ contest: scope === 'CONTEST' }">
+        <span v-for="column in boardColumns" :key="column">{{ column }}</span>
+      </div>
+      <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="{ top: row.rank <= 3, contest: scope === 'CONTEST' }">
+        <span class="rank">
+          <i v-if="rankMedal(row.rank)">{{ rankMedal(row.rank) }}</i>
+          <b v-else>{{ row.rank }}</b>
+        </span>
+        <span class="user">
+          <strong>{{ row.nickname || row.username }}</strong>
+          <small>@{{ row.username }}</small>
+        </span>
+        <strong v-if="scope === 'CONTEST' && contest?.mode === 'IOI'">{{ row.score }} 分</strong>
+        <strong v-else>{{ row.solvedCount }}</strong>
         <span v-if="scope === 'CONTEST' && contest?.mode === 'ACM'">{{ row.penalty }} min</span>
-        <span v-else-if="scope !== 'CONTEST'">{{ row.submissionCount }}</span>
-        <span v-if="scope !== 'CONTEST'">{{ row.acceptRate }}%</span>
+        <span v-else-if="scope === 'CONTEST'">{{ row.solvedCount }}</span>
+        <span v-else>{{ row.submissionCount }}</span>
+        <span v-if="scope === 'GLOBAL'">{{ row.acceptRate }}%</span>
       </div>
     </section>
   </main>
 </template>
 
 <style scoped>
-.leaderboard-page { --ink:#18253a; --muted:#728096; --line:#e5eaf0; --navy:#173b66; --primary:#245d91; --primary-strong:#173b66; --primary-container:#e8f3fc; --surface:#fff; --surface-low:#f5f8fb; --outline:#d7e2ec; max-width:940px; margin:auto; padding:30px 20px 60px; color:var(--ink); }.head { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:28px 34px; overflow:hidden; border-radius:23px; color:#fff; background:linear-gradient(125deg,#183b64,#3677a9); }.eyebrow { margin:0 0 7px; color:#f8cc75; font-size:11px; font-weight:900; letter-spacing:.15em; }.head h1 { margin:0; font-size:31px; letter-spacing:-.04em; }.head p:not(.eyebrow) { margin:9px 0 0; color:#dcebf9; line-height:1.65; }.trophy { font-size:66px; filter:drop-shadow(0 8px 8px rgba(0,0,0,.2)); }.scope-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:22px 0 14px; }.scope-bar button { padding:8px 13px; border:1px solid var(--line); border-radius:999px; color:var(--muted); background:#fff; font:inherit; font-size:13px; cursor:pointer; }.scope-bar button.active { color:#fff; border-color:var(--navy); background:var(--navy); }.scope-bar button:disabled { opacity:.45; cursor:not-allowed; }.scope-select { width:178px; height:36px; }.scope-select :deep(.filter-select__trigger) { padding:0 12px; border-radius:10px; box-shadow:0 2px 7px rgba(23,59,102,.05); }.scope-select :deep(.filter-select__menu) { border-color:#c8dbea; border-radius:11px; }.scope-select :deep(.filter-select__option.is-selected) { color:#173b66; background:#e8f3fc; }.scope-bar .back { margin-left:auto; color:#245d91; }.notice { padding:11px 14px; color:#a84f35; border-radius:10px; background:#fff0eb; }.state { display:grid; min-height:230px; place-items:center; color:var(--muted); border:1px dashed #cbd5de; border-radius:16px; }.board { overflow:hidden; border:1px solid var(--line); border-radius:18px; background:#fff; box-shadow:0 10px 26px rgba(23,49,80,.06); }.board-head,.board-row { display:grid; grid-template-columns:80px minmax(170px,1fr) 120px 100px 100px; align-items:center; gap:10px; padding:13px 18px; }.board-head { color:#6e7d8f; border-bottom:1px solid var(--line); background:#f8fafc; font-size:12px; font-weight:900; }.board-row { min-height:47px; border-bottom:1px solid #f0f2f5; font-size:14px; }.board-row:last-child { border-bottom:0; }.board-row.top { background:linear-gradient(90deg,#fffaf0,#fff); }.rank i { font-size:22px; font-style:normal; }.rank b { color:#98a4b1; }.user { display:flex; flex-direction:column; gap:2px; }.user small { color:#95a0ae; font-size:11px; }.board-row>strong { color:#1e588c; }@media(max-width:620px){.head{padding:24px}.trophy{display:none}.board{overflow:auto}.board-head,.board-row{min-width:620px}.scope-bar .back{margin-left:0}}
-/* Keep the leaderboard in the same light workspace family as the problem library. */
-.head {
-  border: 1px solid #dce5ef;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
-  color: #1f2a37;
+.leaderboard-page {
+  --ink: #17233a;
+  --muted: #71809a;
+  --line: #dfe8f5;
+  --blue: #2f7cf2;
+  width: min(1080px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 30px 0 64px;
+  color: var(--ink);
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
 }
-.eyebrow { color: #3977aa; }
-.head p:not(.eyebrow) { color: #66778a; }
-.trophy { filter: none; }
-.scope-bar button.active {
-  border-color: #aec7f4;
-  background: #e7efff;
-  color: #1f5eff;
+
+.leaderboard-hero {
+  position: relative;
+  display: flex;
+  min-height: 210px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  padding: 34px 40px;
+  border: 1px solid #d6e5ff;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 82% 18%, rgba(255, 255, 255, .72) 0 2px, transparent 3px) 0 0 / 22px 22px,
+    radial-gradient(ellipse at 78% 20%, rgba(158, 198, 255, .42), transparent 42%),
+    linear-gradient(124deg, #f8fbff 0%, #eaf3ff 48%, #d7e8ff 100%);
+  box-shadow: 0 18px 38px rgba(47, 99, 180, .12);
+}
+
+.leaderboard-hero::after {
+  position: absolute;
+  right: -110px;
+  bottom: -140px;
+  width: 360px;
+  height: 300px;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 50%;
+  content: '';
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  color: #2f70df;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+
+.leaderboard-hero h1 {
+  margin: 0;
+  font-size: clamp(32px, 4.2vw, 48px);
+  font-weight: 860;
+  letter-spacing: -.06em;
+}
+
+.leaderboard-hero p:not(.eyebrow) {
+  max-width: 560px;
+  margin: 12px 0 0;
+  color: #64738e;
+  line-height: 1.8;
+}
+
+.hero-orb {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 116px;
+  height: 116px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .8);
+  border-radius: 32px;
+  background: linear-gradient(145deg, rgba(255,255,255,.72), rgba(116, 168, 246, .38));
+  color: #256dde;
+  box-shadow: 0 18px 32px rgba(47, 108, 213, .16);
+}
+
+.rank-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.rank-switcher button {
+  display: grid;
+  min-height: 86px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(38, 56, 89, .055);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.rank-switcher button:hover,
+.rank-switcher button.active {
+  transform: translateY(-3px);
+  border-color: #9fc2ff;
+  box-shadow: 0 14px 28px rgba(38, 91, 178, .12);
+}
+
+.rank-switcher button > svg {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  padding: 10px;
+  border-radius: 13px;
+  background: #eef5ff;
+  color: #2c6edb;
+}
+
+.rank-switcher button.active {
+  color: #fff;
+  background: linear-gradient(135deg, #2f7cf2, #235fd3);
+}
+
+.rank-switcher button.active > svg {
+  background: rgba(255,255,255,.18);
+  color: #fff;
+}
+
+.rank-switcher strong,
+.rank-switcher small {
+  display: block;
+}
+
+.rank-switcher strong {
+  color: inherit;
+  font-size: 15px;
+  font-weight: 820;
+}
+
+.rank-switcher small {
+  margin-top: 4px;
+  color: currentColor;
+  opacity: .76;
+  font-size: 12px;
+}
+
+.contest-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -2px 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contest-select {
+  width: min(360px, 100%);
+}
+
+.overall-placeholder {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 24px;
+  border: 1px dashed #aac7fa;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #fff, #f3f8ff);
+}
+
+.placeholder-icon {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border-radius: 20px;
+  background: #fff3d7;
+  color: #d58618;
+}
+
+.overall-placeholder h2 {
+  margin: 0 0 8px;
+}
+
+.overall-placeholder p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.notice {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff0eb;
+  color: #a84f35;
+}
+
+.state {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+  border: 1px dashed #cbd5de;
+  border-radius: 18px;
+  color: var(--muted);
+  background: #fff;
+}
+
+.board {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(23, 49, 80, .07);
+}
+
+.board-head,
+.board-row {
+  display: grid;
+  grid-template-columns: 82px minmax(180px, 1fr) 120px 110px 100px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+}
+
+.board-head.contest,
+.board-row.contest {
+  grid-template-columns: 82px minmax(180px, 1fr) 120px 110px;
+}
+
+.board-head {
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+  color: #6e7d8f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.board-row {
+  min-height: 56px;
+  border-bottom: 1px solid #f0f2f5;
+  font-size: 14px;
+}
+
+.board-row:last-child {
+  border-bottom: 0;
+}
+
+.board-row.top {
+  background: linear-gradient(90deg, #fffaf0, #fff);
+}
+
+.rank i {
+  font-size: 24px;
+  font-style: normal;
+}
+
+.rank b {
+  color: #98a4b1;
+}
+
+.user {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user small {
+  color: #95a0ae;
+  font-size: 11px;
+}
+
+.board-row > strong {
+  color: #1e66b4;
+}
+
+@media (max-width: 760px) {
+  .leaderboard-page {
+    width: min(100% - 28px, 680px);
+    padding-top: 20px;
+  }
+
+  .leaderboard-hero {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 28px;
+  }
+
+  .hero-orb {
+    width: 82px;
+    height: 82px;
+    border-radius: 24px;
+  }
+
+  .rank-switcher {
+    grid-template-columns: 1fr;
+  }
+
+  .board {
+    overflow-x: auto;
+  }
+
+  .board-head,
+  .board-row {
+    min-width: 680px;
+  }
 }
 </style>

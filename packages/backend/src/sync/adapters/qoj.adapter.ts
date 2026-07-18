@@ -119,7 +119,7 @@ export function parseQojProblemPage(remoteId: string, html: string): RemoteProbl
   return {
     remoteId: id,
     title: cleanText(`QOJ ${id} ${title}`),
-    difficulty: 'NOI',
+    difficulty: null,
     timeLimit,
     memoryLimit,
     tags,
@@ -168,7 +168,7 @@ function parseQojProblemMarkdown(remoteId: string, raw: string): RemoteProblemDa
   return {
     remoteId: id,
     title: cleanText(`QOJ ${id} ${cleanupTitle(title, id)}`),
-    difficulty: 'NOI',
+    difficulty: null,
     timeLimit,
     memoryLimit,
     tags: [],
