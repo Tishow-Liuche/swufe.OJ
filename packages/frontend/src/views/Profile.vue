@@ -25,6 +25,7 @@ import {
 } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
+import UserAvatar from '../components/UserAvatar.vue';
 import { pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
 interface HeatDay { date: string; count: number; accepted: number; level: number }
@@ -70,6 +71,9 @@ const selectedSubmission = ref<any>(null);
 
 const settingsLoading = ref(false);
 const settingsError = ref('');
+const avatarInput = ref<HTMLInputElement | null>(null);
+const avatarUploading = ref(false);
+const avatarError = ref('');
 const profileForm = reactive({ nickname: '', email: '', phone: '' });
 const accountForm = reactive({ codeforcesHandle: '', luoguHandle: '' });
 const cfSyncing = ref(false);
@@ -155,6 +159,30 @@ async function saveProfile() {
     profile.value = { ...profile.value, ...data };
   } catch (e: any) {
     settingsError.value = e.response?.data?.message || '保存基础资料失败';
+  }
+}
+
+async function uploadAvatar(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+
+  avatarError.value = '';
+  avatarUploading.value = true;
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post('/api/user/avatar', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    profile.value = { ...profile.value, ...data };
+    await auth.fetchProfile();
+  } catch (e: any) {
+    const message = e.response?.data?.message;
+    avatarError.value = Array.isArray(message) ? message.join('；') : message || '头像上传失败';
+  } finally {
+    avatarUploading.value = false;
+    input.value = '';
   }
 }
 
@@ -465,7 +493,9 @@ void [
             <span v-if="profile.createdAt"><CalendarDays :size="14" />加入于 {{ new Date(profile.createdAt).toLocaleDateString('zh-CN') }}</span>
           </div>
         </div>
-        <div class="hero-avatar"><span>{{ avatarText }}</span></div>
+        <div class="hero-avatar">
+          <UserAvatar :name="displayName" :avatar="profile.avatar" :size="92" label="个人头像" />
+        </div>
       </section>
 
       <section class="metric-grid" aria-label="学习概览">
@@ -512,7 +542,7 @@ void [
         </article>
 
         <article class="profile-panel recent-panel">
-          <div class="panel-title"><h2>最近提交</h2><button class="text-btn" @click="loadAllSubmissions">查看全部</button></div>
+          <div class="panel-title"><h2>最近提交</h2></div>
           <div v-if="stats.recentSubmissions?.length" class="submission-list">
             <button v-for="sub in stats.recentSubmissions" :key="sub.id" class="submission-row" @click="viewDetail(sub)">
               <span class="status-dot" :style="{ background: statusColors[sub.status] || '#8996a6' }">{{ statusLabels[sub.status] || sub.status }}</span>
@@ -554,6 +584,23 @@ void [
       </section>
 
       <section v-else class="settings-grid">
+        <article class="profile-panel avatar-settings-card">
+          <div class="panel-title"><h2>头像设置</h2><UserRound :size="18" /></div>
+          <div class="avatar-settings-body">
+            <UserAvatar :name="displayName" :avatar="profile.avatar" :size="88" label="当前头像" />
+            <div>
+              <p class="hint">支持 JPG、PNG、WebP，最大 2MB。上传后顶部菜单栏和个人中心会同步更新。</p>
+              <input ref="avatarInput" class="avatar-input" type="file" accept="image/png,image/jpeg,image/webp" @change="uploadAvatar" />
+              <div class="inline-actions">
+                <button class="primary-btn" :disabled="avatarUploading" @click="avatarInput?.click()">
+                  <UserRound :size="16" />{{ avatarUploading ? '上传中...' : '上传头像' }}
+                </button>
+              </div>
+              <p v-if="avatarError" class="error-msg compact">{{ avatarError }}</p>
+            </div>
+          </div>
+        </article>
+
         <article class="profile-panel">
           <div class="panel-title"><h2>基础资料</h2><UserRound :size="18" /></div>
           <label>昵称<input v-model="profileForm.nickname" placeholder="设置展示昵称" /></label>
@@ -784,6 +831,11 @@ void [
   color: #fff;
   font-size: 40px;
   font-weight: 900;
+}
+
+.hero-avatar :deep(.user-avatar) {
+  border: 4px solid rgba(255,255,255,.86);
+  box-shadow: inset 0 0 0 1px rgba(47,124,242,.14);
 }
 
 .metric-grid {
@@ -1303,6 +1355,27 @@ void [
   gap: 16px;
 }
 
+.avatar-settings-card {
+  grid-column: span 1;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+}
+
+.avatar-settings-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.avatar-settings-body :deep(.user-avatar) {
+  border: 3px solid #dceaff;
+  box-shadow: 0 12px 24px rgba(47, 100, 180, .12);
+}
+
+.avatar-input {
+  display: none;
+}
+
 .settings-card h2 {
   display: flex;
   align-items: center;
@@ -1654,9 +1727,10 @@ void [
   .award-row {
     grid-template-columns: 1fr;
   }
+
+  .avatar-settings-body {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
 }
 </style>
-
-
-
-

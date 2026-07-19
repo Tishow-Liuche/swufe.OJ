@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(resolve(__dirname, '../src/views/Profile.vue'), 'utf8');
+const appSource = readFileSync(resolve(__dirname, '../src/App.vue'), 'utf8');
 
 for (const token of ['profile-hero', '学习概览', '难度分布', '账号设置', 'ICPC / CCPC 奖项认定']) {
   if (!source.includes(token)) {
@@ -27,9 +28,32 @@ for (const token of [
   '/api/user/accepted-problems',
   '已通过题目',
   'accepted-list',
+  'avatar-settings-card',
+  'avatar-input',
+  '/api/user/avatar',
+  'uploadAvatar',
 ]) {
   if (!source.includes(token)) {
     throw new Error(`Profile UI is missing required token: ${token}`);
+  }
+}
+
+for (const token of [
+  '<div class="panel-title"><h2>鏈€杩戞彁浜?/h2><button class="text-btn" @click="loadAllSubmissions">鏌ョ湅鍏ㄩ儴</button></div>',
+  '<div class="panel-title"><h2>最近提交</h2><button class="text-btn" @click="loadAllSubmissions">查看全部</button></div>',
+]) {
+  if (source.includes(token)) {
+    throw new Error(`Profile overview recent submissions should not include 查看全部 button: ${token}`);
+  }
+}
+
+for (const token of [
+  "import UserAvatar from './components/UserAvatar.vue';",
+  'class="header-avatar-link"',
+  ':avatar="auth.user?.avatar"',
+]) {
+  if (!appSource.includes(token)) {
+    throw new Error(`App header is missing persistent avatar token: ${token}`);
   }
 }
 

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Menu, X } from '@lucide/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
+import UserAvatar from './components/UserAvatar.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -59,7 +60,10 @@ async function logout() {
           <router-link v-if="auth.isTeacher()" to="/admin/create-problem" class="admin-link">录题</router-link>
           <router-link v-if="auth.isTeacher()" to="/admin/problems/history" class="admin-link">历史录题</router-link>
           <router-link v-if="auth.isAdmin()" to="/admin/users" class="admin-link">管理</router-link>
-          <router-link to="/profile">个人中心</router-link>
+          <router-link class="header-avatar-link" to="/profile" title="个人中心" aria-label="个人中心">
+            <UserAvatar :name="auth.user?.nickname || auth.user?.username" :avatar="auth.user?.avatar" :size="32" />
+            <span>个人中心</span>
+          </router-link>
           <button type="button" class="btn-logout" @click="logout">退出</button>
         </template>
         <router-link v-else to="/login">登录</router-link>
@@ -222,6 +226,17 @@ nav a,
   font-weight: 500;
   text-decoration: none;
   transition: color 160ms ease, background 160ms ease;
+}
+
+.header-avatar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px !important;
+}
+
+.header-avatar-link span {
+  white-space: nowrap;
 }
 
 nav a:hover,
