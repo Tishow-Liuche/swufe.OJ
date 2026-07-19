@@ -10,12 +10,10 @@ import {
   AddProblemListItemDto,
   CreateLearningPlanDto,
   CreateProblemListDto,
-  CreateProblemNoteDto,
   ReorderProblemListDto,
   ToggleFavoriteDto,
   UpdateLearningPlanDto,
   UpdateProblemListDto,
-  UpdateProblemNoteDto,
   UpsertWrongBookDto,
 } from './dto';
 
@@ -487,15 +485,14 @@ export class LearningService {
   }
 
   async getDashboard(userId: string) {
-    const [daily, plans, favoriteCount, wrongCount, dueNotes, solved] = await Promise.all([
+    const [daily, plans, favoriteCount, wrongCount, solved] = await Promise.all([
       this.getDaily(userId),
       this.getPlans(userId),
       this.prisma.userFavorite.count({ where: { userId } }),
       this.prisma.userWrongBook.count({ where: { userId } }),
-      this.prisma.problemNote.count({ where: { userId, reviewStatus: 'ACTIVE', nextReviewAt: { lte: new Date() } } }),
       this.prisma.submission.findMany({ where: { userId, status: 'ACCEPTED' }, distinct: ['problemId'], select: { problemId: true } }),
     ]);
-    return { daily, plans, counts: { favorites: favoriteCount, wrongBook: wrongCount, dueNotes, solved: solved.length } };
+    return { daily, plans, counts: { favorites: favoriteCount, wrongBook: wrongCount, solved: solved.length } };
   }
 
   // ==================== 收藏与错题 ====================
@@ -571,57 +568,4 @@ export class LearningService {
     return problem;
   }
 
-  // ==================== 笔记与复习 ====================
-
-  async getNotes(userId: string, dueOnly = false) {
-    return this.prisma.problemNote.findMany({
-      where: { userId, ...(dueOnly ? { reviewStatus: 'ACTIVE', nextReviewAt: { lte: new Date() } } : {}) },
-      include: { problem: { select: problemSummary } },
-      orderBy: [{ nextReviewAt: 'asc' }, { updatedAt: 'desc' }],
-    });
-  }
-
-  async createNote(userId: string, dto: CreateProblemNoteDto) {
-    await this.assertPublishedProblem(dto.problemId);
-    const content = dto.content.trim();
-    if (!content) throw new BadRequestException('笔记内容不能为空');
-    return this.prisma.problemNote.create({
-      data: { userId, problemId: dto.problemId, content, nextReviewAt: dto.nextReviewAt ? new Date(dto.nextReviewAt) : new Date(Date.now() + 86400000) },
-      include: { problem: { select: problemSummary } },
-    });
-  }
-
-  async updateNote(id: string, userId: string, dto: UpdateProblemNoteDto) {
-    const note = await this.prisma.problemNote.findUnique({ where: { id }, select: { userId: true } });
-    if (!note) throw new NotFoundException('笔记不存在');
-    if (note.userId !== userId) throw new ForbiddenException('无权操作该笔记');
-    return this.prisma.problemNote.update({
-      where: { id },
-      data: { content: dto.content === undefined ? undefined : dto.content.trim(), nextReviewAt: dto.nextReviewAt ? new Date(dto.nextReviewAt) : undefined, reviewStatus: dto.reviewStatus },
-      include: { problem: { select: problemSummary } },
-    });
-  }
-
-  async deleteNote(id: string, userId: string) {
-    const note = await this.prisma.problemNote.findUnique({ where: { id }, select: { userId: true } });
-    if (!note) throw new NotFoundException('笔记不存在');
-    if (note.userId !== userId) throw new ForbiddenException('无权操作该笔记');
-    await this.prisma.problemNote.delete({ where: { id } });
-    return { id, deleted: true };
-  }
-
-  async reviewNote(id: string, userId: string) {
-    const note = await this.prisma.problemNote.findUnique({ where: { id } });
-    if (!note) throw new NotFoundException('笔记不存在');
-    if (note.userId !== userId) throw new ForbiddenException('无权操作该笔记');
-    const intervals = [1, 3, 7, 14, 30];
-    const interval = intervals[Math.min(note.reviewCount, intervals.length - 1)];
-    const nextReviewAt = new Date();
-    nextReviewAt.setDate(nextReviewAt.getDate() + interval);
-    return this.prisma.problemNote.update({
-      where: { id },
-      data: { lastReviewedAt: new Date(), nextReviewAt, reviewCount: { increment: 1 }, reviewStatus: 'ACTIVE' },
-      include: { problem: { select: problemSummary } },
-    });
-  }
 }

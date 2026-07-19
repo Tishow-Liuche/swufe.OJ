@@ -17,7 +17,6 @@ function makePrisma(overrides: Record<string, any> = {}) {
     learningPlanCheckIn: { count: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), upsert: jest.fn(), ...overrides.learningPlanCheckIn },
     userFavorite: { count: jest.fn(), findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn(), ...overrides.userFavorite },
     userWrongBook: { count: jest.fn(), findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn(), ...overrides.userWrongBook },
-    problemNote: { count: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn(), ...overrides.problemNote },
     submission: { findMany: jest.fn(), findUnique: jest.fn(), ...overrides.submission },
     $transaction: jest.fn(),
   } as any;
@@ -143,20 +142,6 @@ describe('LearningService', () => {
       where: { userId_problemId: { userId: 'user-1', problemId: 'problem-1' } },
       update: {},
     }));
-  });
-
-  it('schedules the next review using progressive intervals', async () => {
-    const prisma = makePrisma();
-    prisma.problemNote.findUnique.mockResolvedValue({ id: 'note-1', userId: 'user-1', reviewCount: 2 });
-    prisma.problemNote.update.mockImplementation(async ({ data }: any) => ({ ...data, id: 'note-1' }));
-    const service = new LearningService(prisma);
-
-    const result = await service.reviewNote('note-1', 'user-1');
-
-    expect(result.reviewCount).toEqual({ increment: 1 });
-    expect(result.reviewStatus).toBe('ACTIVE');
-    expect(result.nextReviewAt.getTime()).toBeGreaterThan(Date.now() + 6 * 86400000);
-    expect(result.nextReviewAt.getTime()).toBeLessThan(Date.now() + 8 * 86400000);
   });
 
   it('records learner-facing wrong verdicts but ignores accepted submissions', async () => {

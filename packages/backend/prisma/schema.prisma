@@ -44,7 +44,6 @@ model User {
   learningPlans            LearningPlan[]
   favorites                UserFavorite[]
   wrongBook                UserWrongBook[]
-  problemNotes             ProblemNote[]
   recommendationFeedback   RecommendationFeedback[]
   authoredProblems         Problem[]               @relation("ProblemAuthor")
   communityPosts           CommunityPost[]
@@ -243,7 +242,6 @@ model Problem {
   knowledgePoints    ProblemKnowledgePoint[]
   favorites          UserFavorite[]
   wrongBook          UserWrongBook[]
-  problemNotes       ProblemNote[]
   problemListItems   ProblemListItem[]
   learningPlanItems  LearningPlanItem[]
   sourceInfo         ProblemSource?
@@ -969,24 +967,6 @@ model LearningPlanCheckIn {
 
   @@unique([planId, date])
   @@index([planId])
-}
-
-model ProblemNote {
-  id             String    @id @default(cuid())
-  userId         String
-  problemId      String
-  content        String
-  reviewStatus   String    @default("ACTIVE")
-  nextReviewAt   DateTime?
-  lastReviewedAt DateTime?
-  reviewCount    Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  problem        Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
-
-  @@index([userId, nextReviewAt])
-  @@index([userId, problemId])
 }
 
 model RecommendationFeedback {

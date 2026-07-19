@@ -157,31 +157,3 @@ export class UpsertWrongBookDto {
   @MaxLength(80)
   errorType?: string;
 }
-
-export class CreateProblemNoteDto {
-  @IsString()
-  problemId: string;
-
-  @IsString()
-  @MaxLength(10000)
-  content: string;
-
-  @IsOptional()
-  @IsDateString()
-  nextReviewAt?: string;
-}
-
-export class UpdateProblemNoteDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(10000)
-  content?: string;
-
-  @IsOptional()
-  @IsDateString()
-  nextReviewAt?: string;
-
-  @IsOptional()
-  @IsIn(['ACTIVE', 'MASTERED', 'ARCHIVED'])
-  reviewStatus?: string;
-}

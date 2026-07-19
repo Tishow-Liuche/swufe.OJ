@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useStorage } from '@vueuse/core';
-import { BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, NotebookTabs, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
+import { BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRouter } from 'vue-router';
@@ -11,7 +11,7 @@ import LearningProgress from '../components/LearningProgress.vue';
 import { useAuthStore } from '../stores/auth';
 import { pointDifficultyOrder, pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
-type Tab = 'overview' | 'lists' | 'plans' | 'library' | 'notes';
+type Tab = 'overview' | 'lists' | 'plans' | 'library';
 type ListSort = 'difficulty' | 'number' | 'joined';
 
 const router = useRouter();
@@ -49,10 +49,6 @@ const checkInSaving = ref(false);
 
 const favorites = ref<any[]>([]);
 const wrongBook = ref<any[]>([]);
-const notes = ref<any[]>([]);
-const noteForm = ref({ problemId: '', content: '', nextReviewAt: tomorrow() });
-const noteSearch = ref('');
-const noteProblems = ref<any[]>([]);
 
 const selectedListItems = computed(() => selectedList.value?.items || []);
 const sortedListItems = computed(() => {
@@ -76,14 +72,12 @@ const sortedListItems = computed(() => {
   });
 });
 const selectedListOwned = computed(() => lists.value.some((item) => item.id === selectedList.value?.id));
-const dueNotes = computed(() => notes.value.filter((note) => note.reviewStatus === 'ACTIVE' && (!note.nextReviewAt || new Date(note.nextReviewAt) <= new Date())));
 const activePlan = computed(() => plans.value[0] || null);
 const workspaceTabs = computed(() => [
   { id: 'overview' as const, label: '总览', detail: '学习进度', icon: LayoutDashboard },
   { id: 'lists' as const, label: '我的题单', detail: '管理与排序', icon: ListChecks, count: lists.value.length },
   { id: 'plans' as const, label: '学习计划', detail: '目标与打卡', icon: CalendarRange, count: plans.value.length },
   { id: 'library' as const, label: '收藏与错题', detail: '重点回顾', icon: Library },
-  { id: 'notes' as const, label: '笔记与复习', detail: '间隔复习', icon: NotebookTabs, count: dueNotes.value.length },
 ]);
 const continueItems = computed(() => {
   const result: any[] = [];
@@ -120,10 +114,6 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function tomorrow() {
-  return addDays(1);
-}
-
 function addDays(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -152,14 +142,12 @@ async function loadAll() {
       api.get('/api/learning/daily'),
       api.get('/api/learning/favorites'),
       api.get('/api/learning/wrong-book'),
-      api.get('/api/learning/notes'),
     ]);
     lists.value = results[0].data;
     dashboard.value = results[1].data;
     daily.value = results[2].data;
     favorites.value = results[3].data;
     wrongBook.value = results[4].data;
-    notes.value = results[5].data;
     plans.value = dashboard.value?.plans || [];
     if (!selectedListId.value && lists.value.length) await selectList(lists.value[0].id);
   } catch (err: any) {
@@ -386,37 +374,6 @@ async function removeWrong(problemId: string) {
   catch (err: any) { fail(err, '错题移除失败'); }
 }
 
-async function searchNoteProblems() {
-  if (!noteSearch.value.trim()) { noteProblems.value = []; return; }
-  try { noteProblems.value = (await api.get('/api/problems', { params: { keyword: noteSearch.value, pageSize: 12 } })).data.items; }
-  catch (err: any) { fail(err, '题目搜索失败'); }
-}
-
-async function saveNote() {
-  if (!noteForm.value.problemId || !noteForm.value.content.trim()) return;
-  try {
-    const { data } = await api.post('/api/learning/notes', noteForm.value);
-    notes.value.unshift(data);
-    noteForm.value = { problemId: '', content: '', nextReviewAt: tomorrow() };
-    noteSearch.value = '';
-    noteProblems.value = [];
-    message('笔记已保存，已加入复习队列');
-  } catch (err: any) { fail(err, '笔记保存失败'); }
-}
-
-async function reviewNote(note: any) {
-  try {
-    const { data } = await api.post(`/api/learning/notes/${note.id}/review`);
-    Object.assign(note, data);
-    message('复习已记录');
-  } catch (err: any) { fail(err, '复习记录失败'); }
-}
-
-async function archiveNote(note: any) {
-  try { const { data } = await api.patch(`/api/learning/notes/${note.id}`, { reviewStatus: 'ARCHIVED' }); Object.assign(note, data); }
-  catch (err: any) { fail(err, '笔记状态更新失败'); }
-}
-
 onMounted(loadAll);
 </script>
 
@@ -447,7 +404,6 @@ onMounted(loadAll);
       </div>
       <div class="header-actions">
         <button class="secondary-btn" @click="router.push('/problems')"><BookOpenCheck :size="17" />进入题库</button>
-        <button v-if="auth.isLoggedIn()" class="primary-btn" @click="activeTab = 'notes'"><NotebookTabs :size="17" />今日复习 {{ dueNotes.length }}</button>
       </div>
     </header>
 
@@ -455,7 +411,7 @@ onMounted(loadAll);
     <div v-if="error" class="notice error">{{ error }}<button @click="error = ''" aria-label="关闭提示">×</button></div>
 
     <div v-if="!auth.isLoggedIn() && !auth.loading" class="login-banner">
-      <div><strong>登录后管理自己的题单和计划</strong><span>公开题单仍可浏览，收藏、错题和复习记录需要账号。</span></div>
+      <div><strong>登录后管理自己的题单和计划</strong><span>公开题单仍可浏览，收藏和错题需要账号。</span></div>
       <button class="primary-btn" @click="router.push('/login')">登录 / 注册</button>
     </div>
 
@@ -469,7 +425,6 @@ onMounted(loadAll);
           <div class="metric"><span>已解决题目</span><strong>{{ dashboard?.counts?.solved || 0 }}</strong><small>以通过提交计算</small></div>
           <div class="metric"><span>收藏题目</span><strong>{{ dashboard?.counts?.favorites || 0 }}</strong><small>可加入每日练习</small></div>
           <div class="metric"><span>错题本</span><strong>{{ dashboard?.counts?.wrongBook || 0 }}</strong><small>优先安排复习</small></div>
-          <div class="metric accent"><span>待复习笔记</span><strong>{{ dashboard?.counts?.dueNotes || 0 }}</strong><small>按间隔复习</small></div>
         </div>
         <div class="overview-grid">
           <section class="panel daily-panel">
@@ -533,9 +488,7 @@ onMounted(loadAll);
         <div class="panel plan-builder"><div class="panel-heading"><div><span class="section-kicker">TODAY</span><h2>每日练习编排</h2></div><button class="text-btn" @click="generateDaily">按计划补充</button></div><div class="daily-progress"><div><strong>{{ daily.progress?.completed || 0 }} / {{ daily.progress?.total || 0 }}</strong><span>今日完成</span></div><div class="progress-track"><i :style="{ width: `${completionPercent}%` }"></i></div><span>{{ completionPercent }}%</span></div><div class="search-inline wide"><input v-model="planSearch" placeholder="搜索题目加入今日练习" @keyup.enter="searchPlanProblems"><button class="secondary-btn" @click="searchPlanProblems">搜索</button></div><div v-if="planProblems.length" class="search-results"><button v-for="problem in planProblems" :key="problem.id" @click="addToDaily(problem.id)"><span>{{ problem.title }}</span><small>＋加入今日</small></button></div><div class="daily-list schedule-list"><label v-for="item in daily.items" :key="item.id" class="daily-row" :class="{ done: item.completed }"><input type="checkbox" :checked="item.completed" @change="toggleDaily(item)"><span class="history-check" :class="{ visible: item.previouslyDone || item.completed }">✓</span><span class="daily-type">{{ item.type === 'REVIEW' ? '复习题' : '新题' }}</span><button class="problem-link" @click.prevent="openProblem(item.problemId)">{{ item.problem?.title }}</button></label></div></div>
       </section>
 
-      <section v-else-if="activeTab === 'library'" class="library-section"><div class="section-toolbar"><div><span class="section-kicker">RETAIN & REVIEW</span><h2>收藏与错题</h2></div><button class="secondary-btn" @click="generateDaily">把重点加入今日练习</button></div><div class="library-grid"><section class="panel library-column"><div class="panel-heading"><div><h2>收藏题目</h2><small>{{ favorites.length }} 道题</small></div></div><div class="library-list"><div v-for="item in favorites" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span>{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span><button class="icon-btn" title="取消收藏" @click="removeFavorite(item.problemId)">☆</button></div><div v-if="!favorites.length" class="empty-state">在题目页点击收藏，建立自己的练习清单。</div></div></section><section class="panel library-column"><div class="panel-heading"><div><h2>错题本</h2><small>{{ wrongBook.length }} 道题</small></div></div><div class="library-list"><div v-for="item in wrongBook" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span class="wrong-tag">{{ item.errorType }}</span><button class="icon-btn" title="移出错题本" @click="removeWrong(item.problemId)">✓</button></div><div v-if="!wrongBook.length" class="empty-state">提交出现错误的题目会自动进入这里。</div></div></section></div></section>
-
-      <section v-else class="notes-section"><div class="section-toolbar"><div><span class="section-kicker">SPACED REVIEW</span><h2>笔记与复习</h2></div><span class="due-counter">{{ dueNotes.length }} 条待复习</span></div><div class="notes-grid"><section class="panel note-composer"><div class="panel-heading"><div><h2>新建笔记</h2><small>为题目记录思路、易错点或复习结论</small></div></div><div class="note-form"><label>关联题目<div class="search-inline"><input v-model="noteSearch" placeholder="搜索题目" @keyup.enter="searchNoteProblems"><button class="secondary-btn" @click="searchNoteProblems">搜索</button></div></label><div v-if="noteProblems.length" class="search-results"><button v-for="problem in noteProblems" :key="problem.id" @click="noteForm.problemId = problem.id; noteSearch = problem.title; noteProblems = []"><span>{{ problem.title }}</span><small>选择</small></button></div><div v-if="noteForm.problemId" class="selected-problem">已关联：{{ noteSearch }}<button class="icon-btn" @click="noteForm.problemId = ''; noteSearch = ''">×</button></div><label>笔记内容<textarea v-model="noteForm.content" rows="7" maxlength="10000" placeholder="写下这道题的关键思路…"></textarea></label><label>下次复习日期<input v-model="noteForm.nextReviewAt" type="date"></label><button class="primary-btn full-btn" @click="saveNote">保存笔记</button></div></section><section class="panel note-list"><div class="panel-heading"><div><h2>复习队列</h2><small>完成一次复习后自动安排下一次间隔</small></div><button class="text-btn" @click="notes = notes.filter((note) => note.reviewStatus !== 'ARCHIVED')">隐藏归档</button></div><div v-if="notes.length" class="notes-list"><article v-for="note in notes" :key="note.id" class="note-row" :class="{ due: dueNotes.some((item) => item.id === note.id), archived: note.reviewStatus === 'ARCHIVED' }"><div class="note-row-top"><button class="problem-link" @click="openProblem(note.problemId)">{{ note.problem?.title }}</button><span class="note-date">{{ note.nextReviewAt ? new Date(note.nextReviewAt).toLocaleDateString() : '待安排' }}</span></div><p>{{ note.content }}</p><div class="note-actions"><span>已复习 {{ note.reviewCount }} 次</span><button v-if="note.reviewStatus !== 'ARCHIVED'" class="secondary-btn" @click="reviewNote(note)">完成复习</button><button v-if="note.reviewStatus !== 'ARCHIVED'" class="text-btn" @click="archiveNote(note)">归档</button></div></article></div><div v-else class="empty-state">还没有笔记，先从题目页记录一个解题思路。</div></section></div></section>
+      <section v-else class="library-section"><div class="section-toolbar"><div><span class="section-kicker">RETAIN & REVIEW</span><h2>收藏与错题</h2></div><button class="secondary-btn" @click="generateDaily">把重点加入今日练习</button></div><div class="library-grid"><section class="panel library-column"><div class="panel-heading"><div><h2>收藏题目</h2><small>{{ favorites.length }} 道题</small></div></div><div class="library-list"><div v-for="item in favorites" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span>{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span><button class="icon-btn" title="取消收藏" @click="removeFavorite(item.problemId)">☆</button></div><div v-if="!favorites.length" class="empty-state">在题目页点击收藏，建立自己的练习清单。</div></div></section><section class="panel library-column"><div class="panel-heading"><div><h2>错题本</h2><small>{{ wrongBook.length }} 道题</small></div></div><div class="library-list"><div v-for="item in wrongBook" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span class="wrong-tag">{{ item.errorType }}</span><button class="icon-btn" title="移出错题本" @click="removeWrong(item.problemId)">✓</button></div><div v-if="!wrongBook.length" class="empty-state">提交出现错误的题目会自动进入这里。</div></div></section></div></section>
         </template>
       </div>
     </main>
@@ -547,7 +500,7 @@ onMounted(loadAll);
 
 <style scoped>
 .learning-page { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 42px 0 72px; color: #1f2937; }
-.learning-header, .section-toolbar, .panel-heading, .editor-heading, .subheading, .note-row-top, .note-actions, .header-actions, .inline-actions, .daily-progress { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.learning-header, .section-toolbar, .panel-heading, .editor-heading, .subheading, .header-actions, .inline-actions, .daily-progress { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .learning-header { margin-bottom: 30px; align-items: flex-end; }
 .eyebrow, .section-kicker { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
 h1 { margin: 6px 0 8px; color: #0f172a; font-size: clamp(30px, 4vw, 46px); line-height: 1.08; letter-spacing: 0; }
@@ -585,15 +538,14 @@ h3 { color: #0f172a; font-size: 16px; letter-spacing: 0; }
 .empty-state strong { display: block; color: #334155; margin-bottom: 5px; }
 .empty-state p { margin: 0 0 16px; font-size: 13px; }
 .empty-state.compact { padding: 22px 10px; font-size: 13px; }
-.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+.metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
 .metric { padding: 18px 20px; border-top: 3px solid #cbd5e1; background: white; box-shadow: 0 2px 10px rgba(15, 23, 42, .04); }
-.metric.accent { border-color: #0f766e; }
 .metric span, .metric small { display: block; color: #64748b; font-size: 12px; }
 .metric strong { display: block; margin: 8px 0 2px; color: #0f172a; font-size: 27px; line-height: 1; }
-.overview-grid, .library-grid, .notes-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
+.overview-grid, .library-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
 .panel { border: 1px solid #e2e8f0; background: white; box-shadow: 0 2px 10px rgba(15, 23, 42, .035); }
-.daily-panel, .quick-panel, .plan-builder, .library-column, .note-composer, .note-list, .list-editor { padding: 22px; }
-.daily-panel .panel-heading, .quick-panel .panel-heading, .plan-builder .panel-heading, .library-column .panel-heading, .note-composer .panel-heading, .note-list .panel-heading { margin-bottom: 18px; }
+.daily-panel, .quick-panel, .plan-builder, .library-column, .list-editor { padding: 22px; }
+.daily-panel .panel-heading, .quick-panel .panel-heading, .plan-builder .panel-heading, .library-column .panel-heading { margin-bottom: 18px; }
 .daily-list { border-top: 1px solid #e2e8f0; }
 .daily-row, .quick-row, .ordered-row, .library-row { display: flex; align-items: center; gap: 10px; min-height: 48px; border-bottom: 1px solid #f1f5f9; }
 .daily-row:last-child, .quick-row:last-child, .ordered-row:last-child, .library-row:last-child { border-bottom: 0; }
@@ -686,20 +638,7 @@ textarea { resize: vertical; }
 .library-list { border-top: 1px solid #e2e8f0; }
 .library-row { padding: 2px 0; }
 .wrong-tag { color: #b91c1c !important; font-size: 11px !important; font-weight: 700; }
-.due-counter { color: #b45309; font-size: 13px; font-weight: 700; }
-.notes-grid { grid-template-columns: .75fr 1.25fr; margin-top: 16px; }
-.note-form { display: grid; gap: 14px; }
-.selected-problem { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; background: #f0fdfa; color: #0f766e; font-size: 12px; }
 .full-btn { width: 100%; }
-.notes-list { border-top: 1px solid #e2e8f0; }
-.note-row { padding: 15px 0; border-bottom: 1px solid #e2e8f0; }
-.note-row:last-child { border-bottom: 0; }
-.note-row.due { border-left: 3px solid #f59e0b; padding-left: 12px; }
-.note-row.archived { opacity: .55; }
-.note-date { color: #64748b; font-size: 12px; white-space: nowrap; }
-.note-row p { margin: 8px 0 12px; color: #475569; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.note-actions { justify-content: flex-start; }
-.note-actions span { margin-right: auto; color: #94a3b8; font-size: 12px; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 20px; background: rgba(15, 23, 42, .45); }
 .modal { position: relative; width: min(480px, 100%); padding: 26px; }
 .modal h2 { margin: 6px 0 20px; }
@@ -709,7 +648,7 @@ textarea { resize: vertical; }
 .modal .full-btn { margin-top: 20px; }
 .replace-warning { margin: -8px 0 16px; padding: 10px 12px; border-left: 3px solid #f59e0b; background: #fffbeb; color: #92400e; font-size: 12px; line-height: 1.5; }
 @media (max-width: 900px) {
-  .overview-grid, .library-grid, .notes-grid { grid-template-columns: 1fr; }
+  .overview-grid, .library-grid { grid-template-columns: 1fr; }
   .lists-workspace { grid-template-columns: 210px 1fr; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .public-grid { grid-template-columns: repeat(2, 1fr); }
@@ -758,7 +697,6 @@ textarea { resize: vertical; }
 .learning-page.sidebar-collapsed .learning-sidebar { width:72px; flex-basis:72px; padding-right:10px; padding-left:10px; }.sidebar-collapsed .learning-sidebar-icon,.sidebar-collapsed .learning-sidebar-copy,.sidebar-collapsed .learning-sidebar-label { display:none; }.sidebar-collapsed .learning-sidebar-title { justify-content:center; padding-right:0; padding-left:0; }.sidebar-collapsed .learning-sidebar-collapse { margin-left:0; }.sidebar-collapsed .workspace-nav button { grid-template-columns:1fr; justify-items:center; padding-right:0; padding-left:0; }.sidebar-collapsed .workspace-nav button>span,.sidebar-collapsed .workspace-nav button>b { display:none; }
 .panel,.public-section,.metric,.login-banner { border-color:var(--workspace-line); border-radius:8px; box-shadow:0 7px 20px rgba(23,59,102,.04); }
 .metric { border-top:3px solid #8fb9dc; }
-.metric.accent { border-top-color:#e2a93f; background:#fffdf7; }
 .metric strong,.plan-meta strong,.daily-progress strong { color:#1f6099; }
 .section-kicker,.text-btn,.plan-type,.list-nav-item span { color:#3977aa; letter-spacing:0; }
 .text-btn:hover { color:#174f81; }
@@ -771,7 +709,6 @@ input:focus,textarea:focus { border-color:#3979ad; box-shadow:0 0 0 2px #deedf9;
 .sort-modes button.active,.sort-direction:hover { border-color:var(--workspace-blue); color:#1f6098; background:#edf6fd; }
 .sort-direction { color:#1f6098; }
 .progress-track i { background:var(--workspace-blue); }
-.selected-problem { color:#1f6098; background:#edf6fd; }
 .daily-type { color:#28679d; background:#e6f1fb; }
 .public-list:hover { border-color:#8fb7d8; box-shadow:0 10px 22px rgba(23,59,102,.09); }
 .modal { border-radius:8px; }

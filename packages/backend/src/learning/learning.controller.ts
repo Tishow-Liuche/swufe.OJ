@@ -5,10 +5,8 @@ import {
   AddLearningPlanItemDto,
   CheckInLearningPlanDto,
   CreateLearningPlanDto,
-  CreateProblemNoteDto,
   ToggleFavoriteDto,
   UpdateLearningPlanDto,
-  UpdateProblemNoteDto,
   UpsertWrongBookDto,
 } from './dto';
 
@@ -76,19 +74,4 @@ export class LearningController {
 
   @Delete('wrong-book/:problemId')
   removeWrongBook(@Req() req: any, @Param('problemId') problemId: string) { return this.learning.removeWrongBook(req.user.id, problemId); }
-
-  @Get('notes')
-  notes(@Req() req: any, @Query('due') due?: string) { return this.learning.getNotes(req.user.id, due === 'true'); }
-
-  @Post('notes')
-  createNote(@Req() req: any, @Body() dto: CreateProblemNoteDto) { return this.learning.createNote(req.user.id, dto); }
-
-  @Patch('notes/:id')
-  updateNote(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateProblemNoteDto) { return this.learning.updateNote(id, req.user.id, dto); }
-
-  @Delete('notes/:id')
-  deleteNote(@Req() req: any, @Param('id') id: string) { return this.learning.deleteNote(id, req.user.id); }
-
-  @Post('notes/:id/review')
-  reviewNote(@Req() req: any, @Param('id') id: string) { return this.learning.reviewNote(id, req.user.id); }
 }
