@@ -501,7 +501,7 @@ export class LearningService {
 
   async getDashboard(userId: string) {
     const today = startOfDay();
-    const [daily, plans, continueLearning, favoriteCount, wrongCount, solvedToday, checkIn] = await Promise.all([
+    const [daily, plans, continueLearning, favoriteCount, wrongCount, solvedToday, solvedTotal, checkIn] = await Promise.all([
       this.getDaily(userId),
       this.getPlans(userId),
       this.getContinueLearning(userId),
@@ -509,6 +509,11 @@ export class LearningService {
       this.prisma.userWrongBook.count({ where: { userId } }),
       this.prisma.submission.findMany({
         where: { userId, status: 'ACCEPTED', createdAt: { gte: today, lt: endOfDay(today) } },
+        distinct: ['problemId'],
+        select: { problemId: true },
+      }),
+      this.prisma.submission.findMany({
+        where: { userId, status: 'ACCEPTED' },
         distinct: ['problemId'],
         select: { problemId: true },
       }),
@@ -523,6 +528,7 @@ export class LearningService {
         favorites: favoriteCount,
         wrongBook: wrongCount,
         todaySolved: solvedToday.length,
+        totalSolved: solvedTotal.length,
         checkInDays: checkIn.totalDays,
       },
     };

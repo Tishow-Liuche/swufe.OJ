@@ -246,6 +246,29 @@ describe('LearningService', () => {
     expect(result).toMatchObject({ checkedToday: true, totalDays: 1, streak: 1 });
   });
 
+  it('counts distinct accepted problems in the dashboard totals', async () => {
+    const prisma = makePrisma();
+    prisma.userFavorite.count.mockResolvedValue(0);
+    prisma.userWrongBook.count.mockResolvedValue(0);
+    prisma.submission.findMany
+      .mockResolvedValueOnce([{ problemId: 'problem-1' }])
+      .mockResolvedValueOnce([{ problemId: 'problem-1' }, { problemId: 'problem-2' }]);
+    const service = new LearningService(prisma);
+    jest.spyOn(service, 'getDaily').mockResolvedValue({ items: [] } as any);
+    jest.spyOn(service, 'getPlans').mockResolvedValue([] as any);
+    jest.spyOn(service, 'getContinueLearning').mockResolvedValue({ items: [], counts: {} } as any);
+    jest.spyOn(service, 'getCheckIn').mockResolvedValue({ checkedToday: false, totalDays: 3, streak: 0 } as any);
+
+    const result = await service.getDashboard('user-1');
+
+    expect(prisma.submission.findMany).toHaveBeenNthCalledWith(2, {
+      where: { userId: 'user-1', status: 'ACCEPTED' },
+      distinct: ['problemId'],
+      select: { problemId: true },
+    });
+    expect(result.counts).toMatchObject({ todaySolved: 1, totalSolved: 2, checkInDays: 3 });
+  });
+
   it('uses upsert for idempotent favorites', async () => {
     const prisma = makePrisma();
     prisma.problem.findUnique.mockResolvedValue({ id: 'problem-1', status: 'PUBLISHED' });

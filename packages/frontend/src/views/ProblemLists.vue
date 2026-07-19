@@ -403,8 +403,9 @@ onMounted(async () => {
         <div v-if="loading" class="loading-state">正在整理你的学习数据...</div>
 
         <template v-else-if="activeTab === 'practice'">
-          <section class="metric-strip" aria-label="今日刷题数据">
+          <section class="metric-strip" aria-label="刷题数据">
             <div><span>今日已解决题目</span><strong>{{ dashboard?.counts?.todaySolved || 0 }}</strong><small>道</small></div>
+            <div><span>累计解决题目</span><strong>{{ dashboard?.counts?.totalSolved || 0 }}</strong><small>道</small></div>
             <div><span>累计签到</span><strong>{{ dashboard?.counts?.checkInDays || 0 }}</strong><small>天</small></div>
           </section>
 
@@ -748,12 +749,15 @@ onMounted(async () => {
 .notice.error { border-color: #efc0bd; color: #9d342e; background: #fff5f4; }
 .notice button { display: grid; place-items: center; border: 0; color: inherit; background: transparent; cursor: pointer; }
 
-.metric-strip { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
-.metric-strip > div { display: flex; min-height: 92px; align-items: baseline; gap: 7px; padding: 22px 26px; border-left: 4px solid #4f83d8; }
-.metric-strip > div + div { border-left-color: #3c9b79; box-shadow: inset 1px 0 var(--line); }
+.metric-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.metric-strip > div { display: flex; min-width: 0; min-height: 92px; align-items: baseline; gap: 7px; padding: 22px 26px; border-left: 4px solid #4f83d8; }
+.metric-strip > div + div { box-shadow: inset 1px 0 var(--line); }
+.metric-strip > div:nth-child(2) { border-left-color: #3c9b79; }
+.metric-strip > div:nth-child(3) { border-left-color: #c58a32; }
 .metric-strip span { margin-right: auto; align-self: center; color: #617287; font-size: 13px; font-weight: 700; }
 .metric-strip strong { color: #1f4f82; font-size: 34px; line-height: 1; }
-.metric-strip > div + div strong { color: #23785b; }
+.metric-strip > div:nth-child(2) strong { color: #23785b; }
+.metric-strip > div:nth-child(3) strong { color: #95651e; }
 .metric-strip small { color: #8996a5; font-size: 12px; }
 .practice-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 16px; }
 .workspace-panel, .page-section, .active-section, .list-detail { border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
