@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/community', component: () => import('../views/CommunityHub.vue') },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue'), meta: { requiresAuth: true } },
     { path: '/learning-plans/:id', component: () => import('../views/LearningPlanDetail.vue'), meta: { requiresAuth: true } },
+    { path: '/check-in', component: () => import('../views/CheckIn.vue'), meta: { requiresAuth: true } },
     { path: '/profile', component: () => import('../views/Profile.vue'), meta: { requiresAuth: true } },
     { path: '/messages', component: () => import('../views/Messages.vue'), meta: { requiresAuth: true } },
     { path: '/notifications', component: () => import('../views/Notifications.vue'), meta: { requiresAuth: true } },

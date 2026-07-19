@@ -28,6 +28,7 @@ import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import api from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
+import ProblemStateBadges from '../components/ProblemStateBadges.vue';
 import { useAuthStore } from '../stores/auth';
 import {
   normalizePointDifficulty,
@@ -55,6 +56,12 @@ interface ProblemItem {
   createdAt: string;
   tags: ProblemTag[];
   _count?: { submissions: number };
+  state?: {
+    status: 'PASSED' | 'ATTEMPTED' | 'NEW';
+    favorite: boolean;
+    wrong: boolean;
+    hasDraft: boolean;
+  };
 }
 
 interface ProblemResponse {
@@ -248,7 +255,7 @@ async function loadProblems() {
     const { data } = await api.get<ProblemResponse>('/api/problems', { params });
     if (requestId !== requestSerial) return;
 
-    problems.value = data.items || [];
+    problems.value = await attachProblemStates(data.items || []);
     total.value = data.total || 0;
 
     const lastPage = Math.max(1, Math.ceil(total.value / pageSize));
@@ -273,6 +280,18 @@ async function loadProblems() {
         });
       }
     }
+  }
+}
+
+async function attachProblemStates(items: ProblemItem[]) {
+  if (!items.length || !auth.token) return items;
+  try {
+    const { data } = await api.post('/api/learning/problem-states', {
+      problemIds: items.map((problem) => problem.id),
+    });
+    return items.map((problem) => ({ ...problem, state: data[problem.id] }));
+  } catch {
+    return items;
   }
 }
 
@@ -413,11 +432,11 @@ function requireLogin(redirect: string) {
             v-if="auth.isLoggedIn()"
             :to="{ path: '/problem-lists', query: { tab: 'lists' } }"
             class="sidebar-link"
-            aria-label="我的题单"
-            :title="sidebarCollapsed ? '我的题单' : undefined"
+            aria-label="题单"
+            :title="sidebarCollapsed ? '题单' : undefined"
           >
             <BookOpen :size="18" aria-hidden="true" />
-            <span class="sidebar-link-label">我的题单</span>
+            <span class="sidebar-link-label">题单</span>
             <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
           </router-link>
 
@@ -425,12 +444,12 @@ function requireLogin(redirect: string) {
             v-else
             type="button"
             class="sidebar-link"
-            aria-label="登录后查看我的题单"
-            :title="sidebarCollapsed ? '登录后查看我的题单' : undefined"
+            aria-label="登录后查看题单"
+            :title="sidebarCollapsed ? '登录后查看题单' : undefined"
             @click="requireLogin('/problem-lists?tab=lists')"
           >
             <BookOpen :size="18" aria-hidden="true" />
-            <span class="sidebar-link-label">我的题单</span>
+            <span class="sidebar-link-label">题单</span>
             <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
           </button>
 
@@ -631,6 +650,7 @@ function requireLogin(redirect: string) {
                         {{ problem.title }}
                       </router-link>
                       <span class="problem-source">{{ sourceLabel(problemPlatform(problem)) }}</span>
+                      <ProblemStateBadges class="problem-state-line" :state="problem.state" compact />
                     </td>
                     <td>
                       <span class="difficulty-badge" :class="difficultyClass(problem.difficulty)">
@@ -676,6 +696,7 @@ function requireLogin(redirect: string) {
                     {{ difficultyShortLabel(problem.difficulty) }}
                   </span>
                 </div>
+                <ProblemStateBadges class="mobile-state-line" :state="problem.state" compact />
                 <div class="mobile-tag-list">
                   <span v-for="item in problem.tags.slice(0, 2)" :key="item.name" class="tag-chip">{{ item.name }}</span>
                   <span v-if="problem.tags.length > 2" class="tag-chip tag-more">+{{ problem.tags.length - 2 }}</span>
@@ -1462,6 +1483,8 @@ function requireLogin(redirect: string) {
   font-size: 10px;
 }
 
+.problem-state-line { margin-top: 6px; }
+
 .difficulty-badge {
   display: inline-flex;
   min-width: 48px;
@@ -2138,6 +2161,8 @@ a:focus-visible {
   .mobile-tag-list {
     margin-top: 11px;
   }
+
+  .mobile-state-line { margin-top: 10px; }
 
   .mobile-problem-meta {
     display: flex;

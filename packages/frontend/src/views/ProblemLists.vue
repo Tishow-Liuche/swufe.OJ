@@ -1,25 +1,48 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useStorage } from '@vueuse/core';
-import { ArrowUpDown, BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, PanelLeftClose, PanelLeftOpen, Plus, Save, Search, Trash2 } from '@lucide/vue';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowUpDown,
+  BookOpen,
+  BookOpenCheck,
+  CalendarCheck,
+  CheckCircle2,
+  CircleStop,
+  LayoutDashboard,
+  Library,
+  ListChecks,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  RotateCcw,
+  Save,
+  Search,
+  Star,
+  Trash2,
+  X,
+} from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
-import CheckInModal from '../components/CheckInModal.vue';
-import LearningProgress from '../components/LearningProgress.vue';
+import ProblemStateBadges from '../components/ProblemStateBadges.vue';
 import { useAuthStore } from '../stores/auth';
 import { pointDifficultyOrder, pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
-type Tab = 'overview' | 'lists' | 'plans' | 'library';
+type Tab = 'practice' | 'plans' | 'lists' | 'library';
+type LibraryView = 'summary' | 'favorites' | 'wrong';
 type ListSort = 'difficulty' | 'number' | 'joined';
 
+const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
-const activeTab = ref<Tab>('overview');
+const activeTab = ref<Tab>('practice');
 const sidebarCollapsed = useStorage('swufe-oj:learning-sidebar-collapsed', false);
 const loading = ref(true);
 const saving = ref(false);
+const savingPlanId = ref('');
 const error = ref('');
 const notice = ref('');
 
@@ -27,134 +50,117 @@ const lists = ref<any[]>([]);
 const publicLists = ref<any[]>([]);
 const selectedListId = ref('');
 const selectedList = ref<any>(null);
-const listForm = ref({ name: '', description: '', isPublic: false });
+const listForm = ref({ name: '', description: '', isPublic: true });
 const listModalOpen = ref(false);
 const listSearch = ref('');
 const listProblems = ref<any[]>([]);
 const listProblemsLoading = ref(false);
 const listProblemsLoaded = ref(false);
-const listProblemKeyword = ref('');
 const listSort = ref<ListSort>('difficulty');
 const listSortDirection = ref<'asc' | 'desc'>('asc');
 
 const plans = ref<any[]>([]);
 const dashboard = ref<any>(null);
-const daily = ref<any>({ items: [], progress: { total: 0, completed: 0 } });
-const planForm = ref({ name: '', description: '', startDate: today(), endDate: addDays(7), dailyTarget: 3 });
-const planModalOpen = ref(false);
-const planSearch = ref('');
-const planProblems = ref<any[]>([]);
-const checkInOpen = ref(false);
-const checkInSaving = ref(false);
+const daily = ref<any>({ items: [], progress: { total: 0 } });
+const continueLearning = ref<any>({ items: [], counts: { wrong: 0, attempted: 0 } });
+const continueExpanded = ref(false);
+const myPlansOpen = ref(false);
 
 const favorites = ref<any[]>([]);
 const wrongBook = ref<any[]>([]);
+const libraryView = ref<LibraryView>('summary');
 
 const selectedListItems = computed(() => selectedList.value?.items || []);
+const selectedListOwned = computed(() => lists.value.some((item) => item.id === selectedList.value?.id));
+const activePlans = computed(() => plans.value.filter((plan) => plan.status === 'ACTIVE'));
+const completedPlans = computed(() => plans.value.filter((plan) => plan.status === 'COMPLETED'));
+const activePlanListIds = computed(() => new Set(activePlans.value.map((plan) => plan.problemListId)));
+const featuredLists = computed(() =>
+  publicLists.value.filter((list) => !activePlanListIds.value.has(list.id)).slice(0, 8),
+);
+const workspaceTabs = computed(() => [
+  { id: 'practice' as const, label: '刷题', detail: '今日练习', icon: LayoutDashboard },
+  { id: 'plans' as const, label: '学习计划', detail: '题单进度', icon: CalendarCheck, count: activePlans.value.length },
+  { id: 'lists' as const, label: '题单', detail: '公开题单', icon: ListChecks, count: publicLists.value.length },
+  { id: 'library' as const, label: '收藏与错题', detail: '重点回顾', icon: Library },
+]);
 const sortedListItems = computed(() => {
   const direction = listSortDirection.value === 'asc' ? 1 : -1;
   return [...selectedListItems.value].sort((left, right) => {
     if (listSort.value === 'difficulty') {
-      const a = pointDifficultyOrder(left.problem?.difficulty);
-      const b = pointDifficultyOrder(right.problem?.difficulty);
-      if (a !== b) return (a - b) * direction;
+      const difference = pointDifficultyOrder(left.problem?.difficulty) - pointDifficultyOrder(right.problem?.difficulty);
+      if (difference) return difference * direction;
     } else if (listSort.value === 'number') {
       const numberOf = (title = '') => Number(title.match(/P\s*(\d+)/i)?.[1] ?? Number.MAX_SAFE_INTEGER);
-      const a = numberOf(left.problem?.title);
-      const b = numberOf(right.problem?.title);
-      if (a !== b) return (a - b) * direction;
+      const difference = numberOf(left.problem?.title) - numberOf(right.problem?.title);
+      if (difference) return difference * direction;
     } else {
-      const a = new Date(left.createdAt || 0).getTime();
-      const b = new Date(right.createdAt || 0).getTime();
-      if (a !== b) return (a - b) * direction;
+      const difference = new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime();
+      if (difference) return difference * direction;
     }
     return String(left.problem?.title || '').localeCompare(String(right.problem?.title || ''), 'zh-CN') * direction;
   });
 });
-const selectedListOwned = computed(() => lists.value.some((item) => item.id === selectedList.value?.id));
-const activePlan = computed(() => plans.value[0] || null);
-const workspaceTabs = computed(() => [
-  { id: 'overview' as const, label: '总览', detail: '学习进度', icon: LayoutDashboard },
-  { id: 'lists' as const, label: '我的题单', detail: '管理与排序', icon: ListChecks, count: lists.value.length },
-  { id: 'plans' as const, label: '学习计划', detail: '目标与打卡', icon: CalendarRange, count: plans.value.length },
-  { id: 'library' as const, label: '收藏与错题', detail: '重点回顾', icon: Library },
-]);
-const continueItems = computed(() => {
-  const result: any[] = [];
-  const byProblem = new Map<string, any>();
-  const addItem = (item: any, type: '收藏' | '错题') => {
-    if (!item) return;
-    const existing = byProblem.get(item.problemId);
-    if (existing) {
-      if (!existing.types.includes(type)) existing.types.push(type);
-      return;
-    }
-    const entry = { ...item, types: [type] };
-    byProblem.set(item.problemId, entry);
-    result.push(entry);
-  };
-  const length = Math.max(favorites.value.length, wrongBook.value.length);
-  for (let index = 0; index < length && result.length < 6; index += 1) {
-    addItem(favorites.value[index], '收藏');
-    addItem(wrongBook.value[index], '错题');
-  }
-  return result.slice(0, 6);
-});
-const completionPercent = computed(() => {
-  return daily.value?.progress?.percent || 0;
-});
-
 const sortDirectionLabel = computed(() => {
   if (listSort.value === 'difficulty') return listSortDirection.value === 'asc' ? '简单到困难' : '困难到简单';
   if (listSort.value === 'number') return listSortDirection.value === 'asc' ? '编号从小到大' : '编号从大到小';
   return listSortDirection.value === 'desc' ? '最新加入优先' : '最早加入优先';
 });
-
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDays(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
+const fullLibraryItems = computed(() => (libraryView.value === 'favorites' ? favorites.value : wrongBook.value));
 
 function message(text: string) {
   notice.value = text;
-  window.setTimeout(() => { if (notice.value === text) notice.value = ''; }, 2600);
+  window.setTimeout(() => {
+    if (notice.value === text) notice.value = '';
+  }, 2600);
 }
 
 function fail(err: any, fallback = '操作失败') {
   error.value = err?.response?.data?.message || fallback;
 }
 
+function problemCount(list: any) {
+  return list?._count?.items ?? list?.items?.length ?? 0;
+}
+
+function changeTab(tab: Tab) {
+  activeTab.value = tab;
+  if (tab !== 'library') libraryView.value = 'summary';
+}
+
 async function loadAll() {
   loading.value = true;
   error.value = '';
   try {
-    publicLists.value = (await api.get('/api/problem-lists/public')).data;
     if (auth.token && !auth.user) await auth.fetchProfile();
-    if (!auth.isLoggedIn()) return;
     const results = await Promise.all([
+      api.get('/api/problem-lists/public'),
       api.get('/api/problem-lists'),
       api.get('/api/learning/dashboard'),
-      api.get('/api/learning/daily'),
       api.get('/api/learning/favorites'),
       api.get('/api/learning/wrong-book'),
     ]);
-    lists.value = results[0].data;
-    dashboard.value = results[1].data;
-    daily.value = results[2].data;
+    publicLists.value = results[0].data;
+    lists.value = results[1].data;
+    dashboard.value = results[2].data;
+    daily.value = dashboard.value?.daily || { items: [], progress: { total: 0 } };
+    continueLearning.value = dashboard.value?.continueLearning || { items: [], counts: { wrong: 0, attempted: 0 } };
     favorites.value = results[3].data;
     wrongBook.value = results[4].data;
     plans.value = dashboard.value?.plans || [];
-    if (!selectedListId.value && lists.value.length) await selectList(lists.value[0].id);
   } catch (err: any) {
     fail(err, '学习数据加载失败');
   } finally {
     loading.value = false;
   }
+}
+
+async function reloadLearning() {
+  const dashboardResult = await api.get('/api/learning/dashboard');
+  dashboard.value = dashboardResult.data;
+  daily.value = dashboard.value?.daily || { items: [], progress: { total: 0 } };
+  continueLearning.value = dashboard.value?.continueLearning || { items: [], counts: { wrong: 0, attempted: 0 } };
+  plans.value = dashboard.value?.plans || [];
 }
 
 async function selectList(id: string) {
@@ -171,11 +177,13 @@ async function selectList(id: string) {
       listProblems.value = [];
       listProblemsLoaded.value = false;
     }
-  } catch (err: any) { fail(err, '题单加载失败'); }
+  } catch (err: any) {
+    fail(err, '题单加载失败');
+  }
 }
 
 function openNewList() {
-  listForm.value = { name: '', description: '', isPublic: false };
+  listForm.value = { name: '', description: '', isPublic: true };
   listModalOpen.value = true;
 }
 
@@ -184,58 +192,73 @@ async function saveList() {
   saving.value = true;
   try {
     const { data } = await api.post('/api/problem-lists', listForm.value);
-    lists.value.unshift(data);
     listModalOpen.value = false;
+    await loadAll();
     await selectList(data.id);
     activeTab.value = 'lists';
     message('题单已创建');
-  } catch (err: any) { fail(err, '题单创建失败'); }
-  finally { saving.value = false; }
+  } catch (err: any) {
+    fail(err, '题单创建失败');
+  } finally {
+    saving.value = false;
+  }
 }
 
 async function updateList() {
   if (!selectedList.value || !listForm.value.name.trim()) return;
+  saving.value = true;
   try {
-    const { data } = await api.patch(`/api/problem-lists/${selectedList.value.id}`, listForm.value);
-    selectedList.value = { ...selectedList.value, ...data };
-    const index = lists.value.findIndex((item) => item.id === data.id);
-    if (index >= 0) lists.value[index] = { ...lists.value[index], ...data };
-    message(data.isPublic ? '题单已公开' : '题单设置已保存');
-  } catch (err: any) { fail(err, '题单保存失败'); }
+    await api.patch(`/api/problem-lists/${selectedList.value.id}`, listForm.value);
+    await loadAll();
+    await selectList(selectedList.value.id);
+    message('题单设置已保存');
+  } catch (err: any) {
+    fail(err, '题单保存失败');
+  } finally {
+    saving.value = false;
+  }
 }
 
 async function deleteList() {
-  if (!selectedList.value || !window.confirm('确定删除这个题单吗？题目不会被删除。')) return;
+  if (!selectedList.value || !window.confirm('确定删除这个题单吗？相关学习计划也会结束。')) return;
   try {
     await api.delete(`/api/problem-lists/${selectedList.value.id}`);
-    lists.value = lists.value.filter((item) => item.id !== selectedList.value.id);
     selectedList.value = null;
     selectedListId.value = '';
-    if (lists.value.length) await selectList(lists.value[0].id);
+    await loadAll();
     message('题单已删除');
-  } catch (err: any) { fail(err, '题单删除失败'); }
+  } catch (err: any) {
+    fail(err, '题单删除失败');
+  }
 }
 
 async function loadListProblemOptions(keyword = '') {
   if (!selectedListOwned.value) return;
-  const normalizedKeyword = keyword.trim();
   listProblemsLoading.value = true;
   listProblemsLoaded.value = false;
   listProblems.value = [];
-  listProblemKeyword.value = normalizedKeyword;
   try {
     const { data } = await api.get('/api/problems', {
-      params: { keyword: normalizedKeyword || undefined, pageSize: 30, status: 'PUBLISHED' },
+      params: { keyword: keyword.trim() || undefined, pageSize: 30, status: 'PUBLISHED' },
     });
     const selectedIds = new Set(selectedListItems.value.map((item: any) => item.problemId));
-    listProblems.value = (data.items || []).filter((problem: any) => !selectedIds.has(problem.id));
+    listProblems.value = await attachProblemStates(
+      (data.items || []).filter((problem: any) => !selectedIds.has(problem.id)),
+    );
     listProblemsLoaded.value = true;
-  } catch (err: any) { fail(err, '题目加载失败'); }
-  finally { listProblemsLoading.value = false; }
+  } catch (err: any) {
+    fail(err, '题目加载失败');
+  } finally {
+    listProblemsLoading.value = false;
+  }
 }
 
-async function searchListProblems() {
-  await loadListProblemOptions(listSearch.value);
+async function attachProblemStates(problems: any[]) {
+  if (!problems.length) return problems;
+  const { data } = await api.post('/api/learning/problem-states', {
+    problemIds: problems.map((problem) => problem.id),
+  });
+  return problems.map((problem) => ({ ...problem, state: data[problem.id] }));
 }
 
 async function addToList(problemId: string) {
@@ -245,7 +268,9 @@ async function addToList(problemId: string) {
     listSearch.value = '';
     await selectList(selectedList.value.id);
     message('题目已加入题单');
-  } catch (err: any) { fail(err, '题目加入失败'); }
+  } catch (err: any) {
+    fail(err, '题目加入失败');
+  }
 }
 
 async function removeFromList(itemId: string) {
@@ -253,7 +278,9 @@ async function removeFromList(itemId: string) {
   try {
     await api.delete(`/api/problem-lists/${selectedList.value.id}/items/${itemId}`);
     await selectList(selectedList.value.id);
-  } catch (err: any) { fail(err, '题目移除失败'); }
+  } catch (err: any) {
+    fail(err, '题目移除失败');
+  }
 }
 
 function selectListSort(mode: ListSort) {
@@ -265,116 +292,68 @@ function reverseListSort() {
   listSortDirection.value = listSortDirection.value === 'asc' ? 'desc' : 'asc';
 }
 
-function openProblem(problemId: string) { router.push(`/problems/${problemId}`); }
-
-async function openPublicList(id: string) {
-  activeTab.value = 'lists';
-  selectedListId.value = id;
-  try {
-    selectedList.value = (await api.get(`/api/problem-lists/public/${id}`)).data;
-    listForm.value = { name: selectedList.value.name, description: selectedList.value.description || '', isPublic: true };
-  } catch (err: any) { fail(err, '公开题单加载失败'); }
-}
-
-function openNewPlan() {
-  planForm.value = { name: '', description: '', startDate: today(), endDate: addDays(7), dailyTarget: 3 };
-  planModalOpen.value = true;
-}
-
-async function savePlan() {
-  if (!planForm.value.name.trim()) return;
-  if (plans.value.length && !window.confirm('当前已有学习计划。创建新计划会自动删除旧计划及其题目、进度和打卡记录，确定继续创建吗？')) return;
-  try {
-    const { data } = await api.post('/api/learning/plans', planForm.value);
-    plans.value = [data];
-    planModalOpen.value = false;
-    message('学习计划已创建');
-    await loadAll();
-  } catch (err: any) { fail(err, '学习计划创建失败'); }
-}
-
-async function deletePlan(id: string) {
-  if (!window.confirm('确定删除这个学习计划吗？')) return;
-  try {
-    await api.delete(`/api/learning/plans/${id}`);
-    plans.value = plans.value.filter((item) => item.id !== id);
-    message('计划已删除');
-  } catch (err: any) { fail(err, '计划删除失败'); }
-}
-
-async function generateDaily() {
-  try {
-    daily.value = (await api.post('/api/learning/daily/generate')).data;
-    dashboard.value = { ...(dashboard.value || {}), daily: daily.value };
-    message('今日练习已生成');
-  } catch (err: any) { fail(err, '每日练习生成失败'); }
-}
-
-async function toggleDaily(item: any) {
-  const wasEligible = Boolean(daily.value?.progress?.canCheckIn);
-  try {
-    await api.patch(`/api/learning/plans/${item.planId}/items/${item.id}`, { completed: !item.completed });
-    daily.value = (await api.get('/api/learning/daily')).data;
-    dashboard.value = (await api.get('/api/learning/dashboard')).data;
-    plans.value = dashboard.value?.plans || [];
-    if (!wasEligible && daily.value.progress?.canCheckIn && !daily.value.progress?.checkedIn) {
-      checkInOpen.value = true;
-    }
-  } catch (err: any) { fail(err, '进度更新失败'); }
-}
-
-async function confirmCheckIn() {
-  if (!daily.value?.plan?.id) return;
-  checkInSaving.value = true;
-  try {
-    await api.post(`/api/learning/plans/${daily.value.plan.id}/check-in`, { date: daily.value.date });
-    checkInOpen.value = false;
-    const [dailyResult, dashboardResult] = await Promise.all([
-      api.get('/api/learning/daily'),
-      api.get('/api/learning/dashboard'),
-    ]);
-    daily.value = dailyResult.data;
-    dashboard.value = dashboardResult.data;
-    plans.value = dashboard.value?.plans || [];
-    message('今日打卡已完成');
-  } catch (err: any) {
-    fail(err, '今日打卡失败');
-  } finally {
-    checkInSaving.value = false;
-  }
+function openProblem(problemId: string) {
+  void router.push(`/problems/${problemId}`);
 }
 
 function openPlanDetails(id: string) {
-  router.push(`/learning-plans/${id}`);
+  void router.push(`/learning-plans/${id}`);
 }
 
-async function searchPlanProblems() {
-  if (!planSearch.value.trim()) { planProblems.value = []; return; }
-  try { planProblems.value = (await api.get('/api/problems', { params: { keyword: planSearch.value, pageSize: 12 } })).data.items; }
-  catch (err: any) { fail(err, '题目搜索失败'); }
-}
-
-async function addToDaily(problemId: string) {
-  if (!daily.value?.plan?.id) await generateDaily();
-  if (!daily.value?.plan?.id) return;
+async function joinPlan(problemListId: string) {
+  savingPlanId.value = problemListId;
   try {
-    await api.post(`/api/learning/plans/${daily.value.plan.id}/items`, { problemId, dayIndex: daily.value.dayIndex || 0, type: 'PRACTICE' });
-    daily.value = (await api.get('/api/learning/daily')).data;
-    message('题目已加入今日练习');
-  } catch (err: any) { fail(err, '题目加入失败'); }
+    await api.post('/api/learning/plans', { problemListId });
+    await reloadLearning();
+    message('已加入学习计划');
+  } catch (err: any) {
+    fail(err, '加入学习计划失败');
+  } finally {
+    savingPlanId.value = '';
+  }
+}
+
+async function setPlanStatus(plan: any, status: 'ACTIVE' | 'COMPLETED') {
+  if (status === 'COMPLETED' && !window.confirm('确定结束这个学习计划吗？之后仍可重新开始。')) return;
+  savingPlanId.value = plan.problemListId;
+  try {
+    await api.patch(`/api/learning/plans/${plan.id}`, { status });
+    await reloadLearning();
+    message(status === 'ACTIVE' ? '学习计划已重新开始' : '学习计划已结束');
+  } catch (err: any) {
+    fail(err, '学习计划更新失败');
+  } finally {
+    savingPlanId.value = '';
+  }
 }
 
 async function removeFavorite(problemId: string) {
-  try { await api.delete(`/api/learning/favorites/${problemId}`); favorites.value = favorites.value.filter((item) => item.problemId !== problemId); message('已取消收藏'); }
-  catch (err: any) { fail(err, '取消收藏失败'); }
+  try {
+    await api.delete(`/api/learning/favorites/${problemId}`);
+    favorites.value = favorites.value.filter((item) => item.problemId !== problemId);
+    await reloadLearning();
+    message('已取消收藏');
+  } catch (err: any) {
+    fail(err, '取消收藏失败');
+  }
 }
 
 async function removeWrong(problemId: string) {
-  try { await api.delete(`/api/learning/wrong-book/${problemId}`); wrongBook.value = wrongBook.value.filter((item) => item.problemId !== problemId); message('已移出错题本'); }
-  catch (err: any) { fail(err, '错题移除失败'); }
+  try {
+    await api.delete(`/api/learning/wrong-book/${problemId}`);
+    wrongBook.value = wrongBook.value.filter((item) => item.problemId !== problemId);
+    await reloadLearning();
+    message('已移出错题本');
+  } catch (err: any) {
+    fail(err, '错题移除失败');
+  }
 }
 
-onMounted(loadAll);
+onMounted(async () => {
+  const requestedTab = String(route.query.tab || '');
+  if (['practice', 'plans', 'lists', 'library'].includes(requestedTab)) activeTab.value = requestedTab as Tab;
+  await loadAll();
+});
 </script>
 
 <template>
@@ -382,12 +361,27 @@ onMounted(loadAll);
     <aside class="learning-sidebar">
       <div class="learning-sidebar-title">
         <span class="learning-sidebar-icon"><BookOpenCheck :size="19" /></span>
-        <span class="learning-sidebar-copy"><strong>学习导航</strong><small>题单与计划</small></span>
-        <button class="learning-sidebar-collapse" type="button" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" :aria-label="sidebarCollapsed ? '展开学习侧栏' : '收起学习侧栏'" @click="sidebarCollapsed = !sidebarCollapsed"><PanelLeftOpen v-if="sidebarCollapsed" :size="18" /><PanelLeftClose v-else :size="18" /></button>
+        <span class="learning-sidebar-copy"><strong>学习</strong><small>刷题与题单计划</small></span>
+        <button
+          class="learning-sidebar-collapse"
+          type="button"
+          :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
+          :aria-label="sidebarCollapsed ? '展开学习侧栏' : '收起学习侧栏'"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+        >
+          <PanelLeftOpen v-if="sidebarCollapsed" :size="18" />
+          <PanelLeftClose v-else :size="18" />
+        </button>
       </div>
       <p class="learning-sidebar-label">学习模块</p>
       <nav class="workspace-nav" aria-label="学习工作台">
-        <button v-for="item in workspaceTabs" :key="item.id" :title="sidebarCollapsed ? item.label : undefined" :class="{ active: activeTab === item.id }" @click="activeTab = item.id">
+        <button
+          v-for="item in workspaceTabs"
+          :key="item.id"
+          :title="sidebarCollapsed ? item.label : undefined"
+          :class="{ active: activeTab === item.id }"
+          @click="changeTab(item.id)"
+        >
           <component :is="item.icon" :size="18" />
           <span><strong>{{ item.label }}</strong><small>{{ item.detail }}</small></span>
           <b v-if="item.count !== undefined">{{ item.count }}</b>
@@ -397,321 +391,309 @@ onMounted(loadAll);
 
     <main class="learning-main">
       <header class="learning-header">
-      <div>
         <span class="eyebrow">STUDY WORKSPACE</span>
-        <h1>题单与学习计划</h1>
-        <p>把要练的题、正在复习的错题和每天的目标放在一处。</p>
-      </div>
-      <div class="header-actions">
-        <button class="secondary-btn" @click="router.push('/problems')"><BookOpenCheck :size="17" />进入题库</button>
-      </div>
-    </header>
+        <h1>学习</h1>
+        <p>从公开题单开始计划，按自己的节奏持续完成。</p>
+      </header>
 
-    <div v-if="notice" class="notice success">{{ notice }}</div>
-    <div v-if="error" class="notice error">{{ error }}<button @click="error = ''" aria-label="关闭提示">×</button></div>
-
-    <div v-if="!auth.isLoggedIn() && !auth.loading" class="login-banner">
-      <div><strong>登录后管理自己的题单和计划</strong><span>公开题单仍可浏览，收藏和错题需要账号。</span></div>
-      <button class="primary-btn" @click="router.push('/login')">登录 / 注册</button>
-    </div>
+      <div v-if="notice" class="notice success">{{ notice }}</div>
+      <div v-if="error" class="notice error">{{ error }}<button aria-label="关闭提示" @click="error = ''"><X :size="16" /></button></div>
 
       <div class="learning-content">
-        <div v-if="loading" class="loading-state">正在整理你的学习数据…</div>
+        <div v-if="loading" class="loading-state">正在整理你的学习数据...</div>
+
+        <template v-else-if="activeTab === 'practice'">
+          <section class="metric-strip" aria-label="今日刷题数据">
+            <div><span>今日已解决题目</span><strong>{{ dashboard?.counts?.todaySolved || 0 }}</strong><small>道</small></div>
+            <div><span>累计签到</span><strong>{{ dashboard?.counts?.checkInDays || 0 }}</strong><small>天</small></div>
+          </section>
+
+          <div class="practice-grid">
+            <section class="workspace-panel today-practice">
+              <div class="section-heading">
+                <div><span class="section-kicker">TODAY</span><h2>今日练习</h2></div>
+                <span class="section-count">{{ daily.items?.length || 0 }} 题</span>
+              </div>
+              <div v-if="daily.items?.length" class="problem-rows">
+                <button v-for="item in daily.items" :key="item.id" class="problem-row" @click="openProblem(item.problemId)">
+                  <span class="problem-index">{{ String(daily.items.indexOf(item) + 1).padStart(2, '0') }}</span>
+                  <span class="problem-copy">
+                    <strong>{{ item.problem?.title }}</strong>
+                    <small>{{ item.source === 'REVIEW' ? '随机复习题' : '未通过题目' }}</small>
+                    <ProblemStateBadges :state="item.state" compact />
+                  </span>
+                  <span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
+                </button>
+              </div>
+              <div v-else class="empty-state">
+                <CheckCircle2 :size="28" />
+                <strong>题库还没有可练习的题目</strong>
+                <p>发布题目后，系统会在每天自动生成练习。</p>
+              </div>
+            </section>
+
+            <section class="workspace-panel continue-panel">
+              <div class="section-heading">
+                <div><span class="section-kicker">CONTINUE</span><h2>继续学习</h2></div>
+                <span class="section-count">{{ continueLearning.items?.length || 0 }} 题</span>
+              </div>
+              <div v-if="continueLearning.items?.length" class="continue-list">
+                <button
+                  v-for="item in continueLearning.items.slice(0, continueExpanded ? continueLearning.items.length : 4)"
+                  :key="`${item.reason}-${item.problemId}`"
+                  @click="openProblem(item.problemId)"
+                >
+                  <span>
+                    <strong>{{ item.problem?.title }}</strong>
+                    <small>{{ item.reason === 'WRONG' ? '错题优先' : '写过但未通过' }}</small>
+                    <ProblemStateBadges :state="item.state" compact />
+                  </span>
+                  <b>{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</b>
+                </button>
+                <button v-if="continueLearning.items.length > 4" class="continue-expand" @click.stop="continueExpanded = !continueExpanded">
+                  {{ continueExpanded ? '收起列表' : `查看全部 ${continueLearning.items.length} 题` }}
+                </button>
+              </div>
+              <div v-else class="empty-state compact"><BookOpen :size="25" /><strong>没有待继续的题目</strong><p>错题和写过但未通过的题目会显示在这里。</p></div>
+              <button class="library-entry" @click="router.push('/problems')"><BookOpenCheck :size="18" /><span><strong>进入题库</strong><small>浏览全部题目</small></span></button>
+            </section>
+          </div>
+
+          <section class="active-section">
+            <div class="section-heading">
+              <div><span class="section-kicker">IN PROGRESS</span><h2>正在进行中的学习计划</h2></div>
+              <button class="text-btn" @click="changeTab('plans')">管理计划</button>
+            </div>
+            <div v-if="activePlans.length" class="plan-grid">
+              <article v-for="plan in activePlans" :key="plan.id" class="plan-card">
+                <button class="card-main" @click="openPlanDetails(plan.id)">
+                  <span class="card-label">公开题单计划</span>
+                  <h3>{{ plan.problemList?.name }}</h3>
+                  <p>{{ plan.problemList?.description || '按题单顺序完成每一道题。' }}</p>
+                  <div class="progress-line"><i :style="{ width: `${plan.progress?.percent || 0}%` }"></i></div>
+                  <span class="progress-copy">已完成 {{ plan.progress?.solved || 0 }} / {{ plan.progress?.total || 0 }} 题</span>
+                </button>
+              </article>
+            </div>
+            <div v-else class="section-empty">暂无进行中的学习计划。</div>
+          </section>
+        </template>
+
+        <template v-else-if="activeTab === 'plans'">
+          <section class="page-section">
+            <div class="page-toolbar">
+              <div><span class="section-kicker">LEARNING PLANS</span><h2>学习计划</h2><p>收藏一份题单作为计划，完成度会根据通过记录自动更新。</p></div>
+              <button class="secondary-btn" @click="myPlansOpen = true"><ListChecks :size="17" />我的学习计划</button>
+            </div>
+
+            <div class="subsection-heading"><div><h3>正在进行中</h3><span>{{ activePlans.length }} 个计划</span></div></div>
+            <div v-if="activePlans.length" class="plan-grid">
+              <article v-for="plan in activePlans" :key="plan.id" class="plan-card active-plan-card">
+                <button class="card-main" @click="openPlanDetails(plan.id)">
+                  <span class="card-label">LEARNING NOW</span>
+                  <h3>{{ plan.problemList?.name }}</h3>
+                  <p>{{ plan.problemList?.description || '按题单顺序完成每一道题。' }}</p>
+                  <div class="progress-line"><i :style="{ width: `${plan.progress?.percent || 0}%` }"></i></div>
+                  <span class="progress-copy">{{ plan.progress?.solved || 0 }} / {{ plan.progress?.total || 0 }} 题 · {{ plan.progress?.percent || 0 }}%</span>
+                </button>
+                <button class="icon-command danger" title="结束计划" aria-label="结束计划" @click="setPlanStatus(plan, 'COMPLETED')"><CircleStop :size="17" /></button>
+              </article>
+            </div>
+            <div v-else class="section-empty">还没有进行中的计划，从下方公开题单开始。</div>
+
+            <div class="subsection-heading featured-heading"><div><h3>精选的其他公开题单</h3><span>选择题单加入学习计划</span></div></div>
+            <div v-if="featuredLists.length" class="public-grid">
+              <article v-for="list in featuredLists" :key="list.id" class="list-card">
+                <span class="list-badge">公开题单</span>
+                <h3>{{ list.name }}</h3>
+                <p>{{ list.description || '一份等待探索的练习题单。' }}</p>
+                <div class="card-footer"><span>{{ problemCount(list) }} 道题</span><button class="primary-btn small" :disabled="savingPlanId === list.id" @click="joinPlan(list.id)">{{ savingPlanId === list.id ? '加入中...' : '加入学习计划' }}</button></div>
+              </article>
+            </div>
+            <div v-else class="section-empty">所有公开题单都已加入当前计划。</div>
+          </section>
+        </template>
+
+        <template v-else-if="activeTab === 'lists'">
+          <section class="page-section">
+            <div class="page-toolbar">
+              <div><span class="section-kicker">PUBLIC LISTS</span><h2>题单</h2><p>浏览网站全部公开题单，也可以创建并维护自己的题单。</p></div>
+              <button class="primary-btn" @click="openNewList"><Plus :size="17" />创建题单</button>
+            </div>
+
+            <div v-if="publicLists.length" class="public-grid list-catalog">
+              <article v-for="list in publicLists" :key="list.id" class="list-card" :class="{ selected: selectedListId === list.id }">
+                <span class="list-badge">{{ lists.some((mine) => mine.id === list.id) ? '我创建的' : '公开题单' }}</span>
+                <h3>{{ list.name }}</h3>
+                <p>{{ list.description || '暂无题单说明。' }}</p>
+                <div class="card-footer"><span>{{ problemCount(list) }} 道题</span><button class="text-btn" @click="selectList(list.id)">查看题单</button></div>
+              </article>
+            </div>
+            <div v-else class="section-empty">暂无公开题单，创建第一份题单吧。</div>
+
+            <section v-if="selectedList" class="list-detail">
+              <div class="detail-heading">
+                <div><span class="section-kicker">{{ selectedListOwned ? 'MY LIST' : 'PUBLIC LIST' }}</span><h2>{{ selectedList.name }}</h2></div>
+                <div v-if="selectedListOwned" class="inline-actions">
+                  <button class="secondary-btn danger-command" title="删除题单" @click="deleteList"><Trash2 :size="16" />删除</button>
+                  <button class="primary-btn" :disabled="saving" @click="updateList"><Save :size="16" />保存设置</button>
+                </div>
+                <button v-else-if="!activePlanListIds.has(selectedList.id)" class="primary-btn" @click="joinPlan(selectedList.id)">加入学习计划</button>
+              </div>
+
+              <div v-if="selectedListOwned" class="list-settings">
+                <label>题单名称<input v-model="listForm.name" maxlength="80"></label>
+                <label>题单说明<textarea v-model="listForm.description" rows="2" maxlength="500"></textarea></label>
+                <label class="switch-label"><input v-model="listForm.isPublic" type="checkbox"><span>公开题单</span></label>
+              </div>
+              <p v-else class="public-description">{{ selectedList.description || '暂无题单说明。' }}</p>
+
+              <template v-if="selectedListOwned">
+                <div class="subheading"><div><h3>添加题目</h3><span>从已发布题目中搜索</span></div></div>
+                <form class="search-inline" @submit.prevent="loadListProblemOptions(listSearch)">
+                  <input v-model="listSearch" placeholder="输入题号或题目名称">
+                  <button class="secondary-btn" type="submit"><Search :size="16" />搜索</button>
+                </form>
+                <div class="problem-catalog">
+                  <div class="catalog-heading"><span>可加入题目</span><small>当前显示 {{ listProblems.length }} 题</small></div>
+                  <div v-if="listProblemsLoading" class="problem-search-empty">正在加载题目...</div>
+                  <div v-else-if="listProblems.length" class="search-results">
+                    <button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)">
+                      <span><strong>{{ problem.title }}</strong><small>{{ pointDifficultyShortLabel(problem.difficulty) }}</small><ProblemStateBadges :state="problem.state" compact /></span><b>加入</b>
+                    </button>
+                  </div>
+                  <div v-else-if="listProblemsLoaded" class="problem-search-empty">没有更多可加入的已发布题目。</div>
+                </div>
+              </template>
+
+              <div class="subheading problem-heading">
+                <div><h3>题目列表</h3><span>{{ selectedListItems.length }} 道题</span></div>
+                <div class="sort-toolbar">
+                  <div class="sort-modes" aria-label="题单排序">
+                    <button :class="{ active: listSort === 'difficulty' }" @click="selectListSort('difficulty')">难度</button>
+                    <button :class="{ active: listSort === 'number' }" @click="selectListSort('number')">题号</button>
+                    <button :class="{ active: listSort === 'joined' }" @click="selectListSort('joined')">加入时间</button>
+                  </div>
+                  <button class="sort-direction" :title="sortDirectionLabel" :aria-label="sortDirectionLabel" @click="reverseListSort"><ArrowUpDown :size="16" /></button>
+                </div>
+              </div>
+              <div v-if="sortedListItems.length" class="ordered-list">
+                <div v-for="(item, index) in sortedListItems" :key="item.id" class="ordered-row">
+                  <span class="order-number">{{ index + 1 }}</span>
+                  <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title || '题目已移除' }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                  <span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
+                  <button v-if="selectedListOwned" class="icon-command danger" title="移出题单" aria-label="移出题单" @click="removeFromList(item.id)"><Trash2 :size="15" /></button>
+                </div>
+              </div>
+              <div v-else class="section-empty">这个题单还没有题目。</div>
+            </section>
+          </section>
+        </template>
 
         <template v-else>
-      <section v-if="activeTab === 'overview'" class="overview-section">
-        <LearningProgress v-if="auth.isLoggedIn()" :daily="daily" :plan-progress="activePlan?.progress" />
-        <div v-if="auth.isLoggedIn()" class="metric-grid">
-          <div class="metric"><span>已解决题目</span><strong>{{ dashboard?.counts?.solved || 0 }}</strong><small>以通过提交计算</small></div>
-          <div class="metric"><span>收藏题目</span><strong>{{ dashboard?.counts?.favorites || 0 }}</strong><small>可加入每日练习</small></div>
-          <div class="metric"><span>错题本</span><strong>{{ dashboard?.counts?.wrongBook || 0 }}</strong><small>优先安排复习</small></div>
-        </div>
-        <div class="overview-grid">
-          <section class="panel daily-panel">
-            <div class="panel-heading"><div><span class="section-kicker">TODAY</span><h2>今日练习</h2></div><button v-if="auth.isLoggedIn()" class="text-btn" @click="generateDaily">生成 / 补充</button></div>
-            <div v-if="!auth.isLoggedIn()" class="empty-state">登录后生成每日练习。</div>
-            <div v-else-if="!daily.items?.length" class="empty-state"><strong>今天还没有安排题目</strong><p>优先生成未做过的新题，不足时自动补充复习题。</p><button class="primary-btn" @click="generateDaily">生成今日练习</button></div>
-            <div v-else class="daily-list">
-              <label v-for="item in daily.items" :key="item.id" class="daily-row" :class="{ done: item.completed }">
-                <input type="checkbox" :checked="item.completed" @change="toggleDaily(item)">
-                <span class="history-check" :class="{ visible: item.previouslyDone || item.completed }">✓</span>
-                <span class="daily-type">{{ item.type === 'REVIEW' ? '复习题' : '新题' }}</span>
-                <button class="problem-link" @click.prevent="openProblem(item.problemId)">{{ item.problem?.title || '题目已移除' }}</button>
-                <span class="row-arrow">›</span>
-              </label>
+          <section class="page-section">
+            <div v-if="libraryView === 'summary'" class="page-toolbar"><div><span class="section-kicker">PERSONAL LIBRARY</span><h2>收藏与错题</h2><p>查看最近收藏和需要重做的题目。</p></div></div>
+            <div v-else class="page-toolbar compact-toolbar">
+              <button class="back-btn" @click="libraryView = 'summary'"><ArrowLeft :size="17" />返回</button>
+              <div><span class="section-kicker">ALL PROBLEMS</span><h2>{{ libraryView === 'favorites' ? '全部收藏' : '全部错题' }}</h2></div>
             </div>
-          </section>
-          <section class="panel quick-panel">
-            <div class="panel-heading"><div><span class="section-kicker">YOUR LIBRARY</span><h2>继续学习</h2></div><button class="text-btn" @click="activeTab = 'library'">查看全部</button></div>
-            <div class="quick-list">
-              <button v-for="item in continueItems" :key="item.problemId" class="quick-row" @click="openProblem(item.problemId)"><span class="quick-icon">{{ item.types.includes('错题') ? '✓' : '☆' }}</span><span><strong>{{ item.problem?.title }}</strong><small><b>{{ item.types.join(' / ') }}</b> · {{ pointDifficultyShortLabel(item.problem?.difficulty) }}</small></span><span>›</span></button>
-              <div v-if="!continueItems.length" class="empty-state">收藏和错题会集中出现在这里。</div>
-            </div>
-          </section>
-        </div>
-        <section class="public-section">
-          <div class="panel-heading"><div><span class="section-kicker">COMMUNITY LISTS</span><h2>公开题单</h2></div><button class="text-btn" @click="activeTab = 'lists'">管理题单</button></div>
-          <div class="public-grid"><button v-for="list in publicLists.slice(0, 6)" :key="list.id" class="public-list" @click="openPublicList(list.id)"><strong>{{ list.name }}</strong><span>{{ list._count?.items || 0 }} 道题</span><small>{{ list.description || '暂无说明' }}</small></button><div v-if="!publicLists.length" class="empty-state">还没有公开题单。</div></div>
-        </section>
-      </section>
 
-      <section v-else-if="activeTab === 'lists'" class="lists-section">
-        <div class="section-toolbar"><div><span class="section-kicker">CURATED PRACTICE</span><h2>我的题单</h2></div><button v-if="auth.isLoggedIn()" class="primary-btn" @click="openNewList"><Plus :size="17" />新建题单</button></div>
-        <div v-if="!auth.isLoggedIn()" class="empty-state">登录后创建和编辑题单。</div>
-        <div v-else class="lists-workspace">
-          <aside class="list-sidebar"><button v-for="list in lists" :key="list.id" :class="['list-nav-item', { active: selectedListId === list.id }]" @click="selectList(list.id)"><span>{{ list.isPublic ? '公开' : '私有' }}</span><strong>{{ list.name }}</strong><small>{{ list._count?.items || 0 }} 题</small></button><div v-if="!lists.length" class="empty-state compact">还没有题单。</div></aside>
-          <main v-if="selectedList" class="list-editor panel">
-            <div class="editor-heading"><div><span class="section-kicker">{{ selectedListOwned ? 'LIST EDITOR' : 'PUBLIC LIST' }}</span><h2>{{ selectedList.name }}</h2><p>{{ selectedList.isPublic ? '公开题单' : '仅自己可见' }} · {{ selectedListItems.length }} 道题</p></div><div v-if="selectedListOwned" class="inline-actions"><button class="secondary-btn danger-command" @click="deleteList"><Trash2 :size="16" />删除</button><button class="primary-btn" @click="updateList"><Save :size="16" />保存设置</button></div></div>
-            <div v-if="selectedListOwned" class="list-settings"><label>名称<input v-model="listForm.name" maxlength="80"></label><label>说明<textarea v-model="listForm.description" rows="2" maxlength="500"></textarea></label><label class="switch-label"><input v-model="listForm.isPublic" type="checkbox"><span>公开题单</span></label></div>
-            <p v-else class="public-description">{{ selectedList.description || '这个公开题单没有说明。' }}</p>
-            <div class="subheading"><div><h3>题目排序</h3><small>{{ sortDirectionLabel }}</small></div><div v-if="selectedListOwned" class="search-inline"><input v-model="listSearch" placeholder="按标题、站内 ID 或平台题号搜索" @keyup.enter="searchListProblems"><button class="secondary-btn" :disabled="listProblemsLoading" @click="searchListProblems"><Search :size="15" />{{ listProblemsLoading ? '加载中' : '搜索' }}</button></div></div>
-            <div class="sort-toolbar" aria-label="题单排序方式">
-              <div class="sort-modes">
-                <button :class="{ active: listSort === 'difficulty' }" @click="selectListSort('difficulty')">按难度</button>
-                <button :class="{ active: listSort === 'number' }" @click="selectListSort('number')">按编号</button>
-                <button :class="{ active: listSort === 'joined' }" @click="selectListSort('joined')">按加入时间</button>
+            <div v-if="libraryView === 'summary'" class="library-grid">
+              <section class="library-column">
+                <div class="library-title"><span class="library-icon favorite"><Star :size="17" /></span><div><h3>收藏</h3><small>{{ favorites.length }} 道题</small></div></div>
+                <div v-if="favorites.length" class="library-list">
+                  <div v-for="item in favorites.slice(0, 5)" :key="item.id" class="library-row">
+                    <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                    <span>{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
+                    <button class="icon-command" title="取消收藏" aria-label="取消收藏" @click="removeFavorite(item.problemId)"><X :size="15" /></button>
+                  </div>
+                </div>
+                <div v-else class="section-empty compact">暂无收藏题目。</div>
+                <button class="view-all" @click="libraryView = 'favorites'">查看全部收藏 <span>{{ favorites.length }}</span></button>
+              </section>
+
+              <section class="library-column">
+                <div class="library-title"><span class="library-icon wrong"><AlertTriangle :size="17" /></span><div><h3>错题</h3><small>{{ wrongBook.length }} 道题</small></div></div>
+                <div v-if="wrongBook.length" class="library-list">
+                  <div v-for="item in wrongBook.slice(0, 5)" :key="item.id" class="library-row">
+                    <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                    <span class="wrong-tag">{{ item.errorType || '需要重做' }}</span>
+                    <button class="icon-command" title="移出错题本" aria-label="移出错题本" @click="removeWrong(item.problemId)"><X :size="15" /></button>
+                  </div>
+                </div>
+                <div v-else class="section-empty compact">暂无错题记录。</div>
+                <button class="view-all wrong-view" @click="libraryView = 'wrong'">查看全部错题 <span>{{ wrongBook.length }}</span></button>
+              </section>
+            </div>
+
+            <div v-else-if="fullLibraryItems.length" class="full-library-list">
+              <div v-for="item in fullLibraryItems" :key="item.id" class="library-row full-row">
+                <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                <span>{{ libraryView === 'favorites' ? pointDifficultyShortLabel(item.problem?.difficulty) : (item.errorType || '需要重做') }}</span>
+                <button class="secondary-btn danger-command" @click="libraryView === 'favorites' ? removeFavorite(item.problemId) : removeWrong(item.problemId)"><Trash2 :size="15" />移除</button>
               </div>
-              <button class="sort-direction" :title="`倒转排序，当前为${sortDirectionLabel}`" aria-label="倒转排序" @click="reverseListSort"><ArrowUpDown :size="16" /></button>
             </div>
-            <div v-if="selectedListOwned" class="problem-catalog"><div class="catalog-heading"><span>站内题目</span><small>{{ listProblemKeyword ? `“${listProblemKeyword}”的搜索结果` : '最近发布' }}</small></div><div v-if="listProblems.length" class="search-results"><button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)"><span><strong>{{ problem.title }}</strong><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }}{{ problem.sourceInfo?.remoteProblemId ? ` · ${problem.sourceInfo.remoteProblemId}` : '' }}</small></span><b>＋加入</b></button></div><div v-else-if="listProblemsLoading" class="problem-search-empty">正在获取站内题目...</div><div v-else-if="listProblemsLoaded" class="problem-search-empty">{{ listProblemKeyword ? '没有找到匹配题目，请尝试标题或平台题号。' : '暂无其他可加入的已发布题目。' }}</div></div>
-            <div v-if="selectedListItems.length" class="ordered-list"><div v-for="(item, index) in sortedListItems" :key="item.id" class="ordered-row"><span class="order-number">{{ index + 1 }}</span><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span v-if="listSort === 'joined'" class="joined-at">{{ new Date(item.createdAt).toLocaleDateString() }}</span><span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span><button v-if="selectedListOwned" class="icon-btn danger" title="移出题单" @click="removeFromList(item.id)">×</button><button v-else class="icon-btn" title="打开题目" @click="openProblem(item.problemId)">›</button></div></div>
-            <div v-else class="empty-state">从上方站内题目中选择并加入这个题单。</div>
-          </main>
-          <div v-else class="empty-state panel">选择一个题单开始编辑。</div>
-        </div>
-      </section>
-
-      <section v-else-if="activeTab === 'plans'" class="plans-section">
-        <div class="section-toolbar"><div><span class="section-kicker">GOALS & PROGRESS</span><h2>学习计划</h2></div><button class="primary-btn" @click="openNewPlan">{{ plans.length ? '更换计划' : '新建计划' }}</button></div>
-        <LearningProgress v-if="activePlan" :daily="daily" :plan-progress="activePlan.progress" />
-        <div class="plans-grid"><article v-for="plan in plans" :key="plan.id" class="plan-row panel"><button class="plan-main" @click="openPlanDetails(plan.id)"><span class="plan-type">{{ plan.type }}</span><h3>{{ plan.name }}</h3><p>{{ plan.description || '没有设置计划说明' }}</p></button><div class="plan-meta"><strong>{{ plan.progress?.checkedInDays || 0 }} / {{ plan.progress?.totalDays || 0 }}</strong><small>打卡天数</small></div><button class="icon-btn danger" title="删除计划" @click="deletePlan(plan.id)">×</button></article><div v-if="!plans.length" class="empty-state panel">创建一个计划，安排每日目标和复习节奏。</div></div>
-        <div class="panel plan-builder"><div class="panel-heading"><div><span class="section-kicker">TODAY</span><h2>每日练习编排</h2></div><button class="text-btn" @click="generateDaily">按计划补充</button></div><div class="daily-progress"><div><strong>{{ daily.progress?.completed || 0 }} / {{ daily.progress?.total || 0 }}</strong><span>今日完成</span></div><div class="progress-track"><i :style="{ width: `${completionPercent}%` }"></i></div><span>{{ completionPercent }}%</span></div><div class="search-inline wide"><input v-model="planSearch" placeholder="搜索题目加入今日练习" @keyup.enter="searchPlanProblems"><button class="secondary-btn" @click="searchPlanProblems">搜索</button></div><div v-if="planProblems.length" class="search-results"><button v-for="problem in planProblems" :key="problem.id" @click="addToDaily(problem.id)"><span>{{ problem.title }}</span><small>＋加入今日</small></button></div><div class="daily-list schedule-list"><label v-for="item in daily.items" :key="item.id" class="daily-row" :class="{ done: item.completed }"><input type="checkbox" :checked="item.completed" @change="toggleDaily(item)"><span class="history-check" :class="{ visible: item.previouslyDone || item.completed }">✓</span><span class="daily-type">{{ item.type === 'REVIEW' ? '复习题' : '新题' }}</span><button class="problem-link" @click.prevent="openProblem(item.problemId)">{{ item.problem?.title }}</button></label></div></div>
-      </section>
-
-      <section v-else class="library-section"><div class="section-toolbar"><div><span class="section-kicker">RETAIN & REVIEW</span><h2>收藏与错题</h2></div><button class="secondary-btn" @click="generateDaily">把重点加入今日练习</button></div><div class="library-grid"><section class="panel library-column"><div class="panel-heading"><div><h2>收藏题目</h2><small>{{ favorites.length }} 道题</small></div></div><div class="library-list"><div v-for="item in favorites" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span>{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span><button class="icon-btn" title="取消收藏" @click="removeFavorite(item.problemId)">☆</button></div><div v-if="!favorites.length" class="empty-state">在题目页点击收藏，建立自己的练习清单。</div></div></section><section class="panel library-column"><div class="panel-heading"><div><h2>错题本</h2><small>{{ wrongBook.length }} 道题</small></div></div><div class="library-list"><div v-for="item in wrongBook" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span class="wrong-tag">{{ item.errorType }}</span><button class="icon-btn" title="移出错题本" @click="removeWrong(item.problemId)">✓</button></div><div v-if="!wrongBook.length" class="empty-state">提交出现错误的题目会自动进入这里。</div></div></section></div></section>
+            <div v-else class="section-empty">这里还没有题目。</div>
+          </section>
         </template>
       </div>
     </main>
 
-    <div v-if="listModalOpen || planModalOpen" class="modal-backdrop" @click.self="listModalOpen = false; planModalOpen = false"><section class="modal panel"><button class="modal-close" aria-label="关闭" @click="listModalOpen = false; planModalOpen = false">×</button><template v-if="listModalOpen"><span class="section-kicker">NEW LIST</span><h2>创建题单</h2><label>名称<input v-model="listForm.name" maxlength="80" autofocus></label><label>说明<textarea v-model="listForm.description" rows="3" maxlength="500"></textarea></label><label class="switch-label"><input v-model="listForm.isPublic" type="checkbox"><span>创建后公开</span></label><button class="primary-btn full-btn" :disabled="saving" @click="saveList">{{ saving ? '保存中…' : '创建题单' }}</button></template><template v-else><span class="section-kicker">NEW PLAN</span><h2>{{ plans.length ? '更换学习计划' : '创建学习计划' }}</h2><div v-if="plans.length" class="replace-warning">当前计划及其题目、进度、打卡记录会在新计划创建后删除。</div><label>名称<input v-model="planForm.name" maxlength="80" autofocus></label><label>说明<textarea v-model="planForm.description" rows="2" maxlength="500"></textarea></label><div class="date-fields"><label>开始<input v-model="planForm.startDate" type="date"></label><label>结束<input v-model="planForm.endDate" type="date"></label></div><label>每日目标<input v-model.number="planForm.dailyTarget" type="number" min="1" max="50"></label><button class="primary-btn full-btn" @click="savePlan">{{ plans.length ? '确认更换计划' : '创建计划' }}</button></template></section></div>
-    <CheckInModal v-if="checkInOpen" :date="daily.date" :plan-name="daily.plan?.name" :saving="checkInSaving" @confirm="confirmCheckIn" @close="checkInOpen = false" />
+    <div v-if="listModalOpen" class="modal-backdrop" @click.self="listModalOpen = false">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="new-list-title">
+        <button class="modal-close" aria-label="关闭" @click="listModalOpen = false"><X :size="19" /></button>
+        <span class="section-kicker">NEW LIST</span>
+        <h2 id="new-list-title">创建题单</h2>
+        <label>名称<input v-model="listForm.name" maxlength="80" autofocus></label>
+        <label>说明<textarea v-model="listForm.description" rows="3" maxlength="500"></textarea></label>
+        <label class="switch-label"><input v-model="listForm.isPublic" type="checkbox"><span>创建后公开</span></label>
+        <button class="primary-btn full-btn" :disabled="saving || !listForm.name.trim()" @click="saveList">{{ saving ? '保存中...' : '创建题单' }}</button>
+      </section>
+    </div>
+
+    <div v-if="myPlansOpen" class="modal-backdrop" @click.self="myPlansOpen = false">
+      <section class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="my-plan-title">
+        <button class="modal-close" aria-label="关闭" @click="myPlansOpen = false"><X :size="19" /></button>
+        <span class="section-kicker">MY PLANS</span>
+        <h2 id="my-plan-title">我的学习计划</h2>
+        <div class="modal-plan-section">
+          <h3>正在进行中 <span>{{ activePlans.length }}</span></h3>
+          <div v-if="activePlans.length" class="modal-plan-list">
+            <div v-for="plan in activePlans" :key="plan.id">
+              <button @click="myPlansOpen = false; openPlanDetails(plan.id)"><strong>{{ plan.problemList?.name }}</strong><small>{{ plan.progress?.solved || 0 }} / {{ plan.progress?.total || 0 }} 题</small></button>
+              <button class="icon-command danger" title="结束计划" aria-label="结束计划" @click="setPlanStatus(plan, 'COMPLETED')"><CircleStop :size="16" /></button>
+            </div>
+          </div>
+          <p v-else>暂无进行中的计划。</p>
+        </div>
+        <div class="modal-plan-section completed">
+          <h3>已经结束 <span>{{ completedPlans.length }}</span></h3>
+          <div v-if="completedPlans.length" class="modal-plan-list">
+            <div v-for="plan in completedPlans" :key="plan.id">
+              <button @click="myPlansOpen = false; openPlanDetails(plan.id)"><strong>{{ plan.problemList?.name }}</strong><small>完成 {{ plan.progress?.percent || 0 }}%</small></button>
+              <button class="icon-command" title="重新开始" aria-label="重新开始" @click="setPlanStatus(plan, 'ACTIVE')"><RotateCcw :size="16" /></button>
+            </div>
+          </div>
+          <p v-else>暂无已结束的计划。</p>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.learning-page { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 42px 0 72px; color: #1f2937; }
-.learning-header, .section-toolbar, .panel-heading, .editor-heading, .subheading, .header-actions, .inline-actions, .daily-progress { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.learning-header { margin-bottom: 30px; align-items: flex-end; }
-.eyebrow, .section-kicker { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
-h1 { margin: 6px 0 8px; color: #0f172a; font-size: clamp(30px, 4vw, 46px); line-height: 1.08; letter-spacing: 0; }
-h2 { color: #0f172a; font-size: 20px; line-height: 1.25; letter-spacing: 0; }
-h3 { color: #0f172a; font-size: 16px; letter-spacing: 0; }
-.learning-header p, .editor-heading p, .panel-heading small, .subheading small { color: #64748b; font-size: 13px; }
-.primary-btn, .secondary-btn, .text-btn, .icon-btn { border: 0; font: inherit; cursor: pointer; }
-.primary-btn, .secondary-btn { border-radius: 6px; padding: 10px 16px; font-weight: 700; white-space: nowrap; }
-.primary-btn { background: #0f766e; color: white; }
-.primary-btn:hover { background: #115e59; }
-.primary-btn:disabled { opacity: .6; cursor: wait; }
-.secondary-btn { background: #e2e8f0; color: #334155; }
-.secondary-btn:hover { background: #cbd5e1; }
-.text-btn { padding: 3px 0; background: transparent; color: #0f766e; font-size: 13px; font-weight: 700; }
-.text-btn:hover { color: #115e59; text-decoration: underline; }
-.icon-btn { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 5px; background: transparent; color: #64748b; font-size: 18px; line-height: 1; }
-.icon-btn:hover:not(:disabled) { background: #e2e8f0; color: #0f172a; }
-.icon-btn:disabled { color: #cbd5e1; cursor: not-allowed; }
-.icon-btn.danger:hover { color: #b91c1c; background: #fee2e2; }
-.notice { position: fixed; left: 14px; right: 14px; top: 74px; z-index: 120; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 6px; box-shadow: 0 8px 24px rgba(15, 23, 42, .14); font-size: 14px; }
-.notice.success { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
-.notice.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-.notice button { border: 0; background: transparent; color: inherit; font-size: 18px; cursor: pointer; }
-.login-banner { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; padding: 14px 18px; border-left: 3px solid #0f766e; background: #f0fdfa; }
-.login-banner strong, .login-banner span { display: block; }
-.login-banner strong { color: #134e4a; font-size: 14px; }
-.login-banner span { margin-top: 3px; color: #64748b; font-size: 13px; }
-.workspace-tabs { display: flex; gap: 4px; margin-bottom: 28px; border-bottom: 1px solid #cbd5e1; overflow-x: auto; }
-.workspace-tabs button { border: 0; border-bottom: 2px solid transparent; padding: 12px 16px; background: transparent; color: #64748b; cursor: pointer; white-space: nowrap; font: inherit; font-size: 14px; font-weight: 700; }
-.workspace-tabs button:hover { color: #0f766e; }
-.workspace-tabs button.active { border-color: #0f766e; color: #0f766e; }
-.workspace-tabs span { display: inline-flex; min-width: 20px; justify-content: center; margin-left: 4px; padding: 1px 5px; border-radius: 10px; background: #e2e8f0; color: #64748b; font-size: 11px; }
-.workspace-tabs button.active span { background: #ccfbf1; color: #0f766e; }
-.loading-state, .empty-state { padding: 42px 20px; color: #64748b; text-align: center; }
-.empty-state strong { display: block; color: #334155; margin-bottom: 5px; }
-.empty-state p { margin: 0 0 16px; font-size: 13px; }
-.empty-state.compact { padding: 22px 10px; font-size: 13px; }
-.metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
-.metric { padding: 18px 20px; border-top: 3px solid #cbd5e1; background: white; box-shadow: 0 2px 10px rgba(15, 23, 42, .04); }
-.metric span, .metric small { display: block; color: #64748b; font-size: 12px; }
-.metric strong { display: block; margin: 8px 0 2px; color: #0f172a; font-size: 27px; line-height: 1; }
-.overview-grid, .library-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
-.panel { border: 1px solid #e2e8f0; background: white; box-shadow: 0 2px 10px rgba(15, 23, 42, .035); }
-.daily-panel, .quick-panel, .plan-builder, .library-column, .list-editor { padding: 22px; }
-.daily-panel .panel-heading, .quick-panel .panel-heading, .plan-builder .panel-heading, .library-column .panel-heading { margin-bottom: 18px; }
-.daily-list { border-top: 1px solid #e2e8f0; }
-.daily-row, .quick-row, .ordered-row, .library-row { display: flex; align-items: center; gap: 10px; min-height: 48px; border-bottom: 1px solid #f1f5f9; }
-.daily-row:last-child, .quick-row:last-child, .ordered-row:last-child, .library-row:last-child { border-bottom: 0; }
-.daily-row input { width: 16px; height: 16px; accent-color: #0f766e; }
-.daily-row.done .problem-link { color: #94a3b8; text-decoration: line-through; }
-.history-check { width: 16px; color: transparent; font-weight: 800; }
-.history-check.visible { color: #0f766e; }
-.daily-type, .plan-type { min-width: 36px; color: #64748b; font-size: 11px; font-weight: 700; }
-.problem-link { flex: 1; min-width: 0; border: 0; padding: 0; background: transparent; color: #0f766e; text-align: left; cursor: pointer; font: inherit; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.problem-link:hover { color: #115e59; text-decoration: underline; }
-.row-arrow { color: #94a3b8; font-size: 24px; line-height: 1; }
-.quick-list { border-top: 1px solid #e2e8f0; }
-.quick-row { width: 100%; border: 0; border-bottom: 1px solid #f1f5f9; background: transparent; text-align: left; cursor: pointer; }
-.quick-row > span:last-child { color: #94a3b8; font-size: 22px; }
-.quick-icon { width: 28px; color: #f59e0b; font-size: 21px; }
-.quick-row strong, .quick-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.quick-row strong { color: #334155; font-size: 14px; }
-.quick-row small { margin-top: 2px; color: #94a3b8; font-size: 12px; }
-.public-section { margin-top: 22px; padding-top: 4px; }
-.public-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
-.public-list { min-height: 120px; padding: 17px; border: 1px solid #e2e8f0; border-top: 3px solid #0f766e; background: white; text-align: left; cursor: pointer; }
-.public-list:hover { border-color: #99f6e4; box-shadow: 0 4px 14px rgba(15, 118, 110, .1); }
-.public-list strong, .public-list span, .public-list small { display: block; }
-.public-list strong { color: #0f172a; font-size: 15px; }
-.public-list span { margin-top: 6px; color: #0f766e; font-size: 12px; }
-.public-list small { margin-top: 10px; color: #64748b; font-size: 12px; line-height: 1.4; }
-.lists-workspace { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; }
-.list-sidebar { border-right: 1px solid #e2e8f0; padding-right: 12px; }
-.list-nav-item { display: block; width: 100%; margin-bottom: 4px; padding: 13px 14px; border: 1px solid transparent; background: transparent; text-align: left; cursor: pointer; }
-.list-nav-item:hover { background: #f8fafc; }
-.list-nav-item.active { border-color: #99f6e4; background: #f0fdfa; }
-.list-nav-item span, .list-nav-item strong, .list-nav-item small { display: block; }
-.list-nav-item span { color: #0f766e; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
-.list-nav-item strong { margin: 4px 0; color: #334155; font-size: 14px; }
-.list-nav-item small { color: #94a3b8; font-size: 12px; }
-.editor-heading { align-items: flex-start; padding-bottom: 18px; border-bottom: 1px solid #e2e8f0; }
-.inline-actions { align-items: flex-start; }
-.list-settings { display: grid; grid-template-columns: 1fr 2fr auto; align-items: end; gap: 14px; padding: 18px 0; border-bottom: 1px solid #e2e8f0; }
-.public-description { padding: 18px 0; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px; }
-label { display: block; color: #475569; font-size: 12px; font-weight: 700; }
-input, textarea { width: 100%; margin-top: 7px; border: 1px solid #cbd5e1; border-radius: 5px; padding: 9px 10px; background: #fff; color: #1e293b; font: inherit; font-size: 14px; outline: none; }
-input:focus, textarea:focus { border-color: #0f766e; box-shadow: 0 0 0 2px #ccfbf1; }
-textarea { resize: vertical; }
-.switch-label { display: flex; align-items: center; gap: 8px; min-height: 40px; white-space: nowrap; }
-.switch-label input { width: 16px; margin: 0; accent-color: #0f766e; }
-.subheading { margin: 20px 0 10px; align-items: flex-end; }
-.subheading h3 { margin-bottom: 3px; }
-.search-inline { display: flex; gap: 8px; align-items: flex-end; }
-.search-inline input { min-width: 230px; margin: 0; }
-.search-inline.wide { margin: 18px 0; }
-.search-inline.wide input { flex: 1; }
-.search-results { margin-bottom: 10px; border: 1px solid #bae6fd; background: #f0f9ff; }
-.search-results button { display: flex; justify-content: space-between; width: 100%; padding: 9px 12px; border: 0; border-bottom: 1px solid #e0f2fe; background: transparent; color: #334155; text-align: left; cursor: pointer; font: inherit; }
-.search-results button:last-child { border-bottom: 0; }
-.search-results button:hover { background: #e0f2fe; }
-.search-results small { color: #0369a1; font-weight: 700; }
-.problem-catalog { margin:12px 0 16px; overflow:hidden; border:1px solid #dbe5ee; border-radius:7px; background:#f8fbfe; }.catalog-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; color:#34536f; font-size:12px; font-weight:850; }.catalog-heading small { color:#8492a2; font-size:10px; font-weight:650; }.problem-catalog .search-results { max-height:260px; margin:0; overflow-y:auto; border:0; border-top:1px solid #dbe5ee; background:#fff; }.problem-catalog .search-results button>span { display:grid; gap:3px; min-width:0; }.problem-catalog .search-results strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }.problem-catalog .search-results small { color:#7d8b9b; font-size:9px; }.problem-catalog .search-results b { flex:0 0 auto; color:#2469ad; font-size:11px; }.problem-search-empty { padding:24px 14px; border-top:1px solid #dbe5ee; color:#7d8b9b; text-align:center; font-size:11px; }
-.ordered-list { border-top: 1px solid #e2e8f0; }
-.sort-toolbar { display: flex; align-items: center; justify-content: flex-start; gap: 12px; margin-bottom: 12px; }
-.sort-modes { display: flex; gap: 4px; overflow-x: auto; }
-.sort-modes button, .sort-direction { border: 1px solid #cbd5e1; background: #fff; color: #64748b; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.sort-modes button { padding: 7px 10px; }
-.sort-modes button:first-child { border-radius: 5px 0 0 5px; }
-.sort-modes button:last-child { border-radius: 0 5px 5px 0; }
-.sort-modes button + button { margin-left: -5px; border-left-color: transparent; }
-.sort-modes button.active { position: relative; z-index: 1; border-color: #0f766e; background: #f0fdfa; color: #0f766e; }
-.sort-direction { width: 34px; height: 32px; border-radius: 5px; color: #0f766e; font-size: 18px; }
-.sort-direction:hover { border-color: #0f766e; background: #f0fdfa; }
-.order-number { width: 28px; color: #94a3b8; font-size: 12px; text-align: center; }
-.difficulty, .library-row > span { color: #64748b; font-size: 12px; }
-.joined-at { color: #94a3b8; font-size: 11px; white-space: nowrap; }
-.plans-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 16px 0 22px; }
-.plan-row { display: flex; align-items: center; gap: 14px; padding: 17px; }
-.plan-main { flex: 1; min-width: 0; border: 0; padding: 0; background: transparent; cursor: pointer; text-align: left; }
-.plan-main > * { pointer-events: none; }
-.plan-type { color: #0f766e; font-size: 10px; letter-spacing: .08em; }
-.plan-row h3 { margin: 4px 0; }
-.plan-row p { color: #64748b; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plan-meta { display: flex; flex-direction: column; align-items: center; color: #64748b; }
-.plan-meta strong { color: #0f766e; font-size: 23px; line-height: 1; }
-.plan-meta small { margin-top: 3px; font-size: 11px; }
-.daily-progress { margin-bottom: 16px; }
-.daily-progress strong, .daily-progress span { display: block; }
-.daily-progress strong { color: #0f766e; font-size: 18px; }
-.daily-progress span { color: #64748b; font-size: 11px; }
-.progress-track { flex: 1; height: 7px; overflow: hidden; border-radius: 4px; background: #e2e8f0; }
-.progress-track i { display: block; height: 100%; border-radius: inherit; background: #0f766e; transition: width .25s ease; }
-.schedule-list { margin-top: 12px; }
-.library-grid { grid-template-columns: 1fr 1fr; margin-top: 16px; }
-.library-list { border-top: 1px solid #e2e8f0; }
-.library-row { padding: 2px 0; }
-.wrong-tag { color: #b91c1c !important; font-size: 11px !important; font-weight: 700; }
-.full-btn { width: 100%; }
-.modal-backdrop { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 20px; background: rgba(15, 23, 42, .45); }
-.modal { position: relative; width: min(480px, 100%); padding: 26px; }
-.modal h2 { margin: 6px 0 20px; }
-.modal label + label { margin-top: 14px; }
-.modal-close { position: absolute; top: 13px; right: 15px; border: 0; background: transparent; color: #64748b; font-size: 24px; cursor: pointer; }
-.date-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
-.modal .full-btn { margin-top: 20px; }
-.replace-warning { margin: -8px 0 16px; padding: 10px 12px; border-left: 3px solid #f59e0b; background: #fffbeb; color: #92400e; font-size: 12px; line-height: 1.5; }
-@media (max-width: 900px) {
-  .overview-grid, .library-grid { grid-template-columns: 1fr; }
-  .lists-workspace { grid-template-columns: 210px 1fr; }
-  .metric-grid { grid-template-columns: repeat(2, 1fr); }
-  .public-grid { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 640px) {
-  .learning-page { width: min(100% - 28px, 1180px); padding-top: 26px; }
-  .learning-header { display: block; }
-  .header-actions { margin-top: 18px; }
-  .metric-grid, .public-grid, .plans-grid { grid-template-columns: 1fr; }
-  .lists-workspace { grid-template-columns: 1fr; }
-  .list-sidebar { display: flex; gap: 6px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e2e8f0; padding: 0 0 10px; }
-  .list-nav-item { min-width: 180px; margin: 0; }
-  .list-settings { grid-template-columns: 1fr; }
-  .editor-heading, .subheading, .section-toolbar { align-items: flex-start; flex-direction: column; }
-  .inline-actions, .search-inline, .sort-toolbar { width: 100%; }
-  .sort-toolbar { align-items: stretch; }
-  .search-inline input { min-width: 0; flex: 1; }
-  .library-row .problem-link { white-space: normal; }
-  .login-banner { display: block; }
-  .login-banner .primary-btn { margin-top: 12px; }
-}
-@media (min-width: 641px) { .notice { left: auto; right: 24px; max-width: 420px; } }
-
-/* Light learning workspace: shared with the problem library and teacher tools. */
 .learning-page {
-  --workspace-blue: #1f5eff;
-  --workspace-pale: #e7efff;
-  --workspace-line: #dce5ef;
+  --blue: #1f5eff;
+  --blue-soft: #e8efff;
+  --ink: #24364a;
+  --muted: #718094;
+  --line: #dbe4ed;
   display: flex;
-  width: 100%;
-  max-width: none;
   min-height: calc(100vh - 56px);
-  margin: 0;
-  padding: 0;
-  color: #26384d;
+  color: var(--ink);
   background: #f3f6f9;
   font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
 }
-.learning-main { min-width: 0; flex: 1; padding: 26px 28px 72px; }
-.learning-main > .learning-header,
-.learning-main > .login-banner,
-.learning-main > .learning-content { width: min(1180px, 100%); margin-right: auto; margin-left: auto; }
-.learning-header {
-  min-height: 150px;
-  padding: 26px 30px;
-  border: 1px solid var(--workspace-line);
-  border-radius: 8px;
-  color: #1f2a37;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(31, 66, 104, .08);
-}
-.learning-header .eyebrow { color: #3977aa; letter-spacing: 0; }
-.learning-header h1 { color: #1f2a37; font-size: 34px; letter-spacing: 0; }
-.learning-header p { color: #66778a; }
-.header-actions { flex-wrap: wrap; }
-.header-actions .secondary-btn { color: #225d91; border: 1px solid #bfd1e2; background: #f8fbfe; }
-.header-actions .secondary-btn:hover { border-color: #8fb3d2; color: #174f81; background: #edf5fc; }
-.primary-btn,
-.secondary-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 6px; }
-.primary-btn { background: var(--workspace-blue); }
-.primary-btn:hover { background: #174bd1; }
-.secondary-btn.danger-command { color: #a8463f; border: 1px solid #e8c5c2; background: #fff8f7; }
-.secondary-btn.danger-command:hover { color: #8f302a; border-color: #dca9a5; background: #fff0ef; }
 .learning-sidebar {
   position: sticky;
   top: 56px;
@@ -720,139 +702,257 @@ textarea { resize: vertical; }
   height: calc(100vh - 56px);
   flex: 0 0 264px;
   align-self: flex-start;
+  flex-direction: column;
   padding: 22px 14px;
   overflow: hidden;
-  flex-direction: column;
-  border-right: 1px solid var(--workspace-line);
+  border-right: 1px solid var(--line);
   background: #f8fafc;
   transition: width .18s, flex-basis .18s;
 }
 .learning-sidebar-title { display: flex; align-items: center; gap: 10px; padding: 0 7px 18px; }
-.learning-sidebar-icon { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 8px; color: var(--workspace-blue); background: var(--workspace-pale); }
+.learning-sidebar-icon { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 8px; color: var(--blue); background: var(--blue-soft); }
 .learning-sidebar-copy { display: grid; min-width: 0; gap: 2px; }
-.learning-sidebar-copy strong { color: #29435d; font-size: 13px; }
-.learning-sidebar-copy small { color: #8492a2; font-size: 10px; }
+.learning-sidebar-copy strong { font-size: 13px; }
+.learning-sidebar-copy small { color: #8794a4; font-size: 10px; }
 .learning-sidebar-collapse { display: grid; width: 34px; height: 34px; flex: 0 0 34px; margin-left: auto; place-items: center; border: 0; border-radius: 7px; color: #6e7f91; background: transparent; cursor: pointer; }
 .learning-sidebar-collapse:hover { color: #225d91; background: #eaf1f7; }
 .learning-sidebar-label { margin: 4px 9px 9px; color: #8493a5; font-size: 10px; font-weight: 900; }
 .workspace-nav { display: grid; gap: 5px; }
 .workspace-nav button { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; min-height: 52px; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border: 0; border-radius: 7px; color: #65768a; text-align: left; background: transparent; font: inherit; cursor: pointer; }
 .workspace-nav button:hover { color: #245f94; background: #eef4f9; }
-.workspace-nav button.active { color: var(--workspace-blue); background: var(--workspace-pale); box-shadow: none; }
+.workspace-nav button.active { color: var(--blue); background: var(--blue-soft); }
 .workspace-nav button > span { display: grid; gap: 2px; min-width: 0; }
 .workspace-nav button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .workspace-nav button small { color: #8a98a8; font-size: 9px; }
-.workspace-nav button.active small { color: var(--workspace-blue); }
 .workspace-nav button b { display: grid; min-width: 21px; height: 20px; place-items: center; padding: 0 4px; border-radius: 5px; color: #65768a; background: #edf1f5; font-size: 10px; }
-.workspace-nav button.active b { color: var(--workspace-blue); background: #dbe7ff; }
-.learning-content { min-width: 0; margin-top: 22px !important; }
+.workspace-nav button.active b { color: var(--blue); background: #d7e4ff; }
 .learning-page.sidebar-collapsed .learning-sidebar { width: 72px; flex-basis: 72px; padding-right: 10px; padding-left: 10px; }
-.sidebar-collapsed .learning-sidebar-icon,
-.sidebar-collapsed .learning-sidebar-copy,
-.sidebar-collapsed .learning-sidebar-label { display: none; }
+.sidebar-collapsed .learning-sidebar-icon, .sidebar-collapsed .learning-sidebar-copy, .sidebar-collapsed .learning-sidebar-label { display: none; }
 .sidebar-collapsed .learning-sidebar-title { justify-content: center; padding-right: 0; padding-left: 0; }
 .sidebar-collapsed .learning-sidebar-collapse { margin-left: 0; }
 .sidebar-collapsed .workspace-nav button { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }
-.sidebar-collapsed .workspace-nav button > span,
-.sidebar-collapsed .workspace-nav button > b { display: none; }
-.panel,
-.public-section,
-.metric,
-.login-banner { border-color: var(--workspace-line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
-.metric { border-top: 3px solid #8fb9dc; }
-.metric strong,
-.plan-meta strong,
-.daily-progress strong { color: #1f6099; }
-.section-kicker,
-.text-btn,
-.plan-type,
-.list-nav-item span { color: #3977aa; letter-spacing: 0; }
+.sidebar-collapsed .workspace-nav button > span, .sidebar-collapsed .workspace-nav button > b { display: none; }
+
+.learning-main { min-width: 0; flex: 1; padding: 26px 28px 72px; }
+.learning-header, .learning-content { width: min(1180px, 100%); margin-right: auto; margin-left: auto; }
+.learning-header { min-height: 142px; padding: 26px 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .07); }
+.eyebrow, .section-kicker { color: #3977aa; font-size: 10px; font-weight: 850; letter-spacing: 0; }
+.learning-header h1 { margin: 7px 0 8px; color: #1f2a37; font-size: 34px; line-height: 1.1; letter-spacing: 0; }
+.learning-header p, .page-toolbar p { color: var(--muted); font-size: 13px; }
+.learning-content { margin-top: 22px; }
+.loading-state, .section-empty, .empty-state { padding: 42px 18px; color: var(--muted); text-align: center; }
+.section-empty { border: 1px dashed #cbd7e2; background: #f9fbfc; font-size: 13px; }
+.section-empty.compact { padding: 26px 12px; border: 0; background: transparent; }
+.notice { position: fixed; z-index: 180; top: 72px; right: 24px; display: flex; align-items: center; gap: 12px; max-width: 420px; padding: 12px 16px; border: 1px solid; border-radius: 7px; box-shadow: 0 10px 28px rgba(31, 48, 67, .14); font-size: 13px; }
+.notice.success { border-color: #a7dbc6; color: #166044; background: #f0fbf6; }
+.notice.error { border-color: #efc0bd; color: #9d342e; background: #fff5f4; }
+.notice button { display: grid; place-items: center; border: 0; color: inherit; background: transparent; cursor: pointer; }
+
+.metric-strip { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.metric-strip > div { display: flex; min-height: 92px; align-items: baseline; gap: 7px; padding: 22px 26px; border-left: 4px solid #4f83d8; }
+.metric-strip > div + div { border-left-color: #3c9b79; box-shadow: inset 1px 0 var(--line); }
+.metric-strip span { margin-right: auto; align-self: center; color: #617287; font-size: 13px; font-weight: 700; }
+.metric-strip strong { color: #1f4f82; font-size: 34px; line-height: 1; }
+.metric-strip > div + div strong { color: #23785b; }
+.metric-strip small { color: #8996a5; font-size: 12px; }
+.practice-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 16px; }
+.workspace-panel, .page-section, .active-section, .list-detail { border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.workspace-panel { min-width: 0; padding: 22px; }
+.section-heading, .page-toolbar, .detail-heading, .subheading, .subsection-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.section-heading { margin-bottom: 17px; }
+.section-heading h2, .page-toolbar h2, .detail-heading h2 { margin-top: 4px; color: #26384d; font-size: 20px; letter-spacing: 0; }
+.section-count { color: #718094; font-size: 11px; font-weight: 750; }
+.problem-rows { border-top: 1px solid var(--line); }
+.problem-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; min-height: 59px; align-items: center; gap: 10px; width: 100%; border: 0; border-bottom: 1px solid #e9eef3; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.problem-row:hover { background: #f8fafc; }
+.problem-index, .order-number { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: #68798c; background: #edf2f6; font-size: 11px; }
+.problem-copy { display: grid; min-width: 0; gap: 3px; }
+.problem-copy strong { overflow: hidden; color: #295b8d; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.problem-copy small { color: #8a97a6; font-size: 10px; }
+.difficulty { padding: 4px 7px; border-radius: 5px; color: #557086; background: #eef3f7; font-size: 10px; white-space: nowrap; }
+.empty-state { display: grid; justify-items: center; gap: 7px; }
+.empty-state svg { color: #5d8f78; }
+.empty-state strong { color: #44586c; font-size: 13px; }
+.empty-state p { font-size: 11px; }
+.empty-state.compact { padding: 28px 10px; }
+.continue-list { border-top: 1px solid var(--line); }
+.continue-list button { display: flex; min-height: 62px; align-items: center; gap: 12px; width: 100%; border: 0; border-bottom: 1px solid #e9eef3; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.continue-list button:hover { background: #f8fafc; }
+.continue-list button > span { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.continue-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.continue-list small { color: #8794a3; font-size: 10px; }
+.continue-list b { color: #2c70b1; font-size: 15px; }
+.continue-list .continue-expand { min-height: 40px; justify-content: center; color: #316d9f; font-size: 10px; font-weight: 800; }
+.library-entry { display: flex; min-height: 60px; align-items: center; gap: 11px; width: 100%; margin-top: 16px; padding: 10px 13px; border: 1px solid #bfd1e2; border-radius: 7px; color: #225d91; text-align: left; background: #f4f8fc; cursor: pointer; }
+.library-entry:hover { border-color: #8fb3d2; background: #eaf2f9; }
+.library-entry span { display: grid; gap: 2px; }
+.library-entry strong { font-size: 12px; }
+.library-entry small { color: #7a8999; font-size: 9px; }
+.active-section { margin-top: 18px; padding: 22px; }
+.plan-grid, .public-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.plan-card, .list-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.plan-card { display: flex; }
+.plan-card:hover, .list-card:hover, .list-card.selected { border-color: #91b4d3; box-shadow: 0 9px 22px rgba(35, 77, 113, .08); }
+.card-main { min-width: 0; flex: 1; padding: 17px; border: 0; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.card-label, .list-badge { color: #3977aa; font-size: 9px; font-weight: 850; }
+.card-main h3, .list-card h3 { margin: 7px 0 6px; overflow: hidden; color: #2a3e52; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; letter-spacing: 0; }
+.card-main p, .list-card p { height: 35px; overflow: hidden; color: #7c8998; font-size: 11px; line-height: 1.55; }
+.progress-line { height: 6px; margin: 16px 0 7px; overflow: hidden; border-radius: 3px; background: #e6ebf0; }
+.progress-line i { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
+.progress-copy { color: #66778a; font-size: 10px; }
+.active-plan-card { border-top: 3px solid #4e84db; }
+.icon-command { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 0; border-radius: 6px; color: #65778a; background: transparent; cursor: pointer; }
+.icon-command:hover { color: #245f94; background: #edf3f8; }
+.plan-card > .icon-command { margin: 11px 11px 0 0; }
+.icon-command.danger:hover { color: #a9443d; background: #fff0ef; }
+
+.page-section { padding: 24px; }
+.page-toolbar { min-height: 70px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.page-toolbar > div { min-width: 0; }
+.page-toolbar p { margin-top: 7px; }
+.subsection-heading { margin: 23px 0 13px; }
+.subsection-heading h3, .subheading h3 { font-size: 15px; letter-spacing: 0; }
+.subsection-heading span, .subheading span { color: #8492a2; font-size: 10px; }
+.featured-heading { margin-top: 30px; padding-top: 23px; border-top: 1px solid var(--line); }
+.list-card { padding: 17px; }
+.list-card p { margin-bottom: 16px; }
+.card-footer { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid #e9eef3; }
+.card-footer > span { color: #7e8d9d; font-size: 10px; }
+.list-catalog { margin-top: 20px; }
+.list-detail { margin-top: 24px; padding: 24px; box-shadow: none; }
+.detail-heading { min-height: 62px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.inline-actions { display: flex; gap: 8px; }
+.list-settings { display: grid; grid-template-columns: 1fr 2fr auto; align-items: end; gap: 14px; margin: 0 -24px; padding: 18px 24px; border-bottom: 1px solid var(--line); background: #f8fafc; }
+label { display: block; color: #4d6074; font-size: 11px; font-weight: 750; }
+input, textarea { width: 100%; margin-top: 7px; padding: 9px 10px; border: 1px solid #cbd8e4; border-radius: 5px; color: #26384d; background: #fff; font: inherit; font-size: 13px; outline: none; }
+input:focus, textarea:focus { border-color: #7fa9e8; box-shadow: 0 0 0 3px rgba(31, 94, 255, .09); }
+textarea { resize: vertical; }
+.switch-label { display: flex; min-height: 40px; align-items: center; gap: 8px; white-space: nowrap; }
+.switch-label input { width: 16px; margin: 0; accent-color: var(--blue); }
+.public-description { padding: 18px 0; border-bottom: 1px solid var(--line); color: #6f7f90; font-size: 12px; }
+.subheading { margin: 21px 0 11px; }
+.search-inline { display: flex; gap: 8px; }
+.search-inline input { min-width: 0; flex: 1; margin: 0; }
+.problem-catalog { margin-top: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: #f8fafc; }
+.catalog-heading { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px; color: #34536f; font-size: 11px; font-weight: 800; }
+.catalog-heading small { color: #8492a2; font-size: 9px; }
+.search-results { max-height: 250px; overflow-y: auto; border-top: 1px solid var(--line); background: #fff; }
+.search-results button { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 13px; border: 0; border-bottom: 1px solid #e9eef3; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.search-results button:hover { background: #eef4ff; }
+.search-results button > span { display: grid; min-width: 0; gap: 4px; }
+.search-results strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.search-results small { color: #7d8b9b; font-size: 9px; }
+.search-results b { color: var(--blue); font-size: 10px; }
+.problem-search-empty { padding: 24px 14px; border-top: 1px solid var(--line); color: #7d8b9b; text-align: center; font-size: 11px; }
+.problem-heading { align-items: flex-end; }
+.sort-toolbar { display: flex; gap: 5px; padding: 4px; border: 1px solid #dce4ec; border-radius: 7px; background: #f0f3f6; }
+.sort-modes { display: flex; gap: 3px; }
+.sort-modes button, .sort-direction { height: 31px; padding: 0 9px; border: 0; border-radius: 5px; color: #65778a; background: transparent; cursor: pointer; font: inherit; font-size: 10px; font-weight: 750; }
+.sort-modes button.active { color: var(--blue); background: #fff; box-shadow: 0 2px 6px rgba(31, 66, 104, .08); }
+.sort-direction { display: grid; width: 32px; padding: 0; place-items: center; background: #fff; }
+.ordered-list { overflow: hidden; border: 1px solid var(--line); border-radius: 7px; }
+.ordered-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto auto; min-height: 54px; align-items: center; gap: 9px; padding: 0 11px; border-bottom: 1px solid #e9eef3; }
+.ordered-row:last-child { border-bottom: 0; }
+.problem-link { min-width: 0; overflow: hidden; border: 0; padding: 0; color: #225f96; text-align: left; text-overflow: ellipsis; white-space: nowrap; background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 750; }
+.problem-link:hover { color: var(--blue); }
+.listed-problem { display: grid; min-width: 0; gap: 5px; }
+
+.library-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+.library-column { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.library-title { display: flex; min-height: 70px; align-items: center; gap: 11px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: #f8fafc; }
+.library-title > div { display: grid; gap: 2px; }
+.library-title h3 { font-size: 14px; }
+.library-title small { color: #8492a2; font-size: 9px; }
+.library-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 7px; }
+.library-icon.favorite { color: #8a6700; background: #fff6cf; }
+.library-icon.wrong { color: #a7443f; background: #fff0ef; }
+.library-list { padding: 0 14px; }
+.library-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 34px; min-height: 51px; align-items: center; gap: 9px; border-bottom: 1px solid #e9eef3; }
+.library-row > span:not(.listed-problem) { color: #718094; font-size: 9px; white-space: nowrap; }
+.wrong-tag { color: #a7443f !important; }
+.view-all { display: flex; min-height: 48px; align-items: center; justify-content: space-between; width: 100%; padding: 0 16px; border: 0; color: #2d6396; background: #f6f9fc; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
+.view-all:hover { background: #edf4fa; }
+.view-all span { display: grid; min-width: 24px; height: 22px; place-items: center; border-radius: 5px; color: #53718d; background: #e5edf4; }
+.wrong-view { color: #93413b; }
+.compact-toolbar { justify-content: flex-start; }
+.back-btn { display: inline-flex; align-items: center; gap: 6px; border: 0; color: #356f9f; background: transparent; cursor: pointer; font: inherit; font-size: 11px; font-weight: 750; }
+.full-library-list { margin-top: 18px; border: 1px solid var(--line); border-radius: 7px; }
+.full-row { grid-template-columns: minmax(0, 1fr) auto 90px; padding: 0 13px; }
+
+.primary-btn, .secondary-btn { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
+.primary-btn { border: 1px solid var(--blue); color: #fff; background: var(--blue); }
+.primary-btn:hover { border-color: #174bd1; background: #174bd1; }
+.primary-btn.small { min-height: 32px; padding: 0 10px; font-size: 10px; }
+.primary-btn:disabled { opacity: .58; cursor: wait; }
+.secondary-btn { border: 1px solid #bfd1e2; color: #225d91; background: #f8fbfe; }
+.secondary-btn:hover { border-color: #8fb3d2; background: #edf5fc; }
+.secondary-btn.danger-command { color: #a8463f; border-color: #e8c5c2; background: #fff8f7; }
+.text-btn { border: 0; padding: 0; color: #2e6ba0; background: transparent; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
 .text-btn:hover { color: #174f81; }
-.lists-section { overflow: hidden; border: 1px solid var(--workspace-line); border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(31, 66, 104, .05); }
-.lists-section > .section-toolbar { min-height: 80px; padding: 18px 22px; border-bottom: 1px solid var(--workspace-line); }
-.lists-section > .section-toolbar h2 { margin-top: 3px; }
-.lists-workspace { grid-template-columns: 240px minmax(0, 1fr); gap: 0; min-height: 520px; }
-.list-sidebar { padding: 14px; border-right: 1px solid var(--workspace-line); background: #f8fafc; }
-.list-nav-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'visibility count' 'name count'; align-items: center; gap: 4px 10px; min-height: 64px; margin-bottom: 6px; padding: 10px 12px; border: 1px solid transparent; border-radius: 7px; }
-.list-nav-item:hover { border-color: #d8e3ed; background: #fff; }
-.list-nav-item.active { border-color: #c9d9ff; color: var(--workspace-blue); background: var(--workspace-pale); }
-.list-nav-item span { grid-area: visibility; font-size: 9px; letter-spacing: 0; }
-.list-nav-item strong { grid-area: name; min-width: 0; margin: 0; overflow: hidden; color: #30465d; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.list-nav-item small { display: grid; grid-area: count; min-width: 40px; height: 30px; place-items: center; border-radius: 6px; color: #78889a; background: #edf1f5; font-size: 10px; }
-.list-nav-item.active strong,
-.list-nav-item.active span { color: var(--workspace-blue); }
-.list-nav-item.active small { color: var(--workspace-blue); background: #dbe7ff; }
-.list-editor.panel { min-width: 0; padding: 24px 26px; border: 0; border-radius: 0; background: #fff; box-shadow: none; }
-.list-editor .editor-heading { min-height: 78px; padding-bottom: 18px; border-bottom-color: var(--workspace-line); }
-.list-editor .editor-heading h2 { margin-top: 4px; color: #26384d; }
-.list-settings { margin: 0 -26px; padding: 18px 26px; border-bottom: 1px solid var(--workspace-line); background: #f8fafc; }
-.list-settings input,
-.list-settings textarea,
-.search-inline input { border-color: #cbd8e4; background: #fff; }
-.list-editor .search-inline,
-.list-editor .search-inline input { min-width: 0; }
-input:focus,
-textarea:focus { border-color: #7fa9e8; box-shadow: 0 0 0 3px rgba(31, 94, 255, .09); }
-.switch-label input { accent-color: var(--workspace-blue); }
-.list-editor .subheading { margin-top: 22px; }
-.sort-toolbar { width: max-content; gap: 5px; margin-bottom: 14px; padding: 4px; border: 1px solid #dce4ec; border-radius: 7px; background: #f0f3f6; }
-.sort-modes { gap: 3px; }
-.sort-modes button,
-.sort-direction { height: 32px; border: 0; border-radius: 5px; background: transparent; }
-.sort-modes button + button { margin-left: 0; border-left-color: transparent; }
-.sort-modes button:first-child,
-.sort-modes button:last-child { border-radius: 5px; }
-.sort-modes button.active { color: var(--workspace-blue); background: #fff; box-shadow: 0 2px 6px rgba(31, 66, 104, .08); }
-.sort-direction { display: grid; width: 34px; place-items: center; color: #597087; background: #fff; }
-.sort-direction:hover { color: var(--workspace-blue); background: #fff; }
-.problem-catalog { margin: 12px 0 16px; border-color: #dce5ef; background: #f8fafc; }
-.catalog-heading { min-height: 42px; padding: 10px 13px; color: #34536f; }
-.problem-catalog .search-results button:hover { background: #eef4ff; }
-.problem-catalog .search-results b { color: var(--workspace-blue); }
-.ordered-list { margin-top: 15px; overflow: hidden; border: 1px solid var(--workspace-line); border-radius: 7px; }
-.ordered-row { min-height: 54px; padding: 0 12px; border-bottom-color: #e9eef3; }
-.ordered-row:hover { background: #f8fafc; }
-.order-number { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: #68798c; background: #edf2f6; }
-.difficulty { padding: 4px 7px; border-radius: 5px; color: #557086; background: #eef3f7; }
-.problem-link { color: #225f96; }
-.problem-link:hover { color: var(--workspace-blue); }
-.progress-track i { background: var(--workspace-blue); }
-.daily-type { color: #28679d; background: #e6f1fb; }
-.public-list:hover { border-color: #8fb7d8; box-shadow: 0 10px 22px rgba(31, 66, 104, .09); }
-.modal { border-radius: 8px; }
-@media (max-width: 980px) {
-  .lists-workspace { grid-template-columns: 210px minmax(0, 1fr); }
+
+.modal-backdrop { position: fixed; inset: 0; z-index: 220; display: grid; place-items: center; padding: 20px; background: rgba(29, 42, 56, .5); }
+.modal { position: relative; width: min(480px, 100%); max-height: calc(100vh - 40px); padding: 26px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 24px 70px rgba(23, 40, 57, .22); }
+.modal h2 { margin: 6px 0 20px; font-size: 21px; letter-spacing: 0; }
+.modal label + label { margin-top: 14px; }
+.modal-close { position: absolute; top: 14px; right: 14px; display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 6px; color: #65778a; background: transparent; cursor: pointer; }
+.modal-close:hover { background: #edf3f8; }
+.full-btn { width: 100%; margin-top: 20px; }
+.plan-modal { width: min(620px, 100%); }
+.modal-plan-section { padding: 16px 0; border-top: 1px solid var(--line); }
+.modal-plan-section h3 { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; font-size: 13px; }
+.modal-plan-section h3 span { display: grid; min-width: 22px; height: 20px; place-items: center; border-radius: 5px; color: #47647f; background: #e9eff4; font-size: 9px; }
+.modal-plan-section > p { padding: 16px 0; color: #8492a2; font-size: 11px; }
+.modal-plan-list { border: 1px solid var(--line); border-radius: 7px; }
+.modal-plan-list > div { display: flex; min-height: 54px; align-items: center; gap: 8px; padding: 5px 8px 5px 12px; border-bottom: 1px solid #e9eef3; }
+.modal-plan-list > div:last-child { border-bottom: 0; }
+.modal-plan-list > div > button:first-child { display: grid; min-width: 0; flex: 1; gap: 3px; border: 0; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.modal-plan-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.modal-plan-list small { color: #8492a2; font-size: 9px; }
+.modal-plan-section.completed { padding-bottom: 0; }
+
+@media (max-width: 1040px) {
+  .plan-grid, .public-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .list-settings { grid-template-columns: 1fr 1.5fr; }
+  .switch-label { grid-column: 1 / -1; }
 }
 @media (max-width: 860px) {
   .learning-page { display: block; }
   .learning-main { padding: 18px 16px 52px; }
-  .learning-sidebar,
-  .learning-page.sidebar-collapsed .learning-sidebar { position: static; width: auto; height: auto; padding: 12px; border-right: 0; }
+  .learning-sidebar, .learning-page.sidebar-collapsed .learning-sidebar { position: static; width: auto; height: auto; padding: 12px; border-right: 0; }
   .learning-sidebar-title { display: none; }
-  .workspace-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 5px; border: 1px solid var(--workspace-line); border-radius: 8px; background: #fff; }
-  .workspace-nav button,
-  .sidebar-collapsed .workspace-nav button { grid-template-columns: 22px minmax(0, 1fr) auto; justify-items: initial; min-height: 46px; padding: 7px 10px; }
-  .workspace-nav button small,
-  .sidebar-collapsed .workspace-nav button small,
-  .sidebar-collapsed .workspace-nav button > span,
-  .sidebar-collapsed .workspace-nav button > b { display: initial; }
-  .workspace-nav button > span,
-  .sidebar-collapsed .workspace-nav button > span { display: grid; }
-  .workspace-nav button > b,
-  .sidebar-collapsed .workspace-nav button > b { display: grid; }
-  .learning-content { margin-top: 20px !important; }
-  .learning-header { min-height: 0; align-items: flex-start; flex-direction: column; }
-  .learning-header h1 { font-size: 29px; }
+  .workspace-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .workspace-nav button, .sidebar-collapsed .workspace-nav button { grid-template-columns: 22px minmax(0, 1fr) auto; justify-items: initial; min-height: 46px; padding: 7px 10px; }
+  .workspace-nav button small, .sidebar-collapsed .workspace-nav button small, .sidebar-collapsed .workspace-nav button > span, .sidebar-collapsed .workspace-nav button > b { display: initial; }
+  .workspace-nav button > span, .sidebar-collapsed .workspace-nav button > span { display: grid; }
+  .workspace-nav button > b, .sidebar-collapsed .workspace-nav button > b { display: grid; }
+  .learning-header { min-height: 0; }
+  .practice-grid { grid-template-columns: 1fr; }
 }
-@media (max-width: 720px) {
-  .lists-section > .section-toolbar { min-height: 72px; padding: 16px; }
-  .lists-workspace { grid-template-columns: 1fr; min-height: 0; }
-  .list-sidebar { display: flex; gap: 7px; padding: 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--workspace-line); }
-  .list-nav-item { min-width: 172px; margin: 0; }
-  .list-editor.panel { padding: 20px 16px; }
-  .list-editor .inline-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 8px; width: 100%; }
-  .list-editor .inline-actions button { min-width: 0; padding-right: 8px; padding-left: 8px; }
-  .list-settings { grid-template-columns: 1fr; margin: 0 -16px; padding: 16px; }
+@media (max-width: 680px) {
+  .learning-header { padding: 22px 20px; }
+  .learning-header h1 { font-size: 29px; }
+  .metric-strip { grid-template-columns: 1fr; }
+  .metric-strip > div { min-height: 76px; padding: 17px 20px; }
+  .metric-strip > div + div { box-shadow: inset 0 1px var(--line); }
+  .metric-strip strong { font-size: 28px; }
+  .workspace-panel, .page-section, .active-section, .list-detail { padding: 18px 15px; }
+  .plan-grid, .public-grid, .library-grid { grid-template-columns: 1fr; }
+  .page-toolbar, .detail-heading, .problem-heading { align-items: flex-start; flex-direction: column; }
+  .list-settings { grid-template-columns: 1fr; margin: 0 -15px; padding: 16px 15px; }
+  .switch-label { grid-column: auto; }
+  .inline-actions, .search-inline { width: 100%; }
+  .inline-actions > button { min-width: 0; flex: 1; padding-right: 8px; padding-left: 8px; }
   .sort-toolbar { width: 100%; overflow-x: auto; }
+  .ordered-row { grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .ordered-row .difficulty { display: none; }
+  .full-row { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 11px; }
+  .full-row > span { display: none; }
+  .notice { right: 14px; left: 14px; max-width: none; }
+}
+@media (max-width: 430px) {
+  .workspace-nav button { grid-template-columns: 20px minmax(0, 1fr); }
+  .workspace-nav button > b { display: none !important; }
+  .problem-row { grid-template-columns: 30px minmax(0, 1fr); }
+  .problem-row > .difficulty { display: none; }
 }
 </style>

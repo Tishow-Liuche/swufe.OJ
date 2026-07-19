@@ -1,16 +1,11 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  AddLearningPlanItemDto,
   AddProblemListItemDto,
   CreateLearningPlanDto,
   CreateProblemListDto,
   ReorderProblemListDto,
+  SaveProblemDraftDto,
   ToggleFavoriteDto,
   UpdateLearningPlanDto,
   UpdateProblemListDto,
@@ -40,16 +35,26 @@ function endOfDay(value = new Date()) {
   return date;
 }
 
-function dateDiffInDays(start: Date, end: Date) {
-  return Math.max(0, Math.floor((startOfDay(end).getTime() - startOfDay(start).getTime()) / 86400000));
-}
-
 function dateKey(value: Date) {
   const date = startOfDay(value);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function databaseDate(value = new Date()) {
+  const date = startOfDay(value);
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12));
+}
+
+function shuffled<T>(items: T[]) {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [result[index], result[target]] = [result[target], result[index]];
+  }
+  return result;
 }
 
 @Injectable()
@@ -99,10 +104,13 @@ export class LearningService {
       },
     });
     if (!list) throw new NotFoundException('题单不存在');
-    if (!list.isPublic && list.createdBy !== userId) {
-      throw new ForbiddenException('该题单未公开');
-    }
-    return list;
+    if (!list.isPublic && list.createdBy !== userId) throw new ForbiddenException('该题单未公开');
+    if (!userId) return list;
+    const states = await this.getProblemStates(userId, list.items.map((item) => item.problemId));
+    return {
+      ...list,
+      items: list.items.map((item) => ({ ...item, state: states[item.problemId] })),
+    };
   }
 
   async createList(userId: string, dto: CreateProblemListDto) {
@@ -140,13 +148,21 @@ export class LearningService {
 
   async addListItem(listId: string, userId: string, dto: AddProblemListItemDto) {
     await this.assertListOwner(listId, userId);
-    const problem = await this.prisma.problem.findUnique({ where: { id: dto.problemId }, select: { id: true, status: true } });
+    const problem = await this.prisma.problem.findUnique({
+      where: { id: dto.problemId },
+      select: { id: true, status: true },
+    });
     if (!problem || problem.status !== 'PUBLISHED') throw new NotFoundException('题目不存在或尚未发布');
     const exists = await this.prisma.problemListItem.findFirst({ where: { listId, problemId: dto.problemId } });
-    if (exists) return this.prisma.problemListItem.findUnique({ where: { id: exists.id }, include: { problem: { select: problemSummary } } });
+    if (exists) {
+      return this.prisma.problemListItem.findUnique({
+        where: { id: exists.id },
+        include: { problem: { select: problemSummary } },
+      });
+    }
     const max = await this.prisma.problemListItem.aggregate({ where: { listId }, _max: { order: true } });
     return this.prisma.problemListItem.create({
-      data: { listId, problemId: dto.problemId, order: dto.order ?? ((max._max.order ?? -1) + 1) },
+      data: { listId, problemId: dto.problemId, order: dto.order ?? (max._max.order ?? -1) + 1 },
       include: { problem: { select: problemSummary } },
     });
   }
@@ -172,13 +188,18 @@ export class LearningService {
       seen.add(item.itemId);
     }
     await this.prisma.$transaction(
-      dto.items.map((item) => this.prisma.problemListItem.update({ where: { id: item.itemId }, data: { order: item.order } })),
+      dto.items.map((item) =>
+        this.prisma.problemListItem.update({ where: { id: item.itemId }, data: { order: item.order } }),
+      ),
     );
     return this.getList(listId, userId);
   }
 
   private async assertListOwner(id: string, userId: string) {
-    const list = await this.prisma.problemList.findUnique({ where: { id }, select: { id: true, createdBy: true } });
+    const list = await this.prisma.problemList.findUnique({
+      where: { id },
+      select: { id: true, createdBy: true },
+    });
     if (!list) throw new NotFoundException('题单不存在');
     if (list.createdBy !== userId) throw new ForbiddenException('无权操作该题单');
     return list;
@@ -189,316 +210,366 @@ export class LearningService {
   async getPlans(userId: string) {
     const plans = await this.prisma.learningPlan.findMany({
       where: { userId },
-      include: { _count: { select: { items: true, checkIns: true } } },
-      orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }],
-      take: 1,
+      include: {
+        problemList: {
+          include: { items: { select: { problemId: true }, orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
+        },
+      },
+      orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
     });
-    return plans.map((plan) => ({
-      ...plan,
-      progress: this.formatPlanProgress(plan.startDate, plan.endDate, plan._count.checkIns),
-    }));
+    const problemIds = [...new Set(plans.flatMap((plan) => plan.problemList.items.map((item) => item.problemId)))];
+    const solvedIds = await this.getAcceptedProblemIds(userId, problemIds);
+    return plans.map((plan) => this.formatPlan(plan, solvedIds));
   }
 
   async getPlanDetails(id: string, userId: string) {
-    const plan = await this.assertPlanOwner(id, userId);
-    const [items, checkIns] = await Promise.all([
-      this.prisma.learningPlanItem.findMany({
-        where: { planId: id },
-        include: { problem: { select: problemSummary } },
-        orderBy: [{ dayIndex: 'asc' }, { id: 'asc' }],
-      }),
-      this.prisma.learningPlanCheckIn.findMany({
-        where: { planId: id },
-        orderBy: { date: 'desc' },
-      }),
-    ]);
-    const today = this.isDateInPlan(plan, new Date())
-      ? await this.buildDaily(userId, plan, new Date())
-      : this.emptyDaily(new Date(), plan);
+    const plan = await this.prisma.learningPlan.findUnique({
+      where: { id },
+      include: {
+        problemList: {
+          include: {
+            items: {
+              orderBy: [{ order: 'asc' }, { id: 'asc' }],
+              include: { problem: { select: problemSummary } },
+            },
+          },
+        },
+      },
+    });
+    if (!plan) throw new NotFoundException('学习计划不存在');
+    if (plan.userId !== userId) throw new ForbiddenException('无权操作该学习计划');
+    const problemIds = plan.problemList.items.map((item) => item.problemId);
+    const states = await this.getProblemStates(userId, problemIds);
+    const solvedIds = new Set(problemIds.filter((problemId) => states[problemId]?.status === 'PASSED'));
     return {
-      ...plan,
-      items,
-      checkIns,
-      today,
-      progress: this.formatPlanProgress(plan.startDate, plan.endDate, checkIns.length),
+      ...this.formatPlan(plan, solvedIds),
+      items: plan.problemList.items.map((item) => ({
+        ...item,
+        solved: solvedIds.has(item.problemId),
+        state: states[item.problemId],
+      })),
     };
   }
 
   async createPlan(userId: string, dto: CreateLearningPlanDto) {
-    const startDate = new Date(dto.startDate);
-    const endDate = new Date(dto.endDate);
-    if (endDate < startDate) throw new BadRequestException('结束日期不能早于开始日期');
-    const name = dto.name.trim();
-    if (!name) throw new BadRequestException('学习计划名称不能为空');
-    return this.prisma.$transaction(async (tx) => {
-      await tx.learningPlan.deleteMany({ where: { userId } });
-      return tx.learningPlan.create({
-        data: {
-          userId,
-          name,
-          description: dto.description?.trim() || null,
-          type: dto.type || 'DAILY',
-          startDate,
-          endDate,
-          dailyTarget: dto.dailyTarget || 3,
-        },
-        include: { items: { include: { problem: { select: problemSummary } }, orderBy: [{ dayIndex: 'asc' }, { id: 'asc' }] } },
-      });
+    const list = await this.prisma.problemList.findUnique({
+      where: { id: dto.problemListId },
+      select: { id: true, isPublic: true, createdBy: true },
     });
+    if (!list || (!list.isPublic && list.createdBy !== userId)) {
+      throw new NotFoundException('题单不存在或尚未公开');
+    }
+    const plan = await this.prisma.learningPlan.upsert({
+      where: { userId_problemListId: { userId, problemListId: list.id } },
+      create: { userId, problemListId: list.id },
+      update: { status: 'ACTIVE', startedAt: new Date(), completedAt: null },
+    });
+    return this.getPlanDetails(plan.id, userId);
   }
 
   async updatePlan(id: string, userId: string, dto: UpdateLearningPlanDto) {
-    const plan = await this.assertPlanOwner(id, userId);
-    const startDate = dto.startDate ? new Date(dto.startDate) : plan.startDate;
-    const endDate = dto.endDate ? new Date(dto.endDate) : plan.endDate;
-    if (endDate < startDate) throw new BadRequestException('结束日期不能早于开始日期');
-    const name = dto.name?.trim();
-    if (dto.name !== undefined && !name) throw new BadRequestException('学习计划名称不能为空');
-    return this.prisma.learningPlan.update({
+    await this.assertPlanOwner(id, userId);
+    const active = dto.status === 'ACTIVE';
+    await this.prisma.learningPlan.update({
       where: { id },
       data: {
-        name,
-        description: dto.description === undefined ? undefined : (dto.description.trim() || null),
-        startDate,
-        endDate,
-        dailyTarget: dto.dailyTarget,
+        status: dto.status,
+        completedAt: active ? null : new Date(),
+        startedAt: active ? new Date() : undefined,
       },
     });
-  }
-
-  async deletePlan(id: string, userId: string) {
-    await this.assertPlanOwner(id, userId);
-    await this.prisma.learningPlan.delete({ where: { id } });
-    return { id, deleted: true };
-  }
-
-  async checkInPlan(planId: string, userId: string, date = new Date()) {
-    const plan = await this.assertPlanOwner(planId, userId);
-    if (startOfDay(date) > startOfDay(new Date())) {
-      throw new BadRequestException('不能提前为未来日期打卡');
-    }
-    if (!this.isDateInPlan(plan, date)) throw new BadRequestException('当前日期不在计划范围内');
-    const daily = await this.buildDaily(userId, plan, date);
-    if (!daily.progress.canCheckIn) throw new BadRequestException('完成今日目标后才能打卡');
-    const day = startOfDay(date);
-    const checkIn = await this.prisma.learningPlanCheckIn.upsert({
-      where: { planId_date: { planId, date: day } },
-      create: { planId, date: day },
-      update: {},
-    });
-    const checkedInDays = await this.prisma.learningPlanCheckIn.count({ where: { planId } });
-    return {
-      checkIn,
-      progress: this.formatPlanProgress(plan.startDate, plan.endDate, checkedInDays),
-    };
-  }
-
-  async addPlanItem(planId: string, userId: string, dto: AddLearningPlanItemDto) {
-    const plan = await this.assertPlanOwner(planId, userId);
-    const problem = await this.prisma.problem.findUnique({ where: { id: dto.problemId }, select: { id: true, status: true } });
-    if (!problem || problem.status !== 'PUBLISHED') throw new NotFoundException('题目不存在或尚未发布');
-    const dayIndex = Math.min(dto.dayIndex ?? 0, dateDiffInDays(plan.startDate, plan.endDate));
-    const duplicate = await this.prisma.learningPlanItem.findFirst({ where: { planId, problemId: dto.problemId, dayIndex } });
-    if (duplicate) return this.getPlanItem(duplicate.id, userId);
-    const item = await this.prisma.learningPlanItem.create({
-      data: { planId, problemId: dto.problemId, dayIndex, type: dto.type || 'PRACTICE' },
-    });
-    return this.getPlanItem(item.id, userId);
-  }
-
-  async updatePlanItem(planId: string, itemId: string, userId: string, completed: boolean) {
-    await this.assertPlanOwner(planId, userId);
-    const item = await this.prisma.learningPlanItem.findUnique({ where: { id: itemId } });
-    if (!item || item.planId !== planId) throw new NotFoundException('学习计划项目不存在');
-    await this.prisma.learningPlanItem.update({ where: { id: itemId }, data: { completed } });
-    return this.getPlanItem(itemId, userId);
-  }
-
-  async removePlanItem(planId: string, itemId: string, userId: string) {
-    await this.assertPlanOwner(planId, userId);
-    const item = await this.prisma.learningPlanItem.findUnique({ where: { id: itemId } });
-    if (!item || item.planId !== planId) throw new NotFoundException('学习计划项目不存在');
-    await this.prisma.learningPlanItem.delete({ where: { id: itemId } });
-    return { id: itemId, deleted: true };
-  }
-
-  private async getPlanItem(id: string, userId: string) {
-    const item = await this.prisma.learningPlanItem.findUnique({
-      where: { id },
-      include: { plan: { select: { userId: true } }, problem: { select: problemSummary } },
-    });
-    if (!item || item.plan.userId !== userId) throw new NotFoundException('学习计划项目不存在');
-    return item;
+    return this.getPlanDetails(id, userId);
   }
 
   private async assertPlanOwner(id: string, userId: string) {
-    const plan = await this.prisma.learningPlan.findUnique({ where: { id } });
+    const plan = await this.prisma.learningPlan.findUnique({ where: { id }, select: { id: true, userId: true } });
     if (!plan) throw new NotFoundException('学习计划不存在');
     if (plan.userId !== userId) throw new ForbiddenException('无权操作该学习计划');
     return plan;
   }
 
-  private isDateInPlan(plan: { startDate: Date; endDate: Date }, date: Date) {
-    const day = startOfDay(date);
-    return day >= startOfDay(plan.startDate) && day < endOfDay(plan.endDate);
+  private async getAcceptedProblemIds(userId: string, problemIds: string[]) {
+    if (!problemIds.length) return new Set<string>();
+    const submissions = await this.prisma.submission.findMany({
+      where: { userId, status: 'ACCEPTED', problemId: { in: problemIds } },
+      distinct: ['problemId'],
+      select: { problemId: true },
+    });
+    return new Set(submissions.map((item) => item.problemId));
   }
 
-  private formatPlanProgress(startDate: Date, endDate: Date, checkedInDays: number) {
-    const totalDays = dateDiffInDays(startDate, endDate) + 1;
+  private formatPlan(plan: any, solvedIds: Set<string>) {
+    const items = plan.problemList?.items || [];
+    const solved = items.filter((item: any) => solvedIds.has(item.problemId)).length;
+    const total = items.length;
     return {
-      checkedInDays,
-      totalDays,
-      percent: totalDays ? Math.min(100, Math.round((checkedInDays / totalDays) * 100)) : 0,
+      ...plan,
+      progress: { solved, total, percent: total ? Math.round((solved / total) * 100) : 0 },
     };
   }
 
-  private emptyDaily(date: Date, plan: any = null) {
-    const day = startOfDay(date);
+  // ==================== 题目学习状态 ====================
+
+  async getProblemStates(userId: string, problemIds: string[]) {
+    const ids = [...new Set(problemIds.filter(Boolean))];
+    if (!ids.length) return {};
+    const [submissions, drafts, favorites, wrongItems] = await Promise.all([
+      this.prisma.submission.findMany({
+        where: { userId, problemId: { in: ids } },
+        select: { problemId: true, status: true },
+      }),
+      this.prisma.problemDraft.findMany({
+        where: { userId, problemId: { in: ids } },
+        select: { problemId: true },
+      }),
+      this.prisma.userFavorite.findMany({
+        where: { userId, problemId: { in: ids } },
+        select: { problemId: true },
+      }),
+      this.prisma.userWrongBook.findMany({
+        where: { userId, problemId: { in: ids } },
+        select: { problemId: true },
+      }),
+    ]);
+    const accepted = new Set(
+      submissions.filter((item) => item.status === 'ACCEPTED').map((item) => item.problemId),
+    );
+    const attempted = new Set(submissions.map((item) => item.problemId));
+    const draftIds = new Set(drafts.map((item) => item.problemId));
+    const favoriteIds = new Set(favorites.map((item) => item.problemId));
+    const wrongIds = new Set(wrongItems.map((item) => item.problemId));
+    const attempts = new Map<string, number>();
+    for (const submission of submissions) {
+      attempts.set(submission.problemId, (attempts.get(submission.problemId) || 0) + 1);
+    }
+    return Object.fromEntries(
+      ids.map((problemId) => [
+        problemId,
+        {
+          status: accepted.has(problemId)
+            ? 'PASSED'
+            : attempted.has(problemId) || draftIds.has(problemId)
+              ? 'ATTEMPTED'
+              : 'NEW',
+          favorite: favoriteIds.has(problemId),
+          wrong: wrongIds.has(problemId),
+          hasDraft: draftIds.has(problemId),
+          attempts: attempts.get(problemId) || 0,
+        },
+      ]),
+    );
+  }
+
+  async getProblemState(userId: string, problemId: string) {
+    await this.assertPublishedProblem(problemId);
+    const [states, draft] = await Promise.all([
+      this.getProblemStates(userId, [problemId]),
+      this.prisma.problemDraft.findUnique({ where: { userId_problemId: { userId, problemId } } }),
+    ]);
+    return { ...states[problemId], draft };
+  }
+
+  async saveProblemDraft(userId: string, problemId: string, dto: SaveProblemDraftDto) {
+    await this.assertPublishedProblem(problemId);
+    if (!dto.sourceCode.trim()) return this.deleteProblemDraft(userId, problemId);
+    await this.prisma.problemDraft.upsert({
+      where: { userId_problemId: { userId, problemId } },
+      create: { userId, problemId, language: dto.language, sourceCode: dto.sourceCode },
+      update: { language: dto.language, sourceCode: dto.sourceCode },
+    });
+    return this.getProblemState(userId, problemId);
+  }
+
+  async deleteProblemDraft(userId: string, problemId: string) {
+    await this.prisma.problemDraft.deleteMany({ where: { userId, problemId } });
+    return this.getProblemState(userId, problemId);
+  }
+
+  // ==================== 今日练习与继续学习 ====================
+
+  async getDaily(userId: string) {
+    const date = databaseDate();
+    let items = await this.getDailyItems(userId, date);
+    if (!items.length) {
+      const accepted = await this.prisma.submission.findMany({
+        where: { userId, status: 'ACCEPTED' },
+        distinct: ['problemId'],
+        select: { problemId: true },
+      });
+      const acceptedIds = accepted.map((item) => item.problemId);
+      const unsolved = await this.prisma.problem.findMany({
+        where: { status: 'PUBLISHED', id: { notIn: acceptedIds } },
+        select: { id: true },
+      });
+      const selected = shuffled(unsolved)
+        .slice(0, 5)
+        .map((problem) => ({ problemId: problem.id, source: 'UNSOLVED' }));
+      if (selected.length < 5 && acceptedIds.length) {
+        const solved = await this.prisma.problem.findMany({
+          where: { status: 'PUBLISHED', id: { in: acceptedIds } },
+          select: { id: true },
+        });
+        selected.push(
+          ...shuffled(solved)
+            .slice(0, 5 - selected.length)
+            .map((problem) => ({ problemId: problem.id, source: 'REVIEW' })),
+        );
+      }
+      if (selected.length) {
+        await this.prisma.dailyPracticeItem.createMany({
+          data: selected.map((item, order) => ({ userId, date, order, ...item })),
+          skipDuplicates: true,
+        });
+        items = await this.getDailyItems(userId, date);
+      }
+    }
+    const states = await this.getProblemStates(userId, items.map((item) => item.problemId));
     return {
-      date: dateKey(day),
-      dayIndex: plan ? dateDiffInDays(plan.startDate, day) : 0,
-      plan,
-      items: [],
-      checkIn: null,
-      progress: {
-        total: 0,
-        target: plan?.dailyTarget || 0,
-        completed: 0,
-        percent: 0,
-        canCheckIn: false,
-        checkedIn: false,
-      },
+      date: dateKey(new Date()),
+      items: items.map((item) => ({ ...item, state: states[item.problemId] })),
+      progress: { total: items.length },
     };
   }
 
-  private async buildDaily(userId: string, plan: any, date: Date) {
-    const day = startOfDay(date);
-    const dayIndex = dateDiffInDays(plan.startDate, day);
-    const [items, submissions, completedBefore, checkIn] = await Promise.all([
-      this.prisma.learningPlanItem.findMany({
-        where: { planId: plan.id, dayIndex },
+  private getDailyItems(userId: string, date: Date) {
+    return this.prisma.dailyPracticeItem.findMany({
+      where: { userId, date },
+      include: { problem: { select: problemSummary } },
+      orderBy: { order: 'asc' },
+    });
+  }
+
+  async getContinueLearning(userId: string) {
+    const [wrongItems, submissions, drafts] = await Promise.all([
+      this.prisma.userWrongBook.findMany({
+        where: { userId },
         include: { problem: { select: problemSummary } },
-        orderBy: { id: 'asc' },
+        orderBy: { lastAttemptAt: 'desc' },
       }),
       this.prisma.submission.findMany({
         where: { userId },
+        select: { problemId: true, status: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.problemDraft.findMany({
+        where: { userId },
+        select: { problemId: true, updatedAt: true },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ]);
+    const acceptedIds = new Set(
+      submissions.filter((item) => item.status === 'ACCEPTED').map((item) => item.problemId),
+    );
+    const wrongIds = new Set(wrongItems.map((item) => item.problemId));
+    const activity = new Map<string, Date>();
+    for (const submission of submissions) {
+      if (!activity.has(submission.problemId)) activity.set(submission.problemId, submission.createdAt);
+    }
+    for (const draft of drafts) {
+      const current = activity.get(draft.problemId);
+      if (!current || draft.updatedAt > current) activity.set(draft.problemId, draft.updatedAt);
+    }
+    const attemptedIds = [...activity.keys()].filter(
+      (problemId) => !acceptedIds.has(problemId) && !wrongIds.has(problemId),
+    );
+    const attemptedProblems = attemptedIds.length
+      ? await this.prisma.problem.findMany({
+          where: { id: { in: attemptedIds }, status: 'PUBLISHED' },
+          select: problemSummary,
+        })
+      : [];
+    const attemptedById = new Map(attemptedProblems.map((problem) => [problem.id, problem]));
+    const problemIds = [...wrongIds, ...attemptedIds];
+    const states = await this.getProblemStates(userId, problemIds);
+    const wrong = wrongItems.map((item) => ({
+      ...item,
+      reason: 'WRONG',
+      state: states[item.problemId],
+    }));
+    const attempted = attemptedIds
+      .map((problemId) => ({
+        problemId,
+        problem: attemptedById.get(problemId),
+        updatedAt: activity.get(problemId),
+        reason: 'ATTEMPTED',
+        state: states[problemId],
+      }))
+      .filter((item) => item.problem)
+      .sort((left, right) => Number(right.updatedAt) - Number(left.updatedAt));
+    return { items: [...wrong, ...attempted], counts: { wrong: wrong.length, attempted: attempted.length } };
+  }
+
+  async getDashboard(userId: string) {
+    const today = startOfDay();
+    const [daily, plans, continueLearning, favoriteCount, wrongCount, solvedToday, checkIn] = await Promise.all([
+      this.getDaily(userId),
+      this.getPlans(userId),
+      this.getContinueLearning(userId),
+      this.prisma.userFavorite.count({ where: { userId } }),
+      this.prisma.userWrongBook.count({ where: { userId } }),
+      this.prisma.submission.findMany({
+        where: { userId, status: 'ACCEPTED', createdAt: { gte: today, lt: endOfDay(today) } },
         distinct: ['problemId'],
         select: { problemId: true },
       }),
-      this.prisma.learningPlanItem.findMany({
-        where: { planId: plan.id, completed: true, dayIndex: { lt: dayIndex } },
-        select: { problemId: true },
-      }),
-      this.prisma.learningPlanCheckIn.findUnique({
-        where: { planId_date: { planId: plan.id, date: day } },
-      }),
+      this.getCheckIn(userId),
     ]);
-    const previouslyDone = new Set([
-      ...submissions.map((item) => item.problemId),
-      ...completedBefore.map((item) => item.problemId).filter(Boolean),
-    ]);
-    const completed = items.filter((item) => item.completed).length;
-    const total = items.length;
-    const required = Math.min(plan.dailyTarget, total);
     return {
-      date: dateKey(day),
-      dayIndex,
-      plan,
-      items: items.map((item) => ({
-        ...item,
-        previouslyDone: item.problemId ? previouslyDone.has(item.problemId) : false,
-      })),
+      daily,
+      plans,
+      continueLearning,
       checkIn,
-      progress: {
-        total,
-        target: plan.dailyTarget,
-        completed,
-        percent: total ? Math.min(100, Math.round((completed / total) * 100)) : 0,
-        canCheckIn: required > 0 && completed >= required,
-        checkedIn: Boolean(checkIn),
+      counts: {
+        favorites: favoriteCount,
+        wrongBook: wrongCount,
+        todaySolved: solvedToday.length,
+        checkInDays: checkIn.totalDays,
       },
     };
   }
 
-  async getDaily(userId: string, date = new Date()) {
-    const day = startOfDay(date);
-    const plan = await this.prisma.learningPlan.findFirst({
-      where: { userId, startDate: { lte: endOfDay(day) }, endDate: { gte: day } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!plan) return this.emptyDaily(day);
-    return this.buildDaily(userId, plan, day);
-  }
+  // ==================== 全站签到 ====================
 
-  async generateDaily(userId: string, date = new Date()) {
-    const day = startOfDay(date);
-    const plan = await this.prisma.learningPlan.findFirst({
-      where: { userId, startDate: { lte: endOfDay(day) }, endDate: { gte: day } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!plan) throw new BadRequestException('请先创建当前日期有效的学习计划');
-    const dayIndex = dateDiffInDays(plan.startDate, day);
-    const existing = await this.prisma.learningPlanItem.findMany({ where: { planId: plan.id, dayIndex }, select: { problemId: true } });
-    const existingIds = new Set(existing.map((item) => item.problemId).filter(Boolean) as string[]);
-    const count = Math.max(0, plan.dailyTarget - existingIds.size);
-    if (!count) return this.getDaily(userId, day);
-
-    const [submissions, completedItems, wrong, favorites] = await Promise.all([
-      this.prisma.submission.findMany({ where: { userId }, distinct: ['problemId'], select: { problemId: true } }),
-      this.prisma.learningPlanItem.findMany({ where: { planId: plan.id, completed: true }, select: { problemId: true } }),
-      this.prisma.userWrongBook.findMany({ where: { userId }, orderBy: { lastAttemptAt: 'desc' }, select: { problemId: true } }),
-      this.prisma.userFavorite.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, select: { problemId: true } }),
-    ]);
-    const doneIds = new Set([
-      ...submissions.map((item) => item.problemId),
-      ...completedItems.map((item) => item.problemId).filter(Boolean),
-    ] as string[]);
-    const newProblems = await this.prisma.problem.findMany({
-      where: { status: 'PUBLISHED', id: { notIn: [...existingIds, ...doneIds] } },
-      orderBy: { createdAt: 'desc' },
-      take: count,
-      select: problemSummary,
-    });
-    const remaining = count - newProblems.length;
-    const reviewPriority = [
-      ...wrong.map((item) => item.problemId),
-      ...favorites.map((item) => item.problemId),
-      ...doneIds,
-    ].filter((id, index, all) => doneIds.has(id) && !existingIds.has(id) && all.indexOf(id) === index);
-    const reviewPool = remaining && reviewPriority.length
-      ? await this.prisma.problem.findMany({
-          where: { status: 'PUBLISHED', id: { in: reviewPriority } },
-          select: problemSummary,
-        })
-      : [];
-    const reviewById = new Map(reviewPool.map((problem) => [problem.id, problem]));
-    const reviewProblems = reviewPriority.map((id) => reviewById.get(id)).filter(Boolean).slice(0, remaining) as Array<{ id: string }>;
-    if (newProblems.length || reviewProblems.length) {
-      await this.prisma.learningPlanItem.createMany({
-        data: [
-          ...newProblems.map((problem) => ({ planId: plan.id, problemId: problem.id, dayIndex, type: 'PRACTICE' })),
-          ...reviewProblems.map((problem) => ({ planId: plan.id, problemId: problem.id, dayIndex, type: 'REVIEW' })),
-        ],
-      });
+  async getCheckIn(userId: string) {
+    const checkIns = await this.prisma.userCheckIn.findMany({ where: { userId }, orderBy: { date: 'desc' } });
+    const checkedDates = new Set(checkIns.map((item) => dateKey(item.date)));
+    const today = startOfDay();
+    const checkedToday = checkedDates.has(dateKey(today));
+    const cursor = new Date(today);
+    if (!checkedToday) cursor.setDate(cursor.getDate() - 1);
+    let streak = 0;
+    while (checkedDates.has(dateKey(cursor))) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
     }
-    return this.getDaily(userId, day);
+    return {
+      checkedToday,
+      totalDays: checkIns.length,
+      streak,
+      recentDates: checkIns.slice(0, 90).map((item) => dateKey(item.date)),
+    };
   }
 
-  async getDashboard(userId: string) {
-    const [daily, plans, favoriteCount, wrongCount, solved] = await Promise.all([
-      this.getDaily(userId),
-      this.getPlans(userId),
-      this.prisma.userFavorite.count({ where: { userId } }),
-      this.prisma.userWrongBook.count({ where: { userId } }),
-      this.prisma.submission.findMany({ where: { userId, status: 'ACCEPTED' }, distinct: ['problemId'], select: { problemId: true } }),
-    ]);
-    return { daily, plans, counts: { favorites: favoriteCount, wrongBook: wrongCount, solved: solved.length } };
+  async checkIn(userId: string) {
+    const date = databaseDate();
+    await this.prisma.userCheckIn.upsert({
+      where: { userId_date: { userId, date } },
+      create: { userId, date },
+      update: {},
+    });
+    return this.getCheckIn(userId);
   }
 
   // ==================== 收藏与错题 ====================
 
   async getFavorites(userId: string) {
-    return this.prisma.userFavorite.findMany({ where: { userId }, include: { problem: { select: problemSummary } }, orderBy: { createdAt: 'desc' } });
+    const items = await this.prisma.userFavorite.findMany({
+      where: { userId },
+      include: { problem: { select: problemSummary } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const states = await this.getProblemStates(userId, items.map((item) => item.problemId));
+    return items.map((item) => ({ ...item, state: states[item.problemId] }));
   }
 
   async addFavorite(userId: string, dto: ToggleFavoriteDto) {
@@ -517,7 +588,13 @@ export class LearningService {
   }
 
   async getWrongBook(userId: string) {
-    return this.prisma.userWrongBook.findMany({ where: { userId }, include: { problem: { select: problemSummary } }, orderBy: { lastAttemptAt: 'desc' } });
+    const items = await this.prisma.userWrongBook.findMany({
+      where: { userId },
+      include: { problem: { select: problemSummary } },
+      orderBy: { lastAttemptAt: 'desc' },
+    });
+    const states = await this.getProblemStates(userId, items.map((item) => item.problemId));
+    return items.map((item) => ({ ...item, state: states[item.problemId] }));
   }
 
   async upsertWrongBook(userId: string, dto: UpsertWrongBookDto) {
@@ -533,6 +610,26 @@ export class LearningService {
   async removeWrongBook(userId: string, problemId: string) {
     await this.prisma.userWrongBook.deleteMany({ where: { userId, problemId } });
     return { userId, problemId, removed: true };
+  }
+
+  async resolveWrongBook(userId: string, problemId: string, favorite: boolean) {
+    const accepted = await this.prisma.submission.findFirst({
+      where: { userId, problemId, status: 'ACCEPTED' },
+      select: { id: true },
+    });
+    if (!accepted) throw new BadRequestException('题目通过后才能完成错题处理');
+    await this.prisma.$transaction(async (tx) => {
+      if (favorite) {
+        await tx.userFavorite.upsert({
+          where: { userId_problemId: { userId, problemId } },
+          create: { userId, problemId },
+          update: {},
+        });
+      }
+      await tx.userWrongBook.deleteMany({ where: { userId, problemId } });
+    });
+    const states = await this.getProblemStates(userId, [problemId]);
+    return states[problemId];
   }
 
   async recordWrongAnswer(userId: string, problemId: string, errorType: string) {
@@ -563,9 +660,11 @@ export class LearningService {
   }
 
   private async assertPublishedProblem(problemId: string) {
-    const problem = await this.prisma.problem.findUnique({ where: { id: problemId }, select: { id: true, status: true } });
+    const problem = await this.prisma.problem.findUnique({
+      where: { id: problemId },
+      select: { id: true, status: true },
+    });
     if (!problem || problem.status !== 'PUBLISHED') throw new NotFoundException('题目不存在或尚未发布');
     return problem;
   }
-
 }

@@ -28,36 +28,39 @@ model User {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  submissions              Submission[]
-  userRoles                UserRole[]
-  classMembers             ClassMember[]
-  contestParticipants      ContestParticipant[]
-  assignmentStudents       AssignmentStudent[]
-  sessions                 UserSession[]
-  externalAccounts         ExternalAccount[]
-  externalSolvedProblems   ExternalSolvedProblem[]
-  competitionAwards        CompetitionAward[]
-  helperDevices            HelperDevice[]
-  remoteTasks              RemoteSubmissionTask[]
-  skillProfiles            UserSkillProfile[]
-  problemMetrics           UserProblemMetric[]
-  learningPlans            LearningPlan[]
-  favorites                UserFavorite[]
-  wrongBook                UserWrongBook[]
-  recommendationFeedback   RecommendationFeedback[]
-  authoredProblems         Problem[]               @relation("ProblemAuthor")
-  communityPosts           CommunityPost[]
-  communityReplies         CommunityReply[]
-  communityReactions       CommunityReaction[]
-  announcements            Announcement[]
-  notifications            Notification[]
-  directConversationsAsParticipantOne DirectConversation[] @relation("DirectConversationParticipantOne")
-  directConversationsAsParticipantTwo DirectConversation[] @relation("DirectConversationParticipantTwo")
-  sentDirectMessages       DirectMessage[]      @relation("DirectMessageSender")
-  reportedContent          ContentReport[]          @relation("ContentReportReporter")
-  reviewedContentReports   ContentReport[]          @relation("ContentReportReviewer")
-  problemFeedbacks         ProblemFeedback[]        @relation("ProblemFeedbackReporter")
-  reviewedProblemFeedbacks ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
+  submissions                         Submission[]
+  userRoles                           UserRole[]
+  classMembers                        ClassMember[]
+  contestParticipants                 ContestParticipant[]
+  assignmentStudents                  AssignmentStudent[]
+  sessions                            UserSession[]
+  externalAccounts                    ExternalAccount[]
+  externalSolvedProblems              ExternalSolvedProblem[]
+  competitionAwards                   CompetitionAward[]
+  helperDevices                       HelperDevice[]
+  remoteTasks                         RemoteSubmissionTask[]
+  skillProfiles                       UserSkillProfile[]
+  problemMetrics                      UserProblemMetric[]
+  learningPlans                       LearningPlan[]
+  checkIns                            UserCheckIn[]
+  problemDrafts                       ProblemDraft[]
+  dailyPracticeItems                  DailyPracticeItem[]
+  favorites                           UserFavorite[]
+  wrongBook                           UserWrongBook[]
+  recommendationFeedback              RecommendationFeedback[]
+  authoredProblems                    Problem[]                @relation("ProblemAuthor")
+  communityPosts                      CommunityPost[]
+  communityReplies                    CommunityReply[]
+  communityReactions                  CommunityReaction[]
+  announcements                       Announcement[]
+  notifications                       Notification[]
+  directConversationsAsParticipantOne DirectConversation[]     @relation("DirectConversationParticipantOne")
+  directConversationsAsParticipantTwo DirectConversation[]     @relation("DirectConversationParticipantTwo")
+  sentDirectMessages                  DirectMessage[]          @relation("DirectMessageSender")
+  reportedContent                     ContentReport[]          @relation("ContentReportReporter")
+  reviewedContentReports              ContentReport[]          @relation("ContentReportReviewer")
+  problemFeedbacks                    ProblemFeedback[]        @relation("ProblemFeedbackReporter")
+  reviewedProblemFeedbacks            ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
 }
 
 model CompetitionAward {
@@ -243,7 +246,8 @@ model Problem {
   favorites          UserFavorite[]
   wrongBook          UserWrongBook[]
   problemListItems   ProblemListItem[]
-  learningPlanItems  LearningPlanItem[]
+  drafts             ProblemDraft[]
+  dailyPracticeItems DailyPracticeItem[]
   sourceInfo         ProblemSource?
   communityPosts     CommunityPost[]
   feedbacks          ProblemFeedback[]
@@ -683,14 +687,15 @@ model UserWrongBook {
 }
 
 model ProblemList {
-  id          String            @id @default(cuid())
-  name        String
-  description String?
-  createdBy   String
-  isPublic    Boolean           @default(false)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  items       ProblemListItem[]
+  id            String            @id @default(cuid())
+  name          String
+  description   String?
+  createdBy     String
+  isPublic      Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  items         ProblemListItem[]
+  learningPlans LearningPlan[]
 }
 
 model ProblemListItem {
@@ -929,44 +934,62 @@ model UserProblemMetric {
 }
 
 model LearningPlan {
-  id          String                @id @default(cuid())
-  userId      String
-  name        String
-  description String?
-  type        String                @default("DAILY")
-  startDate   DateTime
-  endDate     DateTime
-  dailyTarget Int                   @default(3)
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
-  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items       LearningPlanItem[]
-  checkIns    LearningPlanCheckIn[]
+  id            String      @id @default(cuid())
+  userId        String
+  problemListId String
+  status        String      @default("ACTIVE")
+  startedAt     DateTime    @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problemList   ProblemList @relation(fields: [problemListId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, problemListId])
+  @@index([userId, status])
+  @@index([problemListId])
 }
 
-model LearningPlanItem {
-  id               String       @id @default(cuid())
-  planId           String
-  problemId        String?
-  knowledgePointId String?
-  dayIndex         Int          @default(0)
-  type             String       @default("PRACTICE")
-  completed        Boolean      @default(false)
-  plan             LearningPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  problem          Problem?     @relation(fields: [problemId], references: [id], onDelete: SetNull)
+model UserCheckIn {
+  id        String   @id @default(cuid())
+  userId    String
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([planId, dayIndex])
+  @@unique([userId, date])
+  @@index([userId])
 }
 
-model LearningPlanCheckIn {
-  id        String       @id @default(cuid())
-  planId    String
-  date      DateTime
-  createdAt DateTime     @default(now())
-  plan      LearningPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+model ProblemDraft {
+  id         String   @id @default(cuid())
+  userId     String
+  problemId  String
+  language   String
+  sourceCode String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem    Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
 
-  @@unique([planId, date])
-  @@index([planId])
+  @@unique([userId, problemId])
+  @@index([userId, updatedAt])
+}
+
+model DailyPracticeItem {
+  id        String   @id @default(cuid())
+  userId    String
+  problemId String
+  date      DateTime @db.Date
+  order     Int
+  source    String   @default("UNSOLVED")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, order])
+  @@unique([userId, date, problemId])
+  @@index([userId, date])
 }
 
 model RecommendationFeedback {

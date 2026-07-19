@@ -11,9 +11,14 @@ import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { renderMarkdownWithMath } from '../utils/markdown';
 import { pointDifficultyLabel } from '../utils/pointDifficulty';
+import { Star } from '@lucide/vue';
+import ProblemStateBadges from '../components/ProblemStateBadges.vue';
+import { useAuthStore } from '../stores/auth';
 
 const route = useRoute();
+const auth = useAuthStore();
 const problem = ref<any>(null);
+const problemState = ref<any>(null);
 const code = ref('');
 const language = ref('cpp');
 const result = ref<any>(null);
@@ -26,6 +31,9 @@ let pollTimer: any = null;
 let visibilityCleanupId: any = null;
 const editorHost = ref<HTMLElement | null>(null);
 const pollExhausted = ref(false);
+const wrongResolvedOpen = ref(false);
+const resolvingWrong = ref(false);
+let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const currentVersion = computed(() => problem.value?.versions?.[0] || {});
 const sampleExamples = computed(() => {
   const version = currentVersion.value;
@@ -86,22 +94,32 @@ onMounted(async () => {
   try {
     const { data } = await api.get(`/api/problems/${route.params.id}`);
     problem.value = data;
+    if (auth.token) {
+      problemState.value = (await api.get(`/api/learning/problem-states/${route.params.id}`)).data;
+      if (problemState.value?.draft?.language) language.value = problemState.value.draft.language;
+      if (problemState.value?.status === 'PASSED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
+    }
   } catch (e: any) {
     errorMsg.value = '题目加载失败';
   }
   await nextTick();
-  createEditor();
+  createEditor(problemState.value?.draft?.sourceCode);
 });
 
 onUnmounted(() => {
+  if (draftSaveTimer) {
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = null;
+    void persistDraft();
+  }
   cmView?.destroy();
   if (pollTimer) clearInterval(pollTimer);
   if (visibilityCleanupId) clearInterval(visibilityCleanupId);
 });
 
-function createEditor() {
+function createEditor(initialCode?: string) {
   if (!editorHost.value) return;
-  const templateCode = languageTemplates[language.value];
+  const templateCode = initialCode || languageTemplates[language.value];
   code.value = templateCode;
 
   const state = EditorState.create({
@@ -111,7 +129,10 @@ function createEditor() {
       langExtensions[language.value]?.() || cpp(),
       oneDark,
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) code.value = update.state.doc.toString();
+        if (update.docChanged) {
+          code.value = update.state.doc.toString();
+          scheduleDraftSave();
+        }
       }),
       
     ],
@@ -135,14 +156,78 @@ watch(language, () => {
       langExtensions[language.value]?.() || cpp(),
       oneDark,
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) code.value = update.state.doc.toString();
+        if (update.docChanged) {
+          code.value = update.state.doc.toString();
+          scheduleDraftSave();
+        }
       }),
       
     ],
   });
   cmView = new EditorView({ state, parent: editorHost.value });
   code.value = newCode;
+  if (!isTemplateCode(newCode)) scheduleDraftSave();
 });
+
+function isTemplateCode(value: string) {
+  return Object.values(languageTemplates).some((template) => template.trim() === value.trim());
+}
+
+function scheduleDraftSave() {
+  if (!auth.token || !problem.value) return;
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    draftSaveTimer = null;
+    void persistDraft();
+  }, 800);
+}
+
+async function persistDraft() {
+  if (!auth.token || !problem.value) return;
+  try {
+    if (!code.value.trim() || isTemplateCode(code.value)) {
+      if (problemState.value?.hasDraft) {
+        problemState.value = (await api.delete(`/api/learning/problem-drafts/${problem.value.id}`)).data;
+      }
+      return;
+    }
+    problemState.value = (await api.put(`/api/learning/problem-drafts/${problem.value.id}`, {
+      language: language.value,
+      sourceCode: code.value,
+    })).data;
+  } catch {
+    // A failed background save must not interrupt editing or submission.
+  }
+}
+
+async function refreshProblemState() {
+  if (!auth.token || !problem.value) return;
+  problemState.value = (await api.get(`/api/learning/problem-states/${problem.value.id}`)).data;
+}
+
+async function toggleFavorite() {
+  if (!problem.value || !problemState.value) return;
+  try {
+    if (problemState.value.favorite) await api.delete(`/api/learning/favorites/${problem.value.id}`);
+    else await api.post('/api/learning/favorites', { problemId: problem.value.id });
+    await refreshProblemState();
+  } catch (error: any) {
+    errorMsg.value = error?.response?.data?.message || '收藏状态更新失败';
+  }
+}
+
+async function resolveWrongBook(favorite: boolean) {
+  if (!problem.value || resolvingWrong.value) return;
+  resolvingWrong.value = true;
+  try {
+    problemState.value = (await api.post(`/api/learning/wrong-book/${problem.value.id}/resolve`, { favorite })).data;
+    wrongResolvedOpen.value = false;
+  } catch (error: any) {
+    errorMsg.value = error?.response?.data?.message || '错题状态处理失败';
+  } finally {
+    resolvingWrong.value = false;
+  }
+}
 
 const cfDialog = ref(false);
 const cfData = ref<any>(null);
@@ -180,6 +265,7 @@ async function submitCode() {
   result.value = null;
   isExternal.value = false;
   try {
+    await persistDraft();
     const { data } = await api.post('/api/submissions', {
       problemId: problem.value.id,
       language: language.value,
@@ -236,7 +322,7 @@ function startPolling(id: string) {
 
   function doPoll() {
     attempts++;
-    api.get(`/api/submissions/${id}`).then(({ data }) => {
+    api.get(`/api/submissions/${id}`).then(async ({ data }) => {
       errorCount = 0; // reset on success
       // Preserve mode from the initial submission response if the poll
       // response does not include it (raw Prisma data has no mode field)
@@ -254,6 +340,8 @@ function startPolling(id: string) {
         pollTimer = null;
         clearInterval(visibilityCleanupId);
         visibilityCleanupId = null;
+        await refreshProblemState();
+        if (data.status === 'ACCEPTED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
         return;
       }
       if (attempts >= maxAttempts) {
@@ -321,7 +409,13 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 
     <template v-if="problem">
       <div class="problem-header">
-        <h2>{{ problem.title }}</h2>
+        <div class="problem-title-row">
+          <h2>{{ problem.title }}</h2>
+          <button v-if="problemState" class="favorite-command" :class="{ active: problemState.favorite }" @click="toggleFavorite">
+            <Star :size="16" :fill="problemState.favorite ? 'currentColor' : 'none'" />{{ problemState.favorite ? '已收藏' : '收藏' }}
+          </button>
+        </div>
+        <ProblemStateBadges v-if="problemState" class="detail-state" :state="problemState" />
         <div class="problem-meta">
           <span class="meta-item">⏱ {{ problem.timeLimit }}ms</span>
           <span class="meta-item">📦 {{ problem.memoryLimit }}MB</span>
@@ -449,6 +543,18 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
         </div>
       </div>
     </div>
+
+    <div v-if="wrongResolvedOpen" class="wrong-resolved-overlay" role="dialog" aria-modal="true" aria-labelledby="wrong-resolved-title">
+      <section class="wrong-resolved-dialog">
+        <span class="resolved-icon">✓</span>
+        <h2 id="wrong-resolved-title">这道错题已经通过</h2>
+        <p>移出错题本前，是否收藏以便后续回看？</p>
+        <div class="resolved-actions">
+          <button class="keep-favorite" :disabled="resolvingWrong" @click="resolveWrongBook(true)"><Star :size="16" />收藏并移出错题</button>
+          <button class="remove-only" :disabled="resolvingWrong" @click="resolveWrongBook(false)">直接移出错题</button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -456,6 +562,11 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .problem-page { max-width: 100%; margin: 0; padding: 20px 24px; }
 .problem-header { margin-bottom: 20px; }
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
+.problem-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.problem-title-row h2 { min-width: 0; }
+.favorite-command { display: inline-flex; min-height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid #d4dce5; border-radius: 6px; color: #667587; background: #fff; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.favorite-command:hover, .favorite-command.active { border-color: #e2c45c; color: #846100; background: #fff8d8; }
+.detail-state { margin-bottom: 10px; }
 .problem-meta { display: flex; gap: 16px; flex-wrap: wrap; }
 .meta-item { font-size: 13px; color: #666; background: #f0f0f0; padding: 3px 10px; border-radius: 4px; }
 .content-split { display: grid; grid-template-columns: 1fr 480px; gap: 20px; align-items: start; }
@@ -557,6 +668,16 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .cf-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #999; }
 .cf-close:hover { color: #333; }
 .cf-dialog-body { padding: 16px 20px; }
+.wrong-resolved-overlay { position: fixed; inset: 0; z-index: 11000; display: grid; place-items: center; padding: 20px; background: rgba(18, 31, 43, .58); }
+.wrong-resolved-dialog { width: min(430px, 100%); padding: 28px; border: 1px solid #dbe4ed; border-radius: 8px; color: #26384d; text-align: center; background: #fff; box-shadow: 0 22px 60px rgba(18, 31, 43, .24); }
+.resolved-icon { display: grid; width: 44px; height: 44px; margin: 0 auto 14px; place-items: center; border-radius: 50%; color: #fff; background: #25815f; font-size: 23px; font-weight: 800; }
+.wrong-resolved-dialog h2 { margin: 0 0 8px; font-size: 21px; }
+.wrong-resolved-dialog p { color: #718094; font-size: 13px; }
+.resolved-actions { display: grid; grid-template-columns: 1.35fr 1fr; gap: 9px; margin-top: 22px; }
+.resolved-actions button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
+.keep-favorite { border: 1px solid #e2c45c; color: #7b5b00; background: #fff8d8; }
+.remove-only { border: 1px solid #cbd6e0; color: #526579; background: #f7f9fb; }
+.resolved-actions button:disabled { opacity: .58; cursor: wait; }
 .cf-step { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 14px; }
 .cf-step-num { width: 24px; height: 24px; border-radius: 50%; background: #3498db; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .cf-step-text { flex: 1; }
