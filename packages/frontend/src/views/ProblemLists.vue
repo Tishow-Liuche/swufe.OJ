@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useStorage } from '@vueuse/core';
-import { BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
+import { ArrowUpDown, BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, PanelLeftClose, PanelLeftOpen, Plus, Save, Search, Trash2 } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRouter } from 'vue-router';
@@ -456,22 +456,22 @@ onMounted(loadAll);
       </section>
 
       <section v-else-if="activeTab === 'lists'" class="lists-section">
-        <div class="section-toolbar"><div><span class="section-kicker">CURATED PRACTICE</span><h2>我的题单</h2></div><button v-if="auth.isLoggedIn()" class="primary-btn" @click="openNewList">新建题单</button></div>
+        <div class="section-toolbar"><div><span class="section-kicker">CURATED PRACTICE</span><h2>我的题单</h2></div><button v-if="auth.isLoggedIn()" class="primary-btn" @click="openNewList"><Plus :size="17" />新建题单</button></div>
         <div v-if="!auth.isLoggedIn()" class="empty-state">登录后创建和编辑题单。</div>
         <div v-else class="lists-workspace">
           <aside class="list-sidebar"><button v-for="list in lists" :key="list.id" :class="['list-nav-item', { active: selectedListId === list.id }]" @click="selectList(list.id)"><span>{{ list.isPublic ? '公开' : '私有' }}</span><strong>{{ list.name }}</strong><small>{{ list._count?.items || 0 }} 题</small></button><div v-if="!lists.length" class="empty-state compact">还没有题单。</div></aside>
           <main v-if="selectedList" class="list-editor panel">
-            <div class="editor-heading"><div><span class="section-kicker">{{ selectedListOwned ? 'LIST EDITOR' : 'PUBLIC LIST' }}</span><h2>{{ selectedList.name }}</h2><p>{{ selectedList.isPublic ? '公开题单' : '仅自己可见' }} · {{ selectedListItems.length }} 道题</p></div><div v-if="selectedListOwned" class="inline-actions"><button class="secondary-btn" @click="deleteList">删除</button><button class="primary-btn" @click="updateList">保存设置</button></div></div>
+            <div class="editor-heading"><div><span class="section-kicker">{{ selectedListOwned ? 'LIST EDITOR' : 'PUBLIC LIST' }}</span><h2>{{ selectedList.name }}</h2><p>{{ selectedList.isPublic ? '公开题单' : '仅自己可见' }} · {{ selectedListItems.length }} 道题</p></div><div v-if="selectedListOwned" class="inline-actions"><button class="secondary-btn danger-command" @click="deleteList"><Trash2 :size="16" />删除</button><button class="primary-btn" @click="updateList"><Save :size="16" />保存设置</button></div></div>
             <div v-if="selectedListOwned" class="list-settings"><label>名称<input v-model="listForm.name" maxlength="80"></label><label>说明<textarea v-model="listForm.description" rows="2" maxlength="500"></textarea></label><label class="switch-label"><input v-model="listForm.isPublic" type="checkbox"><span>公开题单</span></label></div>
             <p v-else class="public-description">{{ selectedList.description || '这个公开题单没有说明。' }}</p>
-            <div class="subheading"><div><h3>题目排序</h3><small>{{ sortDirectionLabel }}</small></div><div v-if="selectedListOwned" class="search-inline"><input v-model="listSearch" placeholder="按标题、站内 ID 或平台题号搜索" @keyup.enter="searchListProblems"><button class="secondary-btn" :disabled="listProblemsLoading" @click="searchListProblems">{{ listProblemsLoading ? '加载中' : '搜索' }}</button></div></div>
+            <div class="subheading"><div><h3>题目排序</h3><small>{{ sortDirectionLabel }}</small></div><div v-if="selectedListOwned" class="search-inline"><input v-model="listSearch" placeholder="按标题、站内 ID 或平台题号搜索" @keyup.enter="searchListProblems"><button class="secondary-btn" :disabled="listProblemsLoading" @click="searchListProblems"><Search :size="15" />{{ listProblemsLoading ? '加载中' : '搜索' }}</button></div></div>
             <div class="sort-toolbar" aria-label="题单排序方式">
               <div class="sort-modes">
                 <button :class="{ active: listSort === 'difficulty' }" @click="selectListSort('difficulty')">按难度</button>
                 <button :class="{ active: listSort === 'number' }" @click="selectListSort('number')">按编号</button>
                 <button :class="{ active: listSort === 'joined' }" @click="selectListSort('joined')">按加入时间</button>
               </div>
-              <button class="sort-direction" :title="`倒转排序，当前为${sortDirectionLabel}`" aria-label="倒转排序" @click="reverseListSort">{{ listSortDirection === 'asc' ? '↑' : '↓' }}</button>
+              <button class="sort-direction" :title="`倒转排序，当前为${sortDirectionLabel}`" aria-label="倒转排序" @click="reverseListSort"><ArrowUpDown :size="16" /></button>
             </div>
             <div v-if="selectedListOwned" class="problem-catalog"><div class="catalog-heading"><span>站内题目</span><small>{{ listProblemKeyword ? `“${listProblemKeyword}”的搜索结果` : '最近发布' }}</small></div><div v-if="listProblems.length" class="search-results"><button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)"><span><strong>{{ problem.title }}</strong><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }}{{ problem.sourceInfo?.remoteProblemId ? ` · ${problem.sourceInfo.remoteProblemId}` : '' }}</small></span><b>＋加入</b></button></div><div v-else-if="listProblemsLoading" class="problem-search-empty">正在获取站内题目...</div><div v-else-if="listProblemsLoaded" class="problem-search-empty">{{ listProblemKeyword ? '没有找到匹配题目，请尝试标题或平台题号。' : '暂无其他可加入的已发布题目。' }}</div></div>
             <div v-if="selectedListItems.length" class="ordered-list"><div v-for="(item, index) in sortedListItems" :key="item.id" class="ordered-row"><span class="order-number">{{ index + 1 }}</span><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span v-if="listSort === 'joined'" class="joined-at">{{ new Date(item.createdAt).toLocaleDateString() }}</span><span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span><button v-if="selectedListOwned" class="icon-btn danger" title="移出题单" @click="removeFromList(item.id)">×</button><button v-else class="icon-btn" title="打开题目" @click="openProblem(item.problemId)">›</button></div></div>
@@ -672,45 +672,187 @@ textarea { resize: vertical; }
 }
 @media (min-width: 641px) { .notice { left: auto; right: 24px; max-width: 420px; } }
 
-/* Product-wide learning workspace skin: aligned with Home and Contests. */
-.learning-page { --workspace-navy:#173b66; --workspace-blue:#2469ad; --workspace-pale:#eaf3fc; --workspace-line:#dfe7ef; display:flex; width:100%; max-width:none; min-height:calc(100vh - 56px); margin:0; padding:0; background:#f3f5f7; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
-.learning-main { min-width:0; flex:1; padding:26px 28px 72px; }.learning-main>.learning-header,.learning-main>.login-banner,.learning-main>.learning-content { width:min(1180px,100%); margin-right:auto; margin-left:auto; }
-.learning-header { min-height:166px; padding:28px 32px; border-radius:8px; color:#fff; background:var(--workspace-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
-.learning-header .eyebrow { color:#8fc2ec; letter-spacing:0; }
-.learning-header h1 { color:#fff; font-size:34px; letter-spacing:0; }
-.learning-header p { color:#d7e6f4; }
-.header-actions { flex-wrap:wrap; }
-.header-actions .secondary-btn { color:#eaf4fd; border:1px solid rgba(255,255,255,.24); background:rgba(255,255,255,.1); }
-.header-actions .primary-btn { color:#173b66; background:#f2c66d; }
-.primary-btn,.secondary-btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; border-radius:6px; }
-.primary-btn { background:var(--workspace-blue); }
-.primary-btn:hover { background:#1b568d; }
-.learning-sidebar { position:sticky; top:56px; display:flex; width:264px; height:calc(100vh - 56px); flex:0 0 264px; align-self:flex-start; padding:22px 14px; overflow:hidden; flex-direction:column; border-right:1px solid var(--workspace-line); background:#f8fbfe; transition:width .18s,flex-basis .18s; }
-.learning-sidebar-title { display:flex; align-items:center; gap:10px; padding:0 7px 18px; }.learning-sidebar-icon { display:grid; width:38px; height:38px; flex:0 0 38px; place-items:center; border-radius:8px; color:#1c5688; background:#dcecf9; }.learning-sidebar-copy { display:grid; min-width:0; gap:2px; }.learning-sidebar-copy strong { color:#29435d; font-size:13px; }.learning-sidebar-copy small { color:#8492a2; font-size:10px; }.learning-sidebar-collapse { display:grid; width:34px; height:34px; flex:0 0 34px; margin-left:auto; place-items:center; border:0; border-radius:7px; color:#6e7f91; background:transparent; cursor:pointer; }.learning-sidebar-collapse:hover { color:#245f94; background:#e7f0f8; }.learning-sidebar-label { margin:4px 9px 9px; color:#8493a5; font-size:10px; font-weight:900; }
-.workspace-nav { display:grid; gap:5px; }
-.workspace-nav button { display:grid; grid-template-columns:22px minmax(0,1fr) auto; min-height:52px; align-items:center; gap:9px; width:100%; padding:7px 10px; border:0; border-radius:7px; color:#65768a; text-align:left; background:transparent; font:inherit; cursor:pointer; }
-.workspace-nav button:hover { color:#1f5e96; background:#eef6fd; }
-.workspace-nav button.active { color:#fff; background:var(--workspace-navy); box-shadow:0 6px 14px rgba(23,59,102,.18); }
-.workspace-nav button>span { display:grid; gap:2px; min-width:0; }.workspace-nav button strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }.workspace-nav button small { color:#8a98a8; font-size:9px; }.workspace-nav button.active small { color:#cbddee; }
-.workspace-nav button b { display:grid; min-width:21px; height:20px; place-items:center; padding:0 4px; border-radius:5px; color:#356b99; background:#e1edf8; font-size:10px; }.workspace-nav button.active b { color:#fff; background:rgba(255,255,255,.15); }
-.learning-content { min-width:0; margin-top:22px!important; }
-.learning-page.sidebar-collapsed .learning-sidebar { width:72px; flex-basis:72px; padding-right:10px; padding-left:10px; }.sidebar-collapsed .learning-sidebar-icon,.sidebar-collapsed .learning-sidebar-copy,.sidebar-collapsed .learning-sidebar-label { display:none; }.sidebar-collapsed .learning-sidebar-title { justify-content:center; padding-right:0; padding-left:0; }.sidebar-collapsed .learning-sidebar-collapse { margin-left:0; }.sidebar-collapsed .workspace-nav button { grid-template-columns:1fr; justify-items:center; padding-right:0; padding-left:0; }.sidebar-collapsed .workspace-nav button>span,.sidebar-collapsed .workspace-nav button>b { display:none; }
-.panel,.public-section,.metric,.login-banner { border-color:var(--workspace-line); border-radius:8px; box-shadow:0 7px 20px rgba(23,59,102,.04); }
-.metric { border-top:3px solid #8fb9dc; }
-.metric strong,.plan-meta strong,.daily-progress strong { color:#1f6099; }
-.section-kicker,.text-btn,.plan-type,.list-nav-item span { color:#3977aa; letter-spacing:0; }
-.text-btn:hover { color:#174f81; }
-.list-sidebar { border-right-color:var(--workspace-line); background:#f8fbfe; }
-.list-nav-item { border-radius:7px; }
-.list-nav-item:hover { background:#edf5fc; }
-.list-nav-item.active { border-color:#91b9da; background:#edf6fd; }
-input:focus,textarea:focus { border-color:#3979ad; box-shadow:0 0 0 2px #deedf9; }
-.switch-label input { accent-color:var(--workspace-blue); }
-.sort-modes button.active,.sort-direction:hover { border-color:var(--workspace-blue); color:#1f6098; background:#edf6fd; }
-.sort-direction { color:#1f6098; }
-.progress-track i { background:var(--workspace-blue); }
-.daily-type { color:#28679d; background:#e6f1fb; }
-.public-list:hover { border-color:#8fb7d8; box-shadow:0 10px 22px rgba(23,59,102,.09); }
-.modal { border-radius:8px; }
-@media(max-width:860px){.learning-page{display:block}.learning-main{padding:18px 16px 52px}.learning-sidebar,.learning-page.sidebar-collapsed .learning-sidebar{position:static;width:auto;height:auto;padding:12px;border-right:0}.learning-sidebar-title{display:none}.workspace-nav{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:5px;border:1px solid var(--workspace-line);border-radius:8px;background:#fff}.workspace-nav button,.sidebar-collapsed .workspace-nav button{grid-template-columns:22px minmax(0,1fr) auto;justify-items:initial;min-height:46px;padding:7px 10px}.workspace-nav button:last-child{grid-column:1/-1}.workspace-nav button small,.sidebar-collapsed .workspace-nav button small,.sidebar-collapsed .workspace-nav button>span,.sidebar-collapsed .workspace-nav button>b{display:initial}.workspace-nav button>span,.sidebar-collapsed .workspace-nav button>span{display:grid}.workspace-nav button>b,.sidebar-collapsed .workspace-nav button>b{display:grid}.learning-content{margin-top:20px!important}.learning-header{align-items:flex-start;flex-direction:column}.learning-header h1{font-size:29px}}
+/* Light learning workspace: shared with the problem library and teacher tools. */
+.learning-page {
+  --workspace-blue: #1f5eff;
+  --workspace-pale: #e7efff;
+  --workspace-line: #dce5ef;
+  display: flex;
+  width: 100%;
+  max-width: none;
+  min-height: calc(100vh - 56px);
+  margin: 0;
+  padding: 0;
+  color: #26384d;
+  background: #f3f6f9;
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
+}
+.learning-main { min-width: 0; flex: 1; padding: 26px 28px 72px; }
+.learning-main > .learning-header,
+.learning-main > .login-banner,
+.learning-main > .learning-content { width: min(1180px, 100%); margin-right: auto; margin-left: auto; }
+.learning-header {
+  min-height: 150px;
+  padding: 26px 30px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+  color: #1f2a37;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(31, 66, 104, .08);
+}
+.learning-header .eyebrow { color: #3977aa; letter-spacing: 0; }
+.learning-header h1 { color: #1f2a37; font-size: 34px; letter-spacing: 0; }
+.learning-header p { color: #66778a; }
+.header-actions { flex-wrap: wrap; }
+.header-actions .secondary-btn { color: #225d91; border: 1px solid #bfd1e2; background: #f8fbfe; }
+.header-actions .secondary-btn:hover { border-color: #8fb3d2; color: #174f81; background: #edf5fc; }
+.primary-btn,
+.secondary-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 6px; }
+.primary-btn { background: var(--workspace-blue); }
+.primary-btn:hover { background: #174bd1; }
+.secondary-btn.danger-command { color: #a8463f; border: 1px solid #e8c5c2; background: #fff8f7; }
+.secondary-btn.danger-command:hover { color: #8f302a; border-color: #dca9a5; background: #fff0ef; }
+.learning-sidebar {
+  position: sticky;
+  top: 56px;
+  display: flex;
+  width: 264px;
+  height: calc(100vh - 56px);
+  flex: 0 0 264px;
+  align-self: flex-start;
+  padding: 22px 14px;
+  overflow: hidden;
+  flex-direction: column;
+  border-right: 1px solid var(--workspace-line);
+  background: #f8fafc;
+  transition: width .18s, flex-basis .18s;
+}
+.learning-sidebar-title { display: flex; align-items: center; gap: 10px; padding: 0 7px 18px; }
+.learning-sidebar-icon { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 8px; color: var(--workspace-blue); background: var(--workspace-pale); }
+.learning-sidebar-copy { display: grid; min-width: 0; gap: 2px; }
+.learning-sidebar-copy strong { color: #29435d; font-size: 13px; }
+.learning-sidebar-copy small { color: #8492a2; font-size: 10px; }
+.learning-sidebar-collapse { display: grid; width: 34px; height: 34px; flex: 0 0 34px; margin-left: auto; place-items: center; border: 0; border-radius: 7px; color: #6e7f91; background: transparent; cursor: pointer; }
+.learning-sidebar-collapse:hover { color: #225d91; background: #eaf1f7; }
+.learning-sidebar-label { margin: 4px 9px 9px; color: #8493a5; font-size: 10px; font-weight: 900; }
+.workspace-nav { display: grid; gap: 5px; }
+.workspace-nav button { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; min-height: 52px; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border: 0; border-radius: 7px; color: #65768a; text-align: left; background: transparent; font: inherit; cursor: pointer; }
+.workspace-nav button:hover { color: #245f94; background: #eef4f9; }
+.workspace-nav button.active { color: var(--workspace-blue); background: var(--workspace-pale); box-shadow: none; }
+.workspace-nav button > span { display: grid; gap: 2px; min-width: 0; }
+.workspace-nav button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.workspace-nav button small { color: #8a98a8; font-size: 9px; }
+.workspace-nav button.active small { color: var(--workspace-blue); }
+.workspace-nav button b { display: grid; min-width: 21px; height: 20px; place-items: center; padding: 0 4px; border-radius: 5px; color: #65768a; background: #edf1f5; font-size: 10px; }
+.workspace-nav button.active b { color: var(--workspace-blue); background: #dbe7ff; }
+.learning-content { min-width: 0; margin-top: 22px !important; }
+.learning-page.sidebar-collapsed .learning-sidebar { width: 72px; flex-basis: 72px; padding-right: 10px; padding-left: 10px; }
+.sidebar-collapsed .learning-sidebar-icon,
+.sidebar-collapsed .learning-sidebar-copy,
+.sidebar-collapsed .learning-sidebar-label { display: none; }
+.sidebar-collapsed .learning-sidebar-title { justify-content: center; padding-right: 0; padding-left: 0; }
+.sidebar-collapsed .learning-sidebar-collapse { margin-left: 0; }
+.sidebar-collapsed .workspace-nav button { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }
+.sidebar-collapsed .workspace-nav button > span,
+.sidebar-collapsed .workspace-nav button > b { display: none; }
+.panel,
+.public-section,
+.metric,
+.login-banner { border-color: var(--workspace-line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.metric { border-top: 3px solid #8fb9dc; }
+.metric strong,
+.plan-meta strong,
+.daily-progress strong { color: #1f6099; }
+.section-kicker,
+.text-btn,
+.plan-type,
+.list-nav-item span { color: #3977aa; letter-spacing: 0; }
+.text-btn:hover { color: #174f81; }
+.lists-section { overflow: hidden; border: 1px solid var(--workspace-line); border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(31, 66, 104, .05); }
+.lists-section > .section-toolbar { min-height: 80px; padding: 18px 22px; border-bottom: 1px solid var(--workspace-line); }
+.lists-section > .section-toolbar h2 { margin-top: 3px; }
+.lists-workspace { grid-template-columns: 240px minmax(0, 1fr); gap: 0; min-height: 520px; }
+.list-sidebar { padding: 14px; border-right: 1px solid var(--workspace-line); background: #f8fafc; }
+.list-nav-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'visibility count' 'name count'; align-items: center; gap: 4px 10px; min-height: 64px; margin-bottom: 6px; padding: 10px 12px; border: 1px solid transparent; border-radius: 7px; }
+.list-nav-item:hover { border-color: #d8e3ed; background: #fff; }
+.list-nav-item.active { border-color: #c9d9ff; color: var(--workspace-blue); background: var(--workspace-pale); }
+.list-nav-item span { grid-area: visibility; font-size: 9px; letter-spacing: 0; }
+.list-nav-item strong { grid-area: name; min-width: 0; margin: 0; overflow: hidden; color: #30465d; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.list-nav-item small { display: grid; grid-area: count; min-width: 40px; height: 30px; place-items: center; border-radius: 6px; color: #78889a; background: #edf1f5; font-size: 10px; }
+.list-nav-item.active strong,
+.list-nav-item.active span { color: var(--workspace-blue); }
+.list-nav-item.active small { color: var(--workspace-blue); background: #dbe7ff; }
+.list-editor.panel { min-width: 0; padding: 24px 26px; border: 0; border-radius: 0; background: #fff; box-shadow: none; }
+.list-editor .editor-heading { min-height: 78px; padding-bottom: 18px; border-bottom-color: var(--workspace-line); }
+.list-editor .editor-heading h2 { margin-top: 4px; color: #26384d; }
+.list-settings { margin: 0 -26px; padding: 18px 26px; border-bottom: 1px solid var(--workspace-line); background: #f8fafc; }
+.list-settings input,
+.list-settings textarea,
+.search-inline input { border-color: #cbd8e4; background: #fff; }
+.list-editor .search-inline,
+.list-editor .search-inline input { min-width: 0; }
+input:focus,
+textarea:focus { border-color: #7fa9e8; box-shadow: 0 0 0 3px rgba(31, 94, 255, .09); }
+.switch-label input { accent-color: var(--workspace-blue); }
+.list-editor .subheading { margin-top: 22px; }
+.sort-toolbar { width: max-content; gap: 5px; margin-bottom: 14px; padding: 4px; border: 1px solid #dce4ec; border-radius: 7px; background: #f0f3f6; }
+.sort-modes { gap: 3px; }
+.sort-modes button,
+.sort-direction { height: 32px; border: 0; border-radius: 5px; background: transparent; }
+.sort-modes button + button { margin-left: 0; border-left-color: transparent; }
+.sort-modes button:first-child,
+.sort-modes button:last-child { border-radius: 5px; }
+.sort-modes button.active { color: var(--workspace-blue); background: #fff; box-shadow: 0 2px 6px rgba(31, 66, 104, .08); }
+.sort-direction { display: grid; width: 34px; place-items: center; color: #597087; background: #fff; }
+.sort-direction:hover { color: var(--workspace-blue); background: #fff; }
+.problem-catalog { margin: 12px 0 16px; border-color: #dce5ef; background: #f8fafc; }
+.catalog-heading { min-height: 42px; padding: 10px 13px; color: #34536f; }
+.problem-catalog .search-results button:hover { background: #eef4ff; }
+.problem-catalog .search-results b { color: var(--workspace-blue); }
+.ordered-list { margin-top: 15px; overflow: hidden; border: 1px solid var(--workspace-line); border-radius: 7px; }
+.ordered-row { min-height: 54px; padding: 0 12px; border-bottom-color: #e9eef3; }
+.ordered-row:hover { background: #f8fafc; }
+.order-number { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: #68798c; background: #edf2f6; }
+.difficulty { padding: 4px 7px; border-radius: 5px; color: #557086; background: #eef3f7; }
+.problem-link { color: #225f96; }
+.problem-link:hover { color: var(--workspace-blue); }
+.progress-track i { background: var(--workspace-blue); }
+.daily-type { color: #28679d; background: #e6f1fb; }
+.public-list:hover { border-color: #8fb7d8; box-shadow: 0 10px 22px rgba(31, 66, 104, .09); }
+.modal { border-radius: 8px; }
+@media (max-width: 980px) {
+  .lists-workspace { grid-template-columns: 210px minmax(0, 1fr); }
+}
+@media (max-width: 860px) {
+  .learning-page { display: block; }
+  .learning-main { padding: 18px 16px 52px; }
+  .learning-sidebar,
+  .learning-page.sidebar-collapsed .learning-sidebar { position: static; width: auto; height: auto; padding: 12px; border-right: 0; }
+  .learning-sidebar-title { display: none; }
+  .workspace-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 5px; border: 1px solid var(--workspace-line); border-radius: 8px; background: #fff; }
+  .workspace-nav button,
+  .sidebar-collapsed .workspace-nav button { grid-template-columns: 22px minmax(0, 1fr) auto; justify-items: initial; min-height: 46px; padding: 7px 10px; }
+  .workspace-nav button small,
+  .sidebar-collapsed .workspace-nav button small,
+  .sidebar-collapsed .workspace-nav button > span,
+  .sidebar-collapsed .workspace-nav button > b { display: initial; }
+  .workspace-nav button > span,
+  .sidebar-collapsed .workspace-nav button > span { display: grid; }
+  .workspace-nav button > b,
+  .sidebar-collapsed .workspace-nav button > b { display: grid; }
+  .learning-content { margin-top: 20px !important; }
+  .learning-header { min-height: 0; align-items: flex-start; flex-direction: column; }
+  .learning-header h1 { font-size: 29px; }
+}
+@media (max-width: 720px) {
+  .lists-section > .section-toolbar { min-height: 72px; padding: 16px; }
+  .lists-workspace { grid-template-columns: 1fr; min-height: 0; }
+  .list-sidebar { display: flex; gap: 7px; padding: 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--workspace-line); }
+  .list-nav-item { min-width: 172px; margin: 0; }
+  .list-editor.panel { padding: 20px 16px; }
+  .list-editor .inline-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 8px; width: 100%; }
+  .list-editor .inline-actions button { min-width: 0; padding-right: 8px; padding-left: 8px; }
+  .list-settings { grid-template-columns: 1fr; margin: 0 -16px; padding: 16px; }
+  .sort-toolbar { width: 100%; overflow-x: auto; }
+}
 </style>
