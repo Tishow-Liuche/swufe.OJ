@@ -143,12 +143,6 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  background: #171a1f;
-  box-shadow: 0 1px 8px rgba(14, 18, 24, 0.22);
-  color: #eee;
-}
-
-.app-header.home-header {
   border-bottom: 1px solid rgba(117, 151, 207, 0.16);
   background: rgba(253, 254, 255, 0.92);
   box-shadow: 0 1px 10px rgba(79, 112, 164, 0.08);
@@ -156,29 +150,29 @@ body {
   backdrop-filter: blur(14px);
 }
 
-.home-header .logo { color: #276be8; }
+.app-header .logo { color: #276be8; }
 
-.home-header nav a,
-.home-header .header-right a {
+.app-header nav a,
+.app-header .header-right a {
   color: #53627a;
 }
 
-.home-header nav a:hover,
-.home-header .header-right a:hover {
+.app-header nav a:hover,
+.app-header .header-right a:hover {
   background: #edf4ff;
   color: #225fd0;
 }
 
-.home-header nav a.router-link-exact-active,
-.home-header .header-right a.router-link-exact-active {
+.app-header nav a.router-link-exact-active,
+.app-header .header-right a.router-link-exact-active {
   background: #e9f1ff;
   color: #2164dc;
 }
 
-.home-header .mobile-menu-toggle { color: #2f466a; }
+.app-header .mobile-menu-toggle { color: #2f466a; }
 
-.home-header .mobile-menu-toggle:hover,
-.home-header .mobile-menu-toggle:focus-visible {
+.app-header .mobile-menu-toggle:hover,
+.app-header .mobile-menu-toggle:focus-visible {
   background: #edf4ff;
   outline-color: #3e7ee6;
 }
@@ -302,13 +296,13 @@ nav a.router-link-exact-active,
     border: 0;
     border-radius: 50%;
     background: transparent;
-    color: #d9e2ec;
+    color: #2f466a;
   }
 
   .mobile-menu-toggle:hover,
   .mobile-menu-toggle:focus-visible {
-    background: rgba(255, 255, 255, 0.1);
-    outline: 2px solid #69c6ff;
+    background: #edf4ff;
+    outline: 2px solid #3e7ee6;
     outline-offset: 1px;
   }
 
@@ -322,9 +316,9 @@ nav a.router-link-exact-active,
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     padding: 14px 16px 18px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: #171a1f;
-    box-shadow: 0 8px 20px rgba(14, 18, 24, 0.24);
+    border-top: 1px solid #dce8fb;
+    background: rgba(253, 254, 255, 0.98);
+    box-shadow: 0 8px 20px rgba(67, 102, 158, 0.16);
   }
 
   .mobile-navigation a,
@@ -333,10 +327,10 @@ nav a.router-link-exact-active,
     min-height: 44px;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid #dae5f6;
     border-radius: 7px;
-    background: rgba(255, 255, 255, 0.04);
-    color: #d5dde6;
+    background: #f5f9ff;
+    color: #455a7b;
     font: inherit;
     font-size: 14px;
     text-decoration: none;
@@ -345,27 +339,6 @@ nav a.router-link-exact-active,
   .mobile-navigation a.router-link-active,
   .mobile-navigation a:hover,
   .mobile-navigation button:hover {
-    border-color: rgba(105, 198, 255, 0.35);
-    background: rgba(105, 198, 255, 0.12);
-    color: #69c6ff;
-  }
-
-  .app-shell:has(.home-header) .mobile-navigation {
-    border-top-color: #dce8fb;
-    background: rgba(253, 254, 255, 0.98);
-    box-shadow: 0 8px 20px rgba(67, 102, 158, 0.16);
-  }
-
-  .app-shell:has(.home-header) .mobile-navigation a,
-  .app-shell:has(.home-header) .mobile-navigation button {
-    border-color: #dae5f6;
-    background: #f5f9ff;
-    color: #455a7b;
-  }
-
-  .app-shell:has(.home-header) .mobile-navigation a.router-link-active,
-  .app-shell:has(.home-header) .mobile-navigation a:hover,
-  .app-shell:has(.home-header) .mobile-navigation button:hover {
     border-color: #a9c7f5;
     background: #e8f2ff;
     color: #2164dc;
