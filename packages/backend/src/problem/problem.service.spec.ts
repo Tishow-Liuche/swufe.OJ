@@ -2,6 +2,15 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import AdmZip from 'adm-zip';
 import { ProblemService } from './problem.service';
 
+jest.mock('sanitize-html', () => ({
+  __esModule: true,
+  default: (html: string) => String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\s+on\w+="[^"]*"/gi, '')
+    .replace(/<=/g, '&lt;=')
+    .replace(/<img([^>]*)>/gi, '<img$1 />'),
+}));
+
 describe('ProblemService createFull with judge data', () => {
   let service: ProblemService;
   let prisma: any;
@@ -16,6 +25,7 @@ describe('ProblemService createFull with judge data', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn(),
         findMany: jest.fn(),
+        groupBy: jest.fn(),
         count: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
@@ -35,6 +45,10 @@ describe('ProblemService createFull with judge data', () => {
       problemTag: {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
+        groupBy: jest.fn(),
+      },
+      problemSource: {
+        groupBy: jest.fn(),
       },
       checker: {
         upsert: jest.fn(),
@@ -101,6 +115,57 @@ describe('ProblemService createFull with judge data', () => {
 
     expect(prisma.problem.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ createdById: 'teacher-1' }),
+    }));
+  });
+
+  it('returns full published problem metadata without sampling the first page', async () => {
+    prisma.problem.count
+      .mockResolvedValueOnce(24292)
+      .mockResolvedValueOnce(2);
+    prisma.problemTag.groupBy.mockResolvedValue([
+      { name: 'dp', _count: { name: 1200 } },
+      { name: 'math', _count: { name: 980 } },
+      { name: '构造', _count: { name: 1 } },
+    ]);
+    prisma.problem.groupBy.mockResolvedValue([
+      { difficulty: 'POINT_0', _count: { _all: 300 } },
+      { difficulty: 'POINT_4', _count: { _all: 42 } },
+    ]);
+    prisma.problemSource.groupBy.mockResolvedValue([
+      { platform: 'CODEFORCES', _count: { _all: 10000 } },
+      { platform: 'LUOGU', _count: { _all: 14000 } },
+      { platform: 'QOJ', _count: { _all: 290 } },
+    ]);
+
+    const result = await service.getMetadata();
+
+    expect(result).toEqual({
+      total: 24292,
+      tags: [
+        { name: 'dp', count: 1200 },
+        { name: 'math', count: 980 },
+        { name: '构造', count: 1 },
+      ],
+      difficulties: [
+        { difficulty: 'POINT_0', count: 300 },
+        { difficulty: 'POINT_4', count: 42 },
+      ],
+      sources: [
+        { source: 'LOCAL', count: 2 },
+        { source: 'CODEFORCES', count: 10000 },
+        { source: 'LUOGU', count: 14000 },
+        { source: 'QOJ', count: 290 },
+      ],
+    });
+    expect(prisma.problem.findMany).not.toHaveBeenCalled();
+    expect(prisma.problemTag.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      by: ['name'],
+      where: { problem: { status: 'PUBLISHED' } },
+      orderBy: [{ _count: { name: 'desc' } }, { name: 'asc' }],
+    }));
+    expect(prisma.problemSource.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      by: ['platform'],
+      where: { problem: { status: 'PUBLISHED' } },
     }));
   });
 
