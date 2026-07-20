@@ -121,6 +121,7 @@ const keyword = ref(initialKeyword);
 const difficulty = ref(initialDifficulty);
 const source = ref(initialSource);
 const selectedTag = ref(queryValue('tag'));
+const tagSearchKeyword = ref('');
 const page = ref(Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1);
 const pageSize = 10;
 
@@ -153,6 +154,18 @@ const tagCounts = computed(() => {
 });
 
 const popularTagCounts = computed(() => tagCounts.value.slice(0, 9));
+const normalizedTagSearchKeyword = computed(() => tagSearchKeyword.value.trim().toLocaleLowerCase());
+const visibleTagCounts = computed(() => {
+  const query = normalizedTagSearchKeyword.value;
+  if (!query) return popularTagCounts.value;
+  return tagCounts.value
+    .filter((item) => item.name.toLocaleLowerCase().includes(query))
+    .slice(0, 60);
+});
+const tagSearchSummary = computed(() => {
+  if (!normalizedTagSearchKeyword.value) return '输入关键词搜索全部标签';
+  return `匹配 ${visibleTagCounts.value.length} / ${tagCounts.value.length} 个标签`;
+});
 const tagOptions = computed(() => [
   { value: '', label: '全部标签' },
   ...tagCounts.value.map((item) => ({
@@ -791,13 +804,30 @@ function requireLogin(redirect: string) {
               <div class="insight-heading">
                 <span class="insight-icon accent"><Tag :size="18" aria-hidden="true" /></span>
                 <div>
-                  <span>热门标签</span>
-                  <small>{{ tagCounts.length }} 个标签</small>
+                  <span>标签筛选</span>
+                  <small>{{ tagSearchSummary }}</small>
                 </div>
               </div>
+              <label class="tag-search-box">
+                <Search :size="14" aria-hidden="true" />
+                <input
+                  v-model="tagSearchKeyword"
+                  type="search"
+                  placeholder="搜索标签，例如 dp / 数学 / greedy"
+                  autocomplete="off"
+                />
+                <button
+                  v-if="tagSearchKeyword"
+                  type="button"
+                  aria-label="清空标签搜索"
+                  @click="tagSearchKeyword = ''"
+                >
+                  <X :size="13" aria-hidden="true" />
+                </button>
+              </label>
               <div class="tag-cloud">
                 <button
-                  v-for="item in popularTagCounts"
+                  v-for="item in visibleTagCounts"
                   :key="item.name"
                   type="button"
                   :class="{ selected: selectedTag === item.name }"
@@ -807,6 +837,9 @@ function requireLogin(redirect: string) {
                   <strong>{{ item.count }}</strong>
                 </button>
               </div>
+              <p v-if="!visibleTagCounts.length && !metadataLoading" class="tag-empty-state">
+                没有匹配标签
+              </p>
             </section>
           </template>
 
@@ -1783,6 +1816,62 @@ function requireLogin(redirect: string) {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+.tag-search-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  margin-bottom: 10px;
+  padding: 0 10px;
+  border: 1px solid var(--outline);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.74);
+  color: #8a94a6;
+}
+
+.tag-search-box:focus-within {
+  border-color: #a9bfff;
+  box-shadow: 0 0 0 3px rgba(31, 94, 255, 0.08);
+}
+
+.tag-search-box input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.tag-search-box input::placeholder {
+  color: #9aa3b2;
+}
+
+.tag-search-box button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: var(--primary-strong);
+  cursor: pointer;
+}
+
+.tag-empty-state {
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface-low);
+  color: #7a8392;
+  font-size: 11px;
+  text-align: center;
 }
 
 .tag-cloud button {
