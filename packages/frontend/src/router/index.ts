@@ -23,6 +23,8 @@ const router = createRouter({
     { path: '/teacher/classes', component: () => import('../views/teacher/ClassManage.vue'), meta: { requiresAuth: true, requiresTeacher: true } },
     // 管理员
     { path: '/admin/create-problem', component: () => import('../views/admin/CreateProblem.vue'), meta: { requiresAuth: true, requiresTeacher: true } },
+    { path: '/admin/problems/history', component: () => import('../views/admin/ProblemHistory.vue'), meta: { requiresAuth: true, requiresTeacher: true } },
+    { path: '/admin/problems/:id/edit', component: () => import('../views/admin/EditProblem.vue'), meta: { requiresAuth: true, requiresTeacher: true } },
     { path: '/admin/import-atcoder', component: () => import('../views/admin/AtCoderImport.vue'), meta: { requiresAuth: true, requiresTeacher: true } },
     { path: '/admin/users', component: () => import('../views/admin/UserManage.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
   ],

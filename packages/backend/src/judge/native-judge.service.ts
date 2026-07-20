@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { execSync } from 'child_process';
-import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -160,6 +160,85 @@ export class NativeJudgeService {
         memoryUsed: 0,
         output: stderr || stdout || msg,
       };
+    }
+  }
+
+  async runWithFiles(
+    language: string,
+    input: string,
+    timeLimitMs: number,
+    memoryLimitMb: number,
+    compileFileId?: string,
+    sourceCode?: string,
+    files: Record<string, string> = {},
+  ): Promise<RunResult> {
+    const config = LANGUAGE_CONFIG[language];
+    if (!config) {
+      return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: 'Unsupported language' };
+    }
+
+    const runDir = join(this.workDir, `spj-${randomUUID()}`);
+    mkdirSync(runDir, { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
+        rmSync(runDir, { recursive: true, force: true });
+        return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: `Invalid SPJ file name: ${name}` };
+      }
+      writeFileSync(join(runDir, name), content ?? '', 'utf-8');
+    }
+
+    let runCmd = config.runCmd;
+    if (compileFileId) {
+      runCmd = runCmd
+        .replace('{dir}', compileFileId)
+        .replace('{output}', compileFileId)
+        .replace('{source}', compileFileId);
+    } else if (language === 'python' && sourceCode) {
+      const sourcePath = join(runDir, `checker.${config.extension}`);
+      writeFileSync(sourcePath, sourceCode, 'utf-8');
+      runCmd = runCmd.replace('{source}', sourcePath);
+    } else {
+      runCmd = runCmd.replace('{source}', compileFileId || '');
+    }
+
+    const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+    const stdinFileName = '__stdin.txt';
+    const stdinPath = join(runDir, stdinFileName);
+    writeFileSync(stdinPath, input ?? '', 'utf-8');
+    const commandWithStdin = `${runCmd} < "${stdinPath}"`;
+    const startTime = Date.now();
+    try {
+      const output = execSync(commandWithStdin, {
+        timeout: timeLimitMs + 5000,
+        maxBuffer: 10 * 1024 * 1024,
+        stdio: 'pipe',
+        cwd: language === 'java' && compileFileId ? compileFileId : runDir,
+        shell,
+      }).toString();
+
+      const elapsed = Date.now() - startTime;
+      return { status: 'ACCEPTED', timeUsed: elapsed, memoryUsed: 0, output };
+    } catch (error: any) {
+      const elapsed = Date.now() - startTime;
+      const stdout = error.stdout?.toString() || '';
+      const stderr = error.stderr?.toString() || '';
+      const msg = error.message || '';
+
+      if (msg.includes('ETIMEDOUT') || msg.includes('killed') || error.signal === 'SIGKILL') {
+        return { status: 'TIME_LIMIT_EXCEEDED', timeUsed: elapsed, memoryUsed: 0, output: stdout };
+      }
+      if (error.signal === 'SIGSEGV' || msg.includes('SIGSEGV')) {
+        return { status: 'RUNTIME_ERROR', timeUsed: elapsed, memoryUsed: 0, output: 'Segmentation fault' };
+      }
+
+      return {
+        status: 'RUNTIME_ERROR',
+        timeUsed: elapsed,
+        memoryUsed: 0,
+        output: stderr || stdout || msg,
+      };
+    } finally {
+      rmSync(runDir, { recursive: true, force: true });
     }
   }
 

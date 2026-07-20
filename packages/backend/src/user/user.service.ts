@@ -1,7 +1,10 @@
 ﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FileUploadService } from '../common/file-upload.service';
+import { CfAcceptedSyncService } from '../codeforces/cf-accepted-sync.service';
+import { Optional } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { normalizePointDifficulty } from '../problem/point-difficulty';
 
 type ProfileUpdateInput = {
   nickname?: string | null;
@@ -26,11 +29,17 @@ type AwardInput = {
   certificateUrl?: string | null;
 };
 
+type PasswordChangeInput = {
+  currentPassword?: string;
+  password?: string;
+};
+
 @Injectable()
 export class UserService {
   constructor(
     private prisma: PrismaService,
     private readonly fileUpload: FileUploadService,
+    @Optional() private cfAcceptedSync?: CfAcceptedSyncService,
   ) {}
 
   async getProfile(userId: string) {
@@ -116,6 +125,100 @@ export class UserService {
       },
     });
     return this.formatExternalAccounts(accounts);
+  }
+
+  async syncCodeforcesAccepted(userId: string) {
+    if (!this.cfAcceptedSync) {
+      throw new BadRequestException('Codeforces 同步服务尚未启用');
+    }
+    return this.cfAcceptedSync.syncUserAccepted(userId);
+  }
+
+  async listAcceptedProblems(userId: string) {
+    const [localAccepted, externalAccepted] = await Promise.all([
+      this.prisma.submission.findMany({
+        where: { userId, status: 'ACCEPTED' },
+        orderBy: [{ judgedAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          problemId: true,
+          language: true,
+          timeUsed: true,
+          memoryUsed: true,
+          judgedAt: true,
+          createdAt: true,
+          problem: {
+            select: {
+              id: true,
+              title: true,
+              difficulty: true,
+              source: true,
+              sourceInfo: { select: { platform: true, remoteProblemId: true, remoteUrl: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.externalSolvedProblem.findMany({
+        where: { userId },
+        orderBy: [{ acceptedAt: 'desc' }],
+        select: {
+          id: true,
+          platform: true,
+          remoteProblemId: true,
+          remoteSubmissionId: true,
+          acceptedAt: true,
+          timeUsed: true,
+          memoryUsed: true,
+          problem: {
+            select: {
+              id: true,
+              title: true,
+              difficulty: true,
+              source: true,
+              sourceInfo: { select: { platform: true, remoteProblemId: true, remoteUrl: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const byProblem = new Map<string, any>();
+    const put = (item: any) => {
+      const existing = byProblem.get(item.problem.id);
+      if (!existing || new Date(item.acceptedAt).getTime() > new Date(existing.acceptedAt).getTime()) {
+        byProblem.set(item.problem.id, item);
+      }
+    };
+
+    for (const submission of localAccepted) {
+      put({
+        source: 'LOCAL',
+        submissionId: submission.id,
+        language: submission.language,
+        acceptedAt: submission.judgedAt || submission.createdAt,
+        timeUsed: submission.timeUsed,
+        memoryUsed: submission.memoryUsed,
+        problem: submission.problem,
+      });
+    }
+
+    for (const solved of externalAccepted) {
+      put({
+        source: solved.platform,
+        externalSolvedId: solved.id,
+        remoteProblemId: solved.remoteProblemId,
+        remoteSubmissionId: solved.remoteSubmissionId,
+        acceptedAt: solved.acceptedAt,
+        timeUsed: solved.timeUsed,
+        memoryUsed: solved.memoryUsed,
+        problem: solved.problem,
+      });
+    }
+
+    const items = [...byProblem.values()].sort(
+      (a, b) => new Date(b.acceptedAt).getTime() - new Date(a.acceptedAt).getTime(),
+    );
+    return { total: items.length, items };
   }
 
   async listAwards(userId: string) {
@@ -281,13 +384,22 @@ export class UserService {
       by: ['language'], where: { userId }, _count: true,
     });
 
-    const solvedProblemIds = solved.map((s) => s.problemId);
+    const externalSolved = await this.prisma.externalSolvedProblem.findMany({
+      where: { userId },
+      select: { problemId: true, platform: true },
+    });
+    const solvedProblemIds = [
+      ...new Set([
+        ...solved.map((s) => s.problemId),
+        ...externalSolved.map((s: any) => s.problemId),
+      ]),
+    ];
     const difficultyDist = await this.prisma.problem.findMany({
       where: { id: { in: solvedProblemIds } }, select: { difficulty: true },
     });
     const diffCount: Record<string, number> = {};
     for (const p of difficultyDist) {
-      const d = p.difficulty || 'UNKNOWN';
+      const d = normalizePointDifficulty(p.difficulty);
       diffCount[d] = (diffCount[d] || 0) + 1;
     }
 
@@ -307,7 +419,8 @@ export class UserService {
       overview: {
         totalSubmissions, totalAccepted,
         acceptRate: totalSubmissions > 0 ? Math.round((totalAccepted / totalSubmissions) * 100) : 0,
-        solvedCount: solved.length, triedCount: tried.length,
+        solvedCount: solvedProblemIds.length, triedCount: tried.length,
+        localSolvedCount: solved.length, externalSolvedCount: externalSolved.length,
         activeDays: uniqueDays.size, currentStreak: streak,
       },
       heatmap,
@@ -515,20 +628,40 @@ export class UserService {
     });
   }
 
-  async changeOwnPassword(userId: string, password: string) {
-    if (!password || password.length < 8) throw new BadRequestException('Password must be at least 8 characters');
-    const hashed = await bcrypt.hash(password, 10);
+  async changeOwnPassword(userId: string, input: string | PasswordChangeInput) {
+    const password = typeof input === 'string' ? input : input?.password;
+    const currentPassword = typeof input === 'string' ? undefined : input?.currentPassword;
+    this.assertPasswordStrength(password);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, password: true, mustChangePassword: true },
+    });
+    if (!user) throw new NotFoundException('用户不存在');
+
+    const requiresCurrentPassword = !user.mustChangePassword;
+    if (requiresCurrentPassword) {
+      if (!currentPassword) throw new BadRequestException('请输入当前密码');
+      const passwordMatches = await bcrypt.compare(currentPassword, user.password);
+      if (!passwordMatches) throw new BadRequestException('当前密码不正确');
+      if (currentPassword === password) throw new BadRequestException('新密码不能与当前密码相同');
+    }
+
+    const hashed = await bcrypt.hash(password!, 10);
     await this.prisma.user.update({
       where: { id: userId },
       data: { password: hashed, mustChangePassword: false, authVersion: { increment: 1 } },
     });
+    if (requiresCurrentPassword) {
+      await this.prisma.userSession.deleteMany({ where: { userId } });
+    }
     return { success: true };
   }
 
   async resetPassword(adminId: string, userId: string, password: string) {
     const admin = await this.prisma.user.findUnique({ where: { id: adminId }, select: { role: true } });
     if (!admin || admin.role !== 'ADMIN') throw new ForbiddenException('No permission to reset password');
-    if (!password || password.length < 8) throw new BadRequestException('Password must be at least 8 characters');
+    this.assertPasswordStrength(password);
     const hashed = await bcrypt.hash(password, 10);
     await this.prisma.user.update({
       where: { id: userId },
@@ -555,5 +688,14 @@ export class UserService {
       where: { id: classId },
       data: { status, reviewNote: reviewNote || null },
     });
+  }
+
+  private assertPasswordStrength(password?: string) {
+    if (!password || password.length < 8) {
+      throw new BadRequestException('密码至少需要 8 位');
+    }
+    if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      throw new BadRequestException('密码需要同时包含字母和数字');
+    }
   }
 }

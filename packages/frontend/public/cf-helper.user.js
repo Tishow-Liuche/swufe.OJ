@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ CF Helper
 // @namespace    https://oj.example.com
-// @version      7.2
+// @version      7.3
 // @description  自动填表 + 自动提交 + 回传 SID + 自动关闭 Codeforces 标签页
 // @author       OJ Team
 // @downloadURL  http://localhost:5173/cf-helper.user.js
@@ -23,8 +23,10 @@
 'use strict';
 
 var API = 'http://127.0.0.1:3000';
+var HELPER_VERSION = '7.3';
 var L = { cpp: '54', c: '43', python: '31', java: '60' };
 var STATE_KEY = 'swufe_cf_auto_state';
+var LOGIN_REQUIRED_KEY = 'swufe_cf_login_required_at';
 
 function gv(k, d) { return GM_getValue(k, d != null ? d : 0); }
 function sv(k, v) { GM_setValue(k, v); }
@@ -36,11 +38,19 @@ function loadState() {
 }
 
 function saveState(next) {
-  sv(STATE_KEY, JSON.stringify(next || {}));
+  var state = next || {};
+  state.helperVersion = HELPER_VERSION;
+  sv(STATE_KEY, JSON.stringify(state));
 }
 
 function clearState() {
   dv(STATE_KEY);
+}
+
+function markLoginRequired() {
+  var st = loadState();
+  if (st.submissionId || st.submittedAt || st.leaseNonce || st.stage) clearState();
+  sv(LOGIN_REQUIRED_KEY, String(Date.now()));
 }
 
 function banner(text, bg) {
@@ -58,8 +68,8 @@ function banner(text, bg) {
 }
 
 function diagnostic(text) {
-  console.log('[CF-Helper v7.1] ' + text);
-  banner('OJ CF Helper 7.1 active — ' + text, '#3498db');
+  console.log('[CF-Helper v' + HELPER_VERSION + '] ' + text);
+  banner('OJ CF Helper ' + HELPER_VERSION + ' active — ' + text, '#3498db');
 }
 
 function apiRequest(method, url, data, cb) {
@@ -181,7 +191,7 @@ function fallbackReportFromStatusPage() {
   diagnostic('status page fallback scanning recent rows');
   var rows = parseStatusRows();
   if (!rows.length) {
-    banner('OJ CF Helper 7.1 active — no status rows found yet', '#f39c12');
+    banner('OJ CF Helper ' + HELPER_VERSION + ' active — no status rows found yet', '#f39c12');
     setTimeout(fallbackReportFromStatusPage, 2500);
     return;
   }
@@ -189,7 +199,7 @@ function fallbackReportFromStatusPage() {
   var idx = 0;
   function tryNext() {
     if (idx >= rows.length) {
-      banner('OJ CF Helper 7.1 active — no matching pending OJ task for visible CF rows', '#f39c12');
+      banner('OJ CF Helper ' + HELPER_VERSION + ' active — no matching pending OJ task for visible CF rows', '#f39c12');
       return;
     }
     var row = rows[idx++];
@@ -211,7 +221,7 @@ function fallbackReportFromStatusPage() {
       }, function(reportErr) {
         if (reportErr) {
           console.error('[CF-Helper] fallback report failed:', reportErr);
-          banner('OJ CF Helper 7.1 active — fallback SID report failed: ' + reportErr, '#e74c3c');
+          banner('OJ CF Helper ' + HELPER_VERSION + ' active — fallback SID report failed: ' + reportErr, '#e74c3c');
           return;
         }
         clearState();
@@ -324,6 +334,20 @@ function watchForOurSub() {
   setTimeout(tick, 2000);
 }
 
+function isActiveSubmittedState(st) {
+  var now = Math.floor(Date.now() / 1000);
+  return !!(
+    st &&
+    st.helperVersion === HELPER_VERSION &&
+    st.submissionId &&
+    st.problemId &&
+    st.token &&
+    st.leaseNonce &&
+    st.submittedAt &&
+    st.submittedAt >= now - 900
+  );
+}
+
 var href = location.href;
 diagnostic('loaded on ' + location.pathname);
 var onStatusPage =
@@ -332,8 +356,11 @@ var onStatusPage =
   /\/submissions\//.test(href);
 
 if (onStatusPage) {
-  if (loadState().submittedAt) watchForOurSub();
-  else fallbackReportFromStatusPage();
+  if (isActiveSubmittedState(loadState())) watchForOurSub();
+  else {
+    clearState();
+    banner('No active OJ submission state. Return to SWUFE OJ and submit again after logging in to Codeforces.', '#f39c12');
+  }
   return;
 }
 
@@ -361,6 +388,7 @@ function fillAndSubmit() {
   }
 
   if (!isLoggedIn()) {
+    markLoginRequired();
     if (pollAttempts % 10 === 1) {
       banner('Please log into Codeforces first, then refresh this page.', '#e74c3c');
     }
@@ -375,7 +403,7 @@ function fillAndSubmit() {
   if (!sl || !ar || !bn) {
     if (pollAttempts % 5 === 1) {
       banner(
-        'OJ CF Helper 7.1 active — waiting for CF form: lang=' + !!sl +
+        'OJ CF Helper ' + HELPER_VERSION + ' active — waiting for CF form: lang=' + !!sl +
         ' source=' + !!ar + ' submit=' + !!bn,
         '#3498db'
       );
@@ -419,6 +447,7 @@ function fillAndSubmit() {
       submissionId: d.submissionId,
       problemId: problemId,
       token: d.token,
+      helperVersion: HELPER_VERSION,
       submittedAt: existing.submittedAt || 0,
       leaseNonce: existing.leaseNonce || ''
     };

@@ -135,6 +135,10 @@ export class UpdateProblemDto {
   memoryLimit?: number;
 
   @IsOptional()
+  @IsInt()
+  outputLimit?: number;
+
+  @IsOptional()
   @IsString()
   inputFormat?: string;
 
@@ -153,6 +157,26 @@ export class UpdateProblemDto {
   @IsOptional()
   @IsString()
   hint?: string;
+
+  @IsOptional()
+  @IsString()
+  dataRange?: string;
+
+  @IsOptional()
+  @IsArray()
+  tags?: string[];
+
+  @IsOptional()
+  @IsString()
+  judgeMode?: string;
+
+  @IsOptional()
+  @IsString()
+  spjLanguage?: string;
+
+  @IsOptional()
+  @IsString()
+  spjSourceCode?: string;
 
   @IsOptional()
   @IsString()
@@ -223,6 +247,26 @@ export class QueryProblemDto {
   @IsOptional()
   @IsString()
   tag?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  pageSize?: number;
+}
+
+export class QueryAuthoredProblemDto {
+  @IsOptional()
+  @IsString()
+  keyword?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 
   @IsOptional()
   @Type(() => Number)

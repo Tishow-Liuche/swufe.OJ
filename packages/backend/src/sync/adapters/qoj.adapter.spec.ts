@@ -69,6 +69,7 @@ Markdown Content:
 
     expect(problem?.remoteId).toBe('1');
     expect(problem?.title).toBe('QOJ 1 A+B Problem');
+    expect(problem?.difficulty).toBeNull();
     expect(problem?.timeLimit).toBe(1000);
     expect(problem?.memoryLimit).toBe(512);
     expect(problem?.tags).toEqual(['math', 'implementation']);
@@ -108,6 +109,7 @@ The time limit (1.0 second) or memory limit (2.0 GiB) is exceeded.
     const problem = parseQojProblemPage('1', markdown);
 
     expect(problem?.title).toBe('QOJ 1 I/O Test');
+    expect(problem?.difficulty).toBeNull();
     expect(problem?.description).toContain('test problem');
     expect(problem?.timeLimit).toBe(1000);
     expect(problem?.memoryLimit).toBe(2048);

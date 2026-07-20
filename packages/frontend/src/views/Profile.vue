@@ -1,20 +1,48 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { Award as AwardIcon, Camera, KeyRound, Mail, Phone, ShieldCheck, Trophy, UserRound } from '@lucide/vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
+import {
+  Activity,
+  Award,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  Code2,
+  Flame,
+  History,
+  KeyRound,
+  Link2,
+  Mail,
+  Phone,
+  RefreshCw,
+  Save,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Trash2,
+  UserRound,
+} from '@lucide/vue';
 import api from '../api/client';
-import UserAvatar from '../components/UserAvatar.vue';
 import { useAuthStore } from '../stores/auth';
+import UserAvatar from '../components/UserAvatar.vue';
+import { pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
 interface HeatDay { date: string; count: number; accepted: number; level: number }
 interface Stats {
-  overview: any;
+  overview: {
+    totalSubmissions?: number;
+    acceptRate?: number;
+    solvedCount?: number;
+    triedCount?: number;
+    activeDays?: number;
+    currentStreak?: number;
+  };
   heatmap: HeatDay[];
-  languageDist: Array<{ language: string; count: number }>;
   difficultyDist: Array<{ difficulty: string; count: number }>;
   recentSubmissions: any[];
 }
-interface Award {
+interface AwardRecord {
   id: string;
   competition: 'ICPC' | 'CCPC';
   year?: number | null;
@@ -27,34 +55,31 @@ interface Award {
   status: string;
 }
 
-type MainTab = 'overview' | 'submissions' | 'settings';
-type SettingsTab = 'profile' | 'awards' | 'security';
-
+const router = useRouter();
+const auth = useAuthStore();
 const stats = ref<Stats | null>(null);
 const profile = ref<any>(null);
-const auth = useAuthStore();
-const route = useRoute();
-const router = useRouter();
 const loading = ref(true);
 const error = ref('');
-const activeTab = ref<MainTab>(route.query.tab === 'settings' ? 'settings' : 'overview');
-const settingsTab = ref<SettingsTab>(
-  route.query.settings === 'awards' || route.query.settings === 'security' ? route.query.settings : 'profile',
-);
+const activeTab = ref<'overview' | 'accepted' | 'submissions' | 'settings'>('overview');
 
 const allSubmissions = ref<any[]>([]);
 const subsLoading = ref(false);
+const acceptedProblems = ref<any[]>([]);
+const acceptedLoading = ref(false);
 const selectedSubmission = ref<any>(null);
 
 const settingsLoading = ref(false);
-const settingsMessage = ref('');
 const settingsError = ref('');
 const avatarInput = ref<HTMLInputElement | null>(null);
 const avatarUploading = ref(false);
 const avatarError = ref('');
 const profileForm = reactive({ nickname: '', email: '', phone: '' });
 const accountForm = reactive({ codeforcesHandle: '', luoguHandle: '' });
-const awards = ref<Award[]>([]);
+const cfSyncing = ref(false);
+const passwordForm = reactive({ currentPassword: '', password: '', confirmPassword: '' });
+const passwordSaving = ref(false);
+const awards = ref<AwardRecord[]>([]);
 const awardForm = reactive({
   id: '',
   competition: 'ICPC' as 'ICPC' | 'CCPC',
@@ -67,18 +92,36 @@ const awardForm = reactive({
   certificateUrl: '',
 });
 
+const overview = computed(() => stats.value?.overview || {});
+const displayName = computed(() => profile.value?.nickname || profile.value?.username || 'OJ 用户');
+const avatarText = computed(() => displayName.value.slice(0, 1).toUpperCase());
+const maxDifficultyCount = computed(() => Math.max(...(stats.value?.difficultyDist || []).map((item) => item.count), 1));
+const solvedRate = computed(() => {
+  const tried = Number(overview.value.triedCount || 0);
+  const solved = Number(overview.value.solvedCount || 0);
+  return tried ? Math.round((solved / tried) * 100) : 0;
+});
+
 onMounted(async () => {
   try {
-    const [pRes, sRes, settingRes] = await Promise.all([
+    const [profileRes, statsRes, settingsRes] = await Promise.allSettled([
       api.get('/api/user/profile'),
       api.get('/api/user/stats'),
       api.get('/api/user/settings'),
     ]);
-    profile.value = settingRes.data.profile || pRes.data;
-    stats.value = sRes.data;
-    fillSettings(settingRes.data);
+
+    if (profileRes.status === 'fulfilled') profile.value = profileRes.value.data;
+    if (statsRes.status === 'fulfilled') stats.value = statsRes.value.data;
+    if (settingsRes.status === 'fulfilled') {
+      profile.value = settingsRes.value.data.profile || profile.value;
+      fillSettings(settingsRes.value.data);
+    } else if (profile.value) {
+      fillSettings({ profile: profile.value, externalAccounts: {}, awards: [] });
+    }
+
+    if (!profile.value || !stats.value) throw new Error('missing required profile data');
   } catch (e: any) {
-    error.value = e.response?.data?.message || '请先登录';
+    error.value = e.response?.data?.message || '请先登录后查看个人中心';
   } finally {
     loading.value = false;
   }
@@ -109,50 +152,34 @@ async function loadSettings() {
   }
 }
 
-function selectSettingsTab(tab: SettingsTab) {
-  settingsTab.value = tab;
-  settingsMessage.value = '';
-  settingsError.value = '';
-}
-
-function goToPasswordChange() {
-  router.push({
-    path: '/change-password',
-    query: { redirect: '/profile?tab=settings&settings=security' },
-  });
-}
-
 async function saveProfile() {
-  settingsMessage.value = '';
   settingsError.value = '';
   try {
     const { data } = await api.patch('/api/user/profile', profileForm);
     profile.value = { ...profile.value, ...data };
-    settingsMessage.value = '基础资料已保存';
   } catch (e: any) {
     settingsError.value = e.response?.data?.message || '保存基础资料失败';
   }
-}
-
-function chooseAvatar() {
-  avatarError.value = '';
-  avatarInput.value?.click();
 }
 
 async function uploadAvatar(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
-  avatarUploading.value = true;
+
   avatarError.value = '';
+  avatarUploading.value = true;
   try {
-    const payload = new FormData();
-    payload.append('file', file);
-    const { data } = await api.post('/api/user/avatar', payload);
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post('/api/user/avatar', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     profile.value = { ...profile.value, ...data };
     await auth.fetchProfile();
-  } catch (requestError: any) {
-    avatarError.value = requestError.response?.data?.message || '头像上传失败，请稍后重试';
+  } catch (e: any) {
+    const message = e.response?.data?.message;
+    avatarError.value = Array.isArray(message) ? message.join('；') : message || '头像上传失败';
   } finally {
     avatarUploading.value = false;
     input.value = '';
@@ -160,20 +187,69 @@ async function uploadAvatar(event: Event) {
 }
 
 async function saveAccounts() {
-  settingsMessage.value = '';
   settingsError.value = '';
   try {
     const { data } = await api.put('/api/user/external-accounts', accountForm);
     accountForm.codeforcesHandle = data.codeforcesHandle || '';
     accountForm.luoguHandle = data.luoguHandle || '';
-    settingsMessage.value = 'OJ 账号绑定已保存';
   } catch (e: any) {
-    settingsError.value = e.response?.data?.message || '保存 OJ 账号失败';
+    settingsError.value = e.response?.data?.message || '保存远程 OJ 账号失败';
+  }
+}
+
+async function syncCodeforcesAccepted() {
+  settingsError.value = '';
+  cfSyncing.value = true;
+  try {
+    await api.post('/api/user/external-accounts/codeforces/sync');
+    const statsRes = await api.get('/api/user/stats');
+    stats.value = statsRes.data;
+    if (activeTab.value === 'accepted') await loadAcceptedProblems();
+  } catch (e: any) {
+    const message = e.response?.data?.message;
+    settingsError.value = Array.isArray(message) ? message.join('，') : message || '同步 Codeforces 通过记录失败';
+  } finally {
+    cfSyncing.value = false;
+  }
+}
+
+function passwordValidationMessage() {
+  if (!passwordForm.currentPassword) return '请输入当前密码';
+  if (passwordForm.password.length < 8) return '新密码至少需要 8 位';
+  if (!/[A-Za-z]/.test(passwordForm.password) || !/\d/.test(passwordForm.password)) return '新密码需要同时包含字母和数字';
+  if (passwordForm.password !== passwordForm.confirmPassword) return '两次输入的新密码不一致';
+  if (passwordForm.currentPassword === passwordForm.password) return '新密码不能与当前密码相同';
+  return '';
+}
+
+async function changePassword() {
+  settingsError.value = '';
+  const validationError = passwordValidationMessage();
+  if (validationError) {
+    settingsError.value = validationError;
+    return;
+  }
+
+  passwordSaving.value = true;
+  try {
+    await api.post('/api/user/password', {
+      currentPassword: passwordForm.currentPassword,
+      password: passwordForm.password,
+    });
+    passwordForm.currentPassword = '';
+    passwordForm.password = '';
+    passwordForm.confirmPassword = '';
+    auth.clearAuth();
+    await router.push({ path: '/login', query: { passwordChanged: '1' } });
+  } catch (e: any) {
+    const message = e.response?.data?.message;
+    settingsError.value = Array.isArray(message) ? message.join('，') : message || '修改密码失败';
+  } finally {
+    passwordSaving.value = false;
   }
 }
 
 async function saveAward() {
-  settingsMessage.value = '';
   settingsError.value = '';
   const payload = {
     competition: awardForm.competition,
@@ -188,10 +264,8 @@ async function saveAward() {
   try {
     if (awardForm.id) {
       await api.patch(`/api/user/awards/${awardForm.id}`, payload);
-      settingsMessage.value = '奖项认定已更新，状态已回到待认定';
     } else {
       await api.post('/api/user/awards', payload);
-      settingsMessage.value = '奖项认定已提交';
     }
     resetAwardForm();
     const { data } = await api.get('/api/user/awards');
@@ -201,7 +275,7 @@ async function saveAward() {
   }
 }
 
-function editAward(award: Award) {
+function editAward(award: AwardRecord) {
   awardForm.id = award.id;
   awardForm.competition = award.competition;
   awardForm.year = award.year || new Date().getFullYear();
@@ -212,16 +286,13 @@ function editAward(award: Award) {
   awardForm.rank = award.rank || null;
   awardForm.certificateUrl = award.certificateUrl || '';
   activeTab.value = 'settings';
-  settingsTab.value = 'awards';
 }
 
 async function deleteAward(id: string) {
-  settingsMessage.value = '';
   settingsError.value = '';
   try {
     await api.delete(`/api/user/awards/${id}`);
     awards.value = awards.value.filter((item) => item.id !== id);
-    settingsMessage.value = '奖项认定已删除';
   } catch (e: any) {
     settingsError.value = e.response?.data?.message || '删除奖项认定失败';
   }
@@ -250,6 +321,17 @@ async function loadAllSubmissions() {
   }
 }
 
+async function loadAcceptedProblems() {
+  acceptedLoading.value = true;
+  activeTab.value = 'accepted';
+  try {
+    const { data } = await api.get('/api/user/accepted-problems');
+    acceptedProblems.value = data.items || [];
+  } finally {
+    acceptedLoading.value = false;
+  }
+}
+
 async function viewDetail(sub: any) {
   const { data } = await api.get(`/api/submissions/${sub.id}`);
   selectedSubmission.value = data;
@@ -257,10 +339,10 @@ async function viewDetail(sub: any) {
 
 const heatmapWeeks = computed(() => {
   if (!stats.value?.heatmap?.length) return [];
-  const weeks: HeatDay[][] = [];
-  let week: HeatDay[] = [];
+  const weeks: Array<Array<HeatDay | null>> = [];
+  let week: Array<HeatDay | null> = [];
   const firstDay = new Date(stats.value.heatmap[0].date + 'T00:00:00');
-  for (let i = 0; i < firstDay.getDay(); i++) week.push(null as any);
+  for (let i = 0; i < firstDay.getDay(); i++) week.push(null);
   for (const day of stats.value.heatmap) {
     week.push(day);
     if (new Date(day.date + 'T00:00:00').getDay() === 6) {
@@ -269,7 +351,7 @@ const heatmapWeeks = computed(() => {
     }
   }
   if (week.length > 0) {
-    while (week.length < 7) week.push(null as any);
+    while (week.length < 7) week.push(null);
     weeks.push(week);
   }
   return weeks;
@@ -291,646 +373,1364 @@ const monthLabels = computed(() => {
   return labels;
 });
 
-const levelColors = ['#1a1a2e08', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
-const diffLabels: Record<string, string> = { BEGINNER: '入门', POPULAR: '普及', 'POPULAR-': '普及-', IMPROVE: '提高', 'IMPROVE-': '提高-', PROVINCIAL: '省选', NOI: 'NOI' };
-const statusLabels: Record<string, string> = { ACCEPTED: 'AC', WRONG_ANSWER: 'WA', TIME_LIMIT_EXCEEDED: 'TLE', RUNTIME_ERROR: 'RE', COMPILE_ERROR: 'CE', MEMORY_LIMIT_EXCEEDED: 'MLE', PENDING: '等待', QUEUING: '排队', COMPILING: '编译中', RUNNING: '运行中', SYSTEM_ERROR: '系统错误' };
-const statusColors: Record<string, string> = { ACCEPTED: '#27ae60', WRONG_ANSWER: '#e74c3c', TIME_LIMIT_EXCEEDED: '#f39c12', RUNTIME_ERROR: '#9b59b6', COMPILE_ERROR: '#e67e22', MEMORY_LIMIT_EXCEEDED: '#f39c12', PENDING: '#95a5a6', QUEUING: '#3498db', COMPILING: '#3498db', RUNNING: '#3498db', SYSTEM_ERROR: '#e74c3c' };
+const levelColors = ['#edf2f7', '#b8edc3', '#6fdc87', '#2fb45e', '#176b38'];
+const statusLabels: Record<string, string> = {
+  ACCEPTED: 'AC',
+  WRONG_ANSWER: 'WA',
+  TIME_LIMIT_EXCEEDED: 'TLE',
+  RUNTIME_ERROR: 'RE',
+  COMPILE_ERROR: 'CE',
+  MEMORY_LIMIT_EXCEEDED: 'MLE',
+  PENDING: '等待',
+  QUEUING: '排队',
+  COMPILING: '编译中',
+  RUNNING: '运行中',
+  REMOTE_ERROR: 'RMR',
+  REMOTE_REEOR: 'RMR',
+  SYSTEM_ERROR: '系统错误',
+};
+const statusColors: Record<string, string> = {
+  ACCEPTED: '#20a66a',
+  WRONG_ANSWER: '#e8594f',
+  TIME_LIMIT_EXCEEDED: '#f0a12a',
+  RUNTIME_ERROR: '#8e5bd6',
+  COMPILE_ERROR: '#e67e22',
+  MEMORY_LIMIT_EXCEEDED: '#f0a12a',
+  PENDING: '#8996a6',
+  QUEUING: '#2f7cf2',
+  COMPILING: '#2f7cf2',
+  RUNNING: '#2f7cf2',
+  REMOTE_ERROR: '#e8594f',
+  REMOTE_REEOR: '#e8594f',
+  SYSTEM_ERROR: '#e8594f',
+};
 const awardStatusLabels: Record<string, string> = { PENDING: '待认定', APPROVED: '已认定', REJECTED: '未通过' };
 const weekDays = ['一', '', '三', '', '五', '', '日'];
 
-function tooltip(day: HeatDay) {
-  return day && day.count > 0 ? `${day.date} | ${day.count} 次提交 | AC×${day.accepted}` : '无提交';
+function tooltip(day: HeatDay | null) {
+  return day && day.count > 0 ? `${day.date}：${day.count} 次提交，AC × ${day.accepted}` : '无提交';
 }
+
 function hasMetric(value: unknown) {
   return value !== null && value !== undefined;
 }
+
 function formatMemoryKb(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? `${(n / 1024).toFixed(1)}MB` : '-';
 }
 
-function maskEmail(value?: string | null) {
-  if (!value) return '未绑定';
-  const [local, domain] = value.split('@');
-  if (!domain) return value;
-  const visible = local.slice(0, Math.min(2, local.length));
-  return `${visible}${'*'.repeat(Math.max(2, local.length - visible.length))}@${domain}`;
+function roleLabel(role?: string) {
+  if (role === 'ADMIN') return '管理员';
+  if (role === 'TEACHER') return '教师';
+  return '学生';
 }
 
-function maskPhone(value?: string | null) {
-  if (!value) return '未绑定';
-  const digits = value.replace(/\s/g, '');
-  if (digits.length < 7) return value;
-  return `${digits.slice(0, 3)}****${digits.slice(-4)}`;
-}
+void [
+  Activity,
+  Award,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  Code2,
+  Flame,
+  History,
+  KeyRound,
+  Link2,
+  Mail,
+  Phone,
+  RefreshCw,
+  Save,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Trash2,
+  UserRound,
+  pointDifficultyShortLabel,
+  avatarText,
+  maxDifficultyCount,
+  solvedRate,
+  loadSettings,
+  saveProfile,
+  saveAccounts,
+  syncCodeforcesAccepted,
+  changePassword,
+  saveAward,
+  editAward,
+  deleteAward,
+  loadAllSubmissions,
+  viewDetail,
+  heatmapWeeks,
+  monthLabels,
+  levelColors,
+  statusLabels,
+  statusColors,
+  awardStatusLabels,
+  weekDays,
+  tooltip,
+  hasMetric,
+  formatMemoryKb,
+  roleLabel,
+];
 </script>
 
 <template>
-  <div class="profile-page">
-    <div v-if="loading" class="loading">加载中...</div>
-    <div v-else-if="error" class="error-msg">{{ error }}</div>
+  <main class="profile-page">
+    <div v-if="loading" class="page-state">正在加载个人中心…</div>
+    <div v-else-if="error" class="page-state error">{{ error }}</div>
 
-    <template v-if="profile && stats">
-      <header class="profile-workspace-hero">
-        <div>
-          <p>{{ activeTab === 'settings' ? 'ACCOUNT SETTINGS' : 'PERSONAL WORKSPACE' }}</p>
-          <h1>{{ activeTab === 'settings' ? '用户设置' : '个人中心' }}</h1>
-          <span>{{ activeTab === 'settings' ? '集中管理个人资料、奖项认证与账户安全。' : '查看训练轨迹、提交记录和账号设置。' }}</span>
-        </div>
-        <div class="profile-workspace-state">
-          <strong>{{ activeTab === 'settings' ? '3 个设置板块' : profile.role === 'ADMIN' ? '管理员空间' : profile.role === 'TEACHER' ? '教师空间' : '学习空间' }}</strong>
-          <small>{{ activeTab === 'settings' ? '资料、认证与账户安全' : '账户状态正常' }}</small>
-        </div>
-      </header>
-      <template v-if="activeTab !== 'settings'">
-        <div class="profile-header">
-          <div class="profile-avatar-control">
-            <UserAvatar :name="profile.nickname || profile.username" :avatar="profile.avatar" :size="72" />
-          </div>
-          <div class="user-info">
-            <h2>{{ profile.nickname || profile.username }}</h2>
-            <p class="username">@{{ profile.username }}</p>
-            <div class="identity-row">
-              <span class="role-badge" :class="profile.role?.toLowerCase()">
-                {{ profile.role === 'ADMIN' ? '管理员' : profile.role === 'TEACHER' ? '教师' : '学生' }}
-              </span>
-              <span v-if="profile.school" class="school-name">{{ profile.school }}</span>
-              <span v-if="profile.email" class="school-name">{{ profile.email }}</span>
-            </div>
-            <p class="join-date">加入于 {{ new Date(profile.createdAt).toLocaleDateString('zh-CN') }}</p>
+    <template v-else-if="profile && stats">
+      <section class="profile-hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><Sparkles :size="16" /> SINGULARITY PROFILE</p>
+          <h1>{{ displayName }}</h1>
+          <p class="username">@{{ profile.username }}</p>
+          <div class="identity-row">
+            <span class="role-badge" :class="profile.role?.toLowerCase()"><ShieldCheck :size="14" />{{ roleLabel(profile.role) }}</span>
+            <span v-if="profile.email"><Mail :size="14" />{{ profile.email }}</span>
+            <span v-if="profile.phone"><Phone :size="14" />{{ profile.phone }}</span>
+            <span v-if="profile.createdAt"><CalendarDays :size="14" />加入于 {{ new Date(profile.createdAt).toLocaleDateString('zh-CN') }}</span>
           </div>
         </div>
-
-        <div class="stats-grid">
-          <div class="stat-card"><div class="stat-value">{{ stats.overview.totalSubmissions }}</div><div class="stat-label">总提交</div></div>
-          <div class="stat-card accent-green"><div class="stat-value">{{ stats.overview.acceptRate }}%</div><div class="stat-label">通过率</div></div>
-          <div class="stat-card accent-blue"><div class="stat-value">{{ stats.overview.solvedCount }}</div><div class="stat-label">已解决</div></div>
-          <div class="stat-card accent-orange"><div class="stat-value">{{ stats.overview.triedCount }}</div><div class="stat-label">尝试过</div></div>
-          <div class="stat-card accent-purple"><div class="stat-value">{{ stats.overview.activeDays }}</div><div class="stat-label">活跃天数</div></div>
-          <div class="stat-card accent-teal"><div class="stat-value">{{ stats.overview.currentStreak }}<span class="stat-unit">天</span></div><div class="stat-label">连续打卡</div></div>
+        <div class="hero-avatar">
+          <UserAvatar :name="displayName" :avatar="profile.avatar" :size="92" label="个人头像" />
         </div>
-      </template>
+      </section>
 
-      <div class="panel submissions-panel" :class="{ 'settings-mode': activeTab === 'settings' }">
-        <div class="sub-header">
-          <div class="tabs">
-            <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">数据概览</button>
-            <button :class="{ active: activeTab === 'submissions' }" @click="loadAllSubmissions">提交记录</button>
-            <button :class="{ active: activeTab === 'settings' }" @click="loadSettings"><ShieldCheck :size="15" aria-hidden="true" />用户设置</button>
-          </div>
-          <span v-if="activeTab === 'submissions'" class="sub-count">{{ allSubmissions.length }} 条</span>
-        </div>
+      <section class="metric-grid" aria-label="学习概览">
+        <article class="metric-card primary"><span><Target :size="20" /></span><strong>{{ overview.solvedCount || 0 }}</strong><small>已解决</small></article>
+        <article class="metric-card"><span><Code2 :size="20" /></span><strong>{{ overview.totalSubmissions || 0 }}</strong><small>总提交</small></article>
+        <article class="metric-card"><span><CheckCircle2 :size="20" /></span><strong>{{ overview.acceptRate || 0 }}%</strong><small>提交通过率</small></article>
+        <article class="metric-card"><span><Activity :size="20" /></span><strong>{{ solvedRate }}%</strong><small>尝试转化率</small></article>
+        <article class="metric-card"><span><Flame :size="20" /></span><strong>{{ overview.currentStreak || 0 }} 天</strong><small>连续活跃</small></article>
+      </section>
 
-        <template v-if="activeTab === 'overview'">
-          <div class="content-grid">
-            <div class="panel inner-panel heatmap-panel">
-              <h3>全年提交热力图</h3>
-              <div class="heatmap-container">
-                <div class="heatmap-wrapper">
-                  <div class="month-row">
-                    <div class="weekday-gutter"></div>
-                    <div class="month-cells">
-                      <span v-for="m in monthLabels" :key="m.index" class="month-label" :style="{ gridColumn: m.index + 1 }">{{ m.label }}</span>
-                    </div>
-                  </div>
-                  <div class="heatmap-grid">
-                    <div class="weekday-col">
-                      <span v-for="(d, i) in weekDays" :key="i" class="weekday-label">{{ d }}</span>
-                    </div>
-                    <div class="cells-grid">
-                      <div v-for="(week, wi) in heatmapWeeks" :key="wi" class="heatmap-week">
-                        <div
-                          v-for="(day, di) in week"
-                          :key="di"
-                          class="heatmap-cell"
-                          :class="{ empty: !day }"
-                          :style="day ? { background: levelColors[day.level] || levelColors[0] } : {}"
-                          :title="tooltip(day)"
-                        ></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="heatmap-legend">
-                  <span>Less</span>
-                  <span v-for="(c, i) in levelColors" :key="i" class="legend-cell" :style="{ background: c }"></span>
-                  <span>More</span>
+      <nav class="tab-nav">
+        <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'"><BarChart3 :size="16" />总览</button>
+        <button :class="{ active: activeTab === 'accepted' }" @click="loadAcceptedProblems"><CheckCircle2 :size="16" />已通过题目</button>
+        <button :class="{ active: activeTab === 'submissions' }" @click="loadAllSubmissions"><History :size="16" />提交记录</button>
+        <button :class="{ active: activeTab === 'settings' }" @click="loadSettings"><Settings :size="16" />设置</button>
+      </nav>
+
+      <section v-if="activeTab === 'overview'" class="overview-layout">
+        <article class="profile-panel heatmap-panel">
+          <div class="panel-title"><h2>全年提交热力图</h2><span>{{ overview.activeDays || 0 }} 天活跃</span></div>
+          <div class="heatmap-track" :style="{ '--heatmap-week-count': heatmapWeeks.length }">
+            <div class="month-row"><span v-for="month in monthLabels" :key="month.index" :style="{ gridColumnStart: month.index + 1 }">{{ month.label }}</span></div>
+            <div class="heatmap-body">
+              <div class="weekday-col"><span v-for="day in weekDays" :key="day">{{ day }}</span></div>
+              <div class="heatmap-grid">
+                <div v-for="(week, wi) in heatmapWeeks" :key="wi" class="heat-week">
+                  <i v-for="(day, di) in week" :key="`${wi}-${di}`" :title="tooltip(day)" :style="day ? { background: levelColors[day.level] || levelColors[0] } : {}"></i>
                 </div>
               </div>
             </div>
+          </div>
+        </article>
 
-            <div class="difficulty-column">
-              <div class="panel inner-panel difficulty-panel">
-                <h3>难度分布</h3>
-                <div class="dist-bars">
-                  <div v-for="d in stats.difficultyDist" :key="d.difficulty" class="dist-row">
-                    <span class="dist-label">{{ diffLabels[d.difficulty] || d.difficulty }}</span>
-                    <div class="dist-bar-track">
-                      <div class="dist-bar-fill diff-bar" :style="{ width: (d.count / Math.max(...stats.difficultyDist.map((x:any)=>x.count), 1) * 100) + '%' }"></div>
-                    </div>
-                    <span class="dist-count">{{ d.count }}</span>
-                  </div>
-                </div>
-                <div v-if="stats.difficultyDist.length === 0" class="no-data-sm">解决题目后显示难度分布</div>
-              </div>
+        <article class="profile-panel difficulty-panel">
+          <div class="panel-title"><h2>难度分布</h2><span>{{ stats.difficultyDist?.length || 0 }} 档</span></div>
+          <div v-if="stats.difficultyDist?.length" class="difficulty-bars">
+            <div v-for="item in stats.difficultyDist" :key="item.difficulty" class="difficulty-row">
+              <span>{{ pointDifficultyShortLabel(item.difficulty) }}</span>
+              <div><i :style="{ width: `${Math.max(8, Math.round(item.count / maxDifficultyCount * 100))}%` }"></i></div>
+              <b>{{ item.count }}</b>
             </div>
           </div>
+          <div v-else class="empty-mini">解决题目后展示难度分布。</div>
+        </article>
 
-          <h3 class="section-title">最近提交</h3>
-          <div class="sub-list">
-            <div v-for="sub in stats.recentSubmissions" :key="sub.id" class="sub-row clickable" @click="viewDetail(sub)">
-              <span class="sub-status" :style="{ background: statusColors[sub.status] || '#999' }">{{ statusLabels[sub.status] || sub.status }}</span>
-              <span class="sub-title">{{ sub.problem.title }}</span>
-              <span class="sub-lang">{{ sub.language }}</span>
-              <span class="sub-meta">
-                <template v-if="hasMetric(sub.timeUsed)">{{ sub.timeUsed }}ms</template>
-                <template v-if="hasMetric(sub.timeUsed) && hasMetric(sub.memoryUsed)"> · </template>
-                <template v-if="hasMetric(sub.memoryUsed)">{{ formatMemoryKb(sub.memoryUsed) }}</template>
-                <template v-if="!hasMetric(sub.timeUsed) && !hasMetric(sub.memoryUsed)">-</template>
-              </span>
-              <span class="sub-time">{{ new Date(sub.createdAt).toLocaleString('zh-CN') }}</span>
-            </div>
-            <div v-if="stats.recentSubmissions.length === 0" class="no-data">暂无提交记录</div>
+        <article class="profile-panel recent-panel">
+          <div class="panel-title"><h2>最近提交</h2></div>
+          <div v-if="stats.recentSubmissions?.length" class="submission-list">
+            <button v-for="sub in stats.recentSubmissions" :key="sub.id" class="submission-row" @click="viewDetail(sub)">
+              <span class="status-dot" :style="{ background: statusColors[sub.status] || '#8996a6' }">{{ statusLabels[sub.status] || sub.status }}</span>
+              <span class="sub-title">{{ sub.problem?.title || '-' }}</span>
+              <span class="sub-meta">{{ sub.language }}</span>
+            </button>
           </div>
-        </template>
+          <div v-else class="empty-mini">还没有提交记录。</div>
+        </article>
+      </section>
 
-        <div v-if="activeTab === 'submissions'" class="sub-list">
-          <div v-if="subsLoading" class="no-data">加载中...</div>
-          <div v-for="sub in allSubmissions" :key="sub.id" class="sub-row clickable" @click="viewDetail(sub)">
-            <span class="sub-status" :style="{ background: statusColors[sub.status] || '#999' }">{{ statusLabels[sub.status] || sub.status }}</span>
+      <section v-else-if="activeTab === 'accepted'" class="profile-panel">
+        <div class="panel-title"><h2>已通过题目</h2><span>{{ acceptedProblems.length }} 题</span></div>
+        <div v-if="acceptedLoading" class="empty-state">正在加载已通过题目…</div>
+        <div v-else-if="acceptedProblems.length" class="accepted-list">
+          <router-link v-for="item in acceptedProblems" :key="item.problemId" class="accepted-row" :to="`/problems/${item.problemId}`">
+            <span class="accepted-source">{{ item.source || item.problem?.source || 'LOCAL' }}</span>
+            <span class="accepted-title">{{ item.problem?.title || item.problemId }}</span>
+            <span class="accepted-difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
+            <span class="accepted-remote">{{ item.remoteProblemId || item.problem?.sourceInfo?.remoteProblemId || '本地题' }}</span>
+          </router-link>
+        </div>
+        <div v-else class="empty-state">暂无已通过题目。</div>
+      </section>
+
+      <section v-else-if="activeTab === 'submissions'" class="profile-panel">
+        <div class="panel-title"><h2>提交记录</h2><span>{{ allSubmissions.length }} 条</span></div>
+        <div v-if="subsLoading" class="empty-state">正在加载提交记录…</div>
+        <div v-else-if="allSubmissions.length" class="submission-list">
+          <button v-for="sub in allSubmissions" :key="sub.id" class="submission-row" @click="viewDetail(sub)">
+            <span class="status-dot" :style="{ background: statusColors[sub.status] || '#8996a6' }">{{ statusLabels[sub.status] || sub.status }}</span>
             <span class="sub-title">{{ sub.problem?.title || '-' }}</span>
-            <span class="sub-lang">{{ sub.language }}</span>
-            <span class="sub-meta">
-              <template v-if="hasMetric(sub.timeUsed)">{{ sub.timeUsed }}ms</template>
-              <template v-if="hasMetric(sub.timeUsed) && hasMetric(sub.memoryUsed)"> · </template>
-              <template v-if="hasMetric(sub.memoryUsed)">{{ formatMemoryKb(sub.memoryUsed) }}</template>
-              <template v-if="!hasMetric(sub.timeUsed) && !hasMetric(sub.memoryUsed)">{{ sub.score }}分</template>
-            </span>
-            <span class="sub-time">{{ new Date(sub.createdAt).toLocaleString('zh-CN') }}</span>
-          </div>
-          <div v-if="!subsLoading && allSubmissions.length === 0" class="no-data">暂无提交记录</div>
+            <span class="sub-meta">{{ sub.language }}</span>
+            <span class="sub-time" v-if="hasMetric(sub.timeUsed) || hasMetric(sub.memoryUsed)">{{ hasMetric(sub.timeUsed) ? `${sub.timeUsed}ms` : '-' }} / {{ hasMetric(sub.memoryUsed) ? formatMemoryKb(sub.memoryUsed) : '-' }}</span>
+            <span class="sub-time" v-else>{{ sub.score }} 分</span>
+          </button>
         </div>
+        <div v-else class="empty-state">暂无提交记录。</div>
+      </section>
 
-        <section v-if="activeTab === 'settings'" class="settings-workspace">
-          <nav class="settings-tabs" aria-label="用户设置板块" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="settingsTab === 'profile'"
-              :class="{ active: settingsTab === 'profile' }"
-              @click="selectSettingsTab('profile')"
-            ><UserRound :size="17" aria-hidden="true" />个人信息</button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="settingsTab === 'awards'"
-              :class="{ active: settingsTab === 'awards' }"
-              @click="selectSettingsTab('awards')"
-            ><AwardIcon :size="17" aria-hidden="true" />奖项认证</button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="settingsTab === 'security'"
-              :class="{ active: settingsTab === 'security' }"
-              @click="selectSettingsTab('security')"
-            ><ShieldCheck :size="17" aria-hidden="true" />安全设置</button>
-          </nav>
+      <section v-else class="settings-grid">
+        <article class="profile-panel avatar-settings-card">
+          <div class="panel-title"><h2>头像设置</h2><UserRound :size="18" /></div>
+          <div class="avatar-settings-body">
+            <UserAvatar :name="displayName" :avatar="profile.avatar" :size="88" label="当前头像" />
+            <div>
+              <p class="hint">支持 JPG、PNG、WebP，最大 2MB。上传后顶部菜单栏和个人中心会同步更新。</p>
+              <input ref="avatarInput" class="avatar-input" type="file" accept="image/png,image/jpeg,image/webp" @change="uploadAvatar" />
+              <div class="inline-actions">
+                <button class="primary-btn" :disabled="avatarUploading" @click="avatarInput?.click()">
+                  <UserRound :size="16" />{{ avatarUploading ? '上传中...' : '上传头像' }}
+                </button>
+              </div>
+              <p v-if="avatarError" class="error-msg compact">{{ avatarError }}</p>
+            </div>
+          </div>
+        </article>
 
-          <div v-if="settingsMessage" class="success-msg">{{ settingsMessage }}</div>
-          <div v-if="settingsError" class="error-msg compact">{{ settingsError }}</div>
-          <div v-if="settingsLoading" class="no-data">加载设置中...</div>
+        <article class="profile-panel">
+          <div class="panel-title"><h2>基础资料</h2><UserRound :size="18" /></div>
+          <label>昵称<input v-model="profileForm.nickname" placeholder="设置展示昵称" /></label>
+          <label>邮箱<input v-model="profileForm.email" type="email" placeholder="绑定邮箱" /></label>
+          <label>电话<input v-model="profileForm.phone" placeholder="绑定电话号码" /></label>
+          <button class="primary-btn" @click="saveProfile"><Save :size="16" />保存基础资料</button>
+        </article>
 
-          <template v-else>
-            <section v-if="settingsTab === 'profile'" class="settings-surface" aria-label="个人信息">
-              <div class="settings-section-heading">
-                <div>
-                  <p class="section-kicker">个人档案</p>
-                  <h2>个人信息</h2>
-                  <span>维护公开资料与平台账号。</span>
-                </div>
-                <span class="section-state">资料可随时更新</span>
-              </div>
+        <article class="profile-panel">
+          <div class="panel-title"><h2>外站账号</h2><Link2 :size="18" /></div>
+          <p class="hint">这里保存远程 OJ 身份，后续跳转提交与结果回传会优先使用这些绑定信息。</p>
+          <label>Codeforces<input v-model="accountForm.codeforcesHandle" placeholder="CF handle" /></label>
+          <label>洛谷<input v-model="accountForm.luoguHandle" placeholder="洛谷用户名" /></label>
+          <div class="inline-actions"><button class="primary-btn" @click="saveAccounts"><Save :size="16" />保存绑定</button><button class="secondary-btn" :disabled="cfSyncing" @click="syncCodeforcesAccepted"><RefreshCw :size="16" :class="{ spinning: cfSyncing }" />{{ cfSyncing ? '同步中…' : '同步 CF 通过记录' }}</button></div>
+        </article>
 
-              <div class="profile-settings-layout">
-                <div class="avatar-settings">
-                  <span class="setting-label">头像</span>
-                  <UserAvatar :name="profile.nickname || profile.username" :avatar="profile.avatar" :size="96" />
-                  <input ref="avatarInput" class="avatar-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" @change="uploadAvatar" />
-                  <button class="avatar-upload-button" type="button" :disabled="avatarUploading" @click="chooseAvatar"><Camera :size="15" aria-hidden="true" />{{ avatarUploading ? '上传中' : '更换头像' }}</button>
-                  <span v-if="avatarError" class="avatar-error">{{ avatarError }}</span>
-                </div>
+        <article class="profile-panel">
+          <div class="panel-title"><h2>修改密码</h2><KeyRound :size="18" /></div>
+          <p class="hint">修改成功后会自动退出当前登录，请使用新密码重新登录。</p>
+          <label>当前密码<input v-model="passwordForm.currentPassword" type="password" autocomplete="current-password" placeholder="请输入当前登录密码" /></label>
+          <label>新密码<input v-model="passwordForm.password" type="password" autocomplete="new-password" placeholder="至少 8 位，包含字母和数字" /></label>
+          <label>确认新密码<input v-model="passwordForm.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入新密码" /></label>
+          <button class="primary-btn" :disabled="passwordSaving" @click="changePassword"><KeyRound :size="16" />{{ passwordSaving ? '修改中…' : '修改密码' }}</button>
+        </article>
 
-                <div class="settings-form-area">
-                  <div class="settings-field-grid">
-                    <label class="setting-field">账号
-                      <input :value="profile.username" readonly aria-readonly="true" />
-                    </label>
-                    <label class="setting-field">昵称
-                      <input v-model="profileForm.nickname" placeholder="请输入显示名称" />
-                    </label>
-                    <label class="setting-field">邮箱
-                      <input v-model="profileForm.email" type="email" placeholder="请输入邮箱" />
-                    </label>
-                    <label class="setting-field">手机号
-                      <input v-model="profileForm.phone" inputmode="tel" placeholder="请输入手机号" />
-                    </label>
-                  </div>
-                  <div class="settings-actions">
-                    <button class="primary-btn" type="button" @click="saveProfile">保存个人信息</button>
-                  </div>
-                </div>
-              </div>
+        <article class="profile-panel award-panel">
+          <div class="panel-title"><h2>ICPC / CCPC 奖项认定</h2><Award :size="18" /></div>
+          <div class="award-form">
+            <label>赛事<select v-model="awardForm.competition"><option value="ICPC">ICPC</option><option value="CCPC">CCPC</option></select></label>
+            <label>年份<input v-model.number="awardForm.year" type="number" min="1970" /></label>
+            <label>赛季/届次<input v-model="awardForm.season" placeholder="如 2025-2026" /></label>
+            <label>赛区<input v-model="awardForm.region" placeholder="如 成都、沈阳、女生赛" /></label>
+            <label>奖项<input v-model="awardForm.awardLevel" placeholder="如 金奖 / 银奖 / 铜奖" /></label>
+            <label>队名<input v-model="awardForm.teamName" placeholder="可选" /></label>
+            <label>排名<input v-model.number="awardForm.rank" type="number" min="1" placeholder="可选" /></label>
+            <label class="full">证书链接<input v-model="awardForm.certificateUrl" placeholder="可选" /></label>
+          </div>
+          <button class="primary-btn" @click="saveAward"><Save :size="16" />{{ awardForm.id ? '更新认定' : '提交认定' }}</button>
+          <div class="award-list">
+            <div v-for="award in awards" :key="award.id" class="award-row">
+              <div><strong>{{ award.competition }} {{ award.year || '' }} {{ award.awardLevel }}</strong><p>{{ award.region || '未填赛区' }} · {{ award.teamName || '未填队名' }}<span v-if="award.rank"> · 第 {{ award.rank }} 名</span></p></div>
+              <span class="award-status" :class="award.status?.toLowerCase()">{{ awardStatusLabels[award.status] || award.status }}</span>
+              <button class="icon-btn" @click="editAward(award)">编辑</button>
+              <button class="icon-btn danger" @click="deleteAward(award.id)"><Trash2 :size="15" /></button>
+            </div>
+            <div v-if="!awards.length" class="empty-mini">还没有提交 ICPC/CCPC 奖项认定。</div>
+          </div>
+        </article>
 
-              <div class="settings-divider"></div>
-
-              <div class="settings-section-heading compact-heading">
-                <div>
-                  <p class="section-kicker">平台账号</p>
-                  <h2>OJ 账号绑定</h2>
-                  <span>用于关联你在第三方题库中的身份。</span>
-                </div>
-              </div>
-              <div class="settings-field-grid account-settings-grid">
-                <label class="setting-field">Codeforces
-                  <input v-model="accountForm.codeforcesHandle" placeholder="例如 tourist" />
-                </label>
-                <label class="setting-field">洛谷
-                  <input v-model="accountForm.luoguHandle" placeholder="用户名或 UID" />
-                </label>
-              </div>
-              <div class="settings-actions">
-                <button class="primary-btn" type="button" @click="saveAccounts">保存平台账号</button>
-              </div>
-            </section>
-
-            <section v-else-if="settingsTab === 'awards'" class="settings-surface" aria-label="奖项认证">
-              <div class="settings-section-heading">
-                <div>
-                  <p class="section-kicker">竞赛荣誉</p>
-                  <h2>奖项认证</h2>
-                  <span>提交后将进入管理员审核流程。</span>
-                </div>
-                <span class="section-state award-state"><Trophy :size="15" aria-hidden="true" />ICPC / CCPC</span>
-              </div>
-
-              <div class="award-form">
-                <label class="setting-field">赛事
-                  <select v-model="awardForm.competition">
-                    <option value="ICPC">ICPC</option>
-                    <option value="CCPC">CCPC</option>
-                  </select>
-                </label>
-                <label class="setting-field">年份<input v-model.number="awardForm.year" type="number" min="1970" max="2100" /></label>
-                <label class="setting-field">赛季/届次<input v-model="awardForm.season" placeholder="如 2025-2026" /></label>
-                <label class="setting-field">赛区<input v-model="awardForm.region" placeholder="如 成都、沈阳、女生赛" /></label>
-                <label class="setting-field">奖项<input v-model="awardForm.awardLevel" placeholder="如 金奖 / 银奖 / 铜奖" /></label>
-                <label class="setting-field">队名<input v-model="awardForm.teamName" placeholder="选填" /></label>
-                <label class="setting-field">排名<input v-model.number="awardForm.rank" type="number" min="1" placeholder="选填" /></label>
-                <label class="setting-field">证书或榜单链接<input v-model="awardForm.certificateUrl" placeholder="选填" /></label>
-              </div>
-              <div class="settings-actions">
-                <button class="primary-btn" type="button" @click="saveAward">{{ awardForm.id ? '更新认定' : '提交认定' }}</button>
-                <button v-if="awardForm.id" class="ghost-btn" type="button" @click="resetAwardForm">取消编辑</button>
-              </div>
-
-              <div class="settings-divider"></div>
-              <div class="award-list-heading">
-                <h3>我的认证</h3>
-                <span>{{ awards.length }} 条</span>
-              </div>
-              <div class="award-list">
-                <div v-for="award in awards" :key="award.id" class="award-row">
-                  <div>
-                    <strong>{{ award.competition }} {{ award.year || '' }} {{ award.awardLevel }}</strong>
-                    <p>{{ award.region || '未填赛区' }} · {{ award.teamName || '未填队名' }}<span v-if="award.rank"> · 第 {{ award.rank }} 名</span></p>
-                  </div>
-                  <span class="award-status" :class="award.status.toLowerCase()">{{ awardStatusLabels[award.status] || award.status }}</span>
-                  <div class="award-actions">
-                    <button class="ghost-btn" type="button" @click="editAward(award)">编辑</button>
-                    <button class="danger-btn" type="button" @click="deleteAward(award.id)">删除</button>
-                  </div>
-                </div>
-                <div v-if="awards.length === 0" class="award-empty">
-                  <AwardIcon :size="30" aria-hidden="true" />
-                  <strong>暂未提交奖项认证</strong>
-                  <span>填写上方资料后即可提交审核。</span>
-                </div>
-              </div>
-            </section>
-
-            <section v-else class="settings-surface security-surface" aria-label="安全设置">
-              <div class="settings-section-heading">
-                <div>
-                  <p class="section-kicker">账户保护</p>
-                  <h2>安全设置</h2>
-                  <span>管理登录凭据与安全联系方式。</span>
-                </div>
-                <span class="section-state security-state"><ShieldCheck :size="15" aria-hidden="true" />账户状态正常</span>
-              </div>
-
-              <div class="security-list">
-                <div class="security-item">
-                  <div class="security-item-copy">
-                    <span class="security-item-icon"><KeyRound :size="20" aria-hidden="true" /></span>
-                    <div><strong>登录密码</strong><p>定期更新密码可以更好地保护账号安全。</p></div>
-                  </div>
-                  <button class="primary-btn" type="button" @click="goToPasswordChange">修改密码</button>
-                </div>
-                <div class="security-item">
-                  <div class="security-item-copy">
-                    <span class="security-item-icon"><Mail :size="20" aria-hidden="true" /></span>
-                    <div><strong>安全邮箱</strong><p>{{ maskEmail(profileForm.email) }}</p></div>
-                  </div>
-                  <button class="ghost-btn" type="button" @click="selectSettingsTab('profile')">{{ profileForm.email ? '修改邮箱' : '绑定邮箱' }}</button>
-                </div>
-                <div class="security-item">
-                  <div class="security-item-copy">
-                    <span class="security-item-icon"><Phone :size="20" aria-hidden="true" /></span>
-                    <div><strong>安全手机</strong><p>{{ maskPhone(profileForm.phone) }}</p></div>
-                  </div>
-                  <button class="ghost-btn" type="button" @click="selectSettingsTab('profile')">{{ profileForm.phone ? '修改手机' : '绑定手机' }}</button>
-                </div>
-              </div>
-            </section>
-          </template>
-        </section>
-      </div>
+        <div v-if="settingsLoading" class="empty-state">正在加载账号设置…</div>
+        <div v-if="settingsError" class="page-state error">{{ settingsError }}</div>
+      </section>
 
       <div v-if="selectedSubmission" class="modal-overlay" @click.self="selectedSubmission = null">
         <div class="modal-card">
-          <div class="modal-header">
-            <h3>提交详情</h3>
-            <button class="modal-close" @click="selectedSubmission = null">×</button>
-          </div>
+          <div class="modal-header"><h2>提交详情</h2><button @click="selectedSubmission = null">×</button></div>
           <div class="modal-body">
             <div class="detail-meta">
-              <span v-if="selectedSubmission.problem"><b>题目:</b> {{ selectedSubmission.problem.title }}</span>
-              <span><b>状态:</b> <span :style="{ color: statusColors[selectedSubmission.status] }">{{ selectedSubmission.status }}</span></span>
-              <span><b>得分:</b> {{ selectedSubmission.score }}</span>
-              <span v-if="hasMetric(selectedSubmission.timeUsed)"><b>用时:</b> {{ selectedSubmission.timeUsed }}ms</span>
-              <span v-if="hasMetric(selectedSubmission.memoryUsed)"><b>内存:</b> {{ formatMemoryKb(selectedSubmission.memoryUsed) }}</span>
-              <span><b>语言:</b> {{ selectedSubmission.language }}</span>
-              <span><b>提交时间:</b> {{ new Date(selectedSubmission.createdAt).toLocaleString('zh-CN') }}</span>
+              <span v-if="selectedSubmission.problem"><b>题目：</b>{{ selectedSubmission.problem.title }}</span>
+              <span><b>状态：</b>{{ statusLabels[selectedSubmission.status] || selectedSubmission.status }}</span>
+              <span><b>得分：</b>{{ selectedSubmission.score }}</span>
+              <span v-if="hasMetric(selectedSubmission.timeUsed)"><b>用时：</b>{{ selectedSubmission.timeUsed }}ms</span>
+              <span v-if="hasMetric(selectedSubmission.memoryUsed)"><b>内存：</b>{{ formatMemoryKb(selectedSubmission.memoryUsed) }}</span>
+              <span><b>语言：</b>{{ selectedSubmission.language }}</span>
             </div>
-            <div v-if="selectedSubmission.compileMessage" class="compile-box">
-              <strong>编译信息:</strong>
-              <pre>{{ selectedSubmission.compileMessage }}</pre>
-            </div>
-            <h4>源代码</h4>
-            <pre class="code-block"><code>{{ selectedSubmission.sourceCode }}</code></pre>
+            <div v-if="selectedSubmission.compileOutput" class="compile-box"><b>编译输出</b><pre>{{ selectedSubmission.compileOutput }}</pre></div>
+            <h3>源代码</h3>
+            <pre class="code-block">{{ selectedSubmission.sourceCode }}</pre>
             <div v-if="selectedSubmission.cases?.length">
-              <h4>测试点详情 ({{ selectedSubmission.cases.length }} 个)</h4>
-              <table class="cases-table">
-                <thead><tr><th>#</th><th>状态</th><th>用时</th><th>内存</th></tr></thead>
-                <tbody>
-                  <tr v-for="c in selectedSubmission.cases" :key="c.caseIndex">
-                    <td>{{ c.caseIndex }}</td>
-                    <td :style="{ color: statusColors[c.status] }">{{ c.status }}</td>
-                    <td>{{ c.timeUsed }}ms</td>
-                    <td>{{ c.memoryUsed }}KB</td>
-                  </tr>
-                </tbody>
-              </table>
+              <h3>测试点</h3>
+              <table class="cases-table"><thead><tr><th>#</th><th>状态</th><th>用时</th><th>内存</th></tr></thead><tbody><tr v-for="item in selectedSubmission.cases" :key="item.id"><td>{{ item.index }}</td><td>{{ statusLabels[item.status] || item.status }}</td><td>{{ hasMetric(item.timeUsed) ? `${item.timeUsed}ms` : '-' }}</td><td>{{ hasMetric(item.memoryUsed) ? formatMemoryKb(item.memoryUsed) : '-' }}</td></tr></tbody></table>
             </div>
           </div>
         </div>
       </div>
     </template>
-  </div>
+  </main>
 </template>
 
 <style scoped>
-.profile-page { max-width: 1080px; margin: 0 auto; padding: 20px; }
-.loading, .error-msg { text-align: center; padding: 60px; color: #999; }
-.error-msg { color: #e74c3c; }
-.error-msg.compact { padding: 10px 12px; text-align: left; background: #fff1f0; border-radius: 8px; margin-bottom: 12px; }
-.success-msg { padding: 10px 12px; color: #1f8f4d; background: #eefaf2; border-radius: 8px; margin-bottom: 12px; }
-
-.profile-header { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; padding: 24px; background: #fff; border-radius: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-.avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, #4fc3f7, #1a1a2e); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: bold; flex-shrink: 0; }
-.user-info h2 { margin: 0; font-size: 24px; }
-.username { color: #999; margin: 4px 0; font-size: 14px; }
-.role-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; margin: 4px 0; }
-.role-badge.admin { background: #fce4ec; color: #c62828; }
-.role-badge.teacher { background: #e3f2fd; color: #1565c0; }
-.role-badge.student { background: #e8f5e9; color: #2e7d32; }
-.identity-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-.school-name { color: #66717e; font-size: 12px; }
-.join-date { color: #aaa; font-size: 13px; margin-top: 6px; }
-
-.stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
-.stat-card { background: #fff; border-radius: 10px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border-top: 3px solid #ddd; }
-.stat-card.accent-green { border-top-color: #27ae60; } .stat-card.accent-blue { border-top-color: #3498db; }
-.stat-card.accent-orange { border-top-color: #e67e22; } .stat-card.accent-purple { border-top-color: #9b59b6; }
-.stat-card.accent-teal { border-top-color: #1abc9c; }
-.stat-value { font-size: 28px; font-weight: bold; color: #1a1a2e; }
-.stat-unit { font-size: 14px; font-weight: normal; color: #999; margin-left: 2px; }
-.stat-label { font-size: 13px; color: #888; margin-top: 4px; }
-
-.panel { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-.inner-panel { box-shadow: none; border: 1px solid #f0f2f5; }
-.panel h3 { margin: 0 0 16px; font-size: 16px; color: #333; }
-.content-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); gap: 16px; margin-bottom: 24px; align-items: start; }
-.difficulty-column { min-width: 0; }
-.difficulty-panel { overflow: hidden; background: linear-gradient(180deg, #fff, #fbfdff); }
-.section-title { margin: 8px 0 12px; font-size: 16px; }
-
-.heatmap-container { display: flex; flex-direction: column; align-items: flex-start; }
-.heatmap-panel { min-width: 0; }
-.heatmap-wrapper { width: 100%; overflow-x: auto; padding-bottom: 4px; }
-.month-row { display: flex; margin-bottom: 2px; }
-.weekday-gutter { width: 20px; flex-shrink: 0; }
-.month-cells { display: grid; grid-template-columns: repeat(54, 15px); }
-.month-label { font-size: 10px; color: #888; }
-.heatmap-grid { display: flex; }
-.weekday-col { display: flex; flex-direction: column; gap: 3px; padding-right: 4px; padding-top: 2px; }
-.weekday-label { font-size: 9px; color: #aaa; height: 12px; line-height: 12px; width: 16px; text-align: right; }
-.cells-grid { display: flex; gap: 3px; }
-.heatmap-week { display: flex; flex-direction: column; gap: 3px; }
-.heatmap-cell { width: 12px; height: 12px; border-radius: 2px; cursor: pointer; transition: transform 0.1s; }
-.heatmap-cell:hover { transform: scale(1.5); outline: 1px solid #666; z-index: 2; position: relative; }
-.heatmap-cell.empty { background: transparent !important; cursor: default; }
-.heatmap-cell.empty:hover { transform: none; outline: none; }
-.heatmap-legend { display: flex; align-items: center; gap: 3px; margin-top: 8px; font-size: 10px; color: #888; }
-.legend-cell { width: 12px; height: 12px; border-radius: 2px; }
-
-.dist-bars { display: flex; flex-direction: column; gap: 12px; }
-.dist-row { display: grid; grid-template-columns: 54px minmax(0, 1fr) 28px; align-items: center; gap: 8px; min-width: 0; }
-.dist-label { min-width: 0; font-size: 12px; color: #5f6b7a; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dist-bar-track { min-width: 0; height: 10px; background: #edf1f5; border-radius: 999px; overflow: hidden; }
-.dist-bar-fill { height: 100%; border-radius: 999px; transition: width 0.5s; }
-.diff-bar { background: linear-gradient(90deg, #4fc3f7, #1a1a2e); box-shadow: 0 4px 10px rgba(79, 195, 247, 0.24); }
-.dist-count { font-size: 13px; font-weight: 700; color: #1a1a2e; text-align: right; }
-
-.submissions-panel { margin-bottom: 24px; }
-.sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.tabs { display: flex; gap: 4px; background: #f5f5f5; border-radius: 8px; padding: 3px; }
-.tabs button { padding: 7px 18px; border: none; background: none; border-radius: 6px; font-size: 14px; cursor: pointer; color: #666; font-weight: 500; transition: all 0.2s; }
-.tabs button.active { background: #fff; color: #1a1a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.tabs button:hover:not(.active) { color: #333; }
-.sub-count { font-size: 13px; color: #999; }
-.sub-list { max-height: 600px; overflow-y: auto; }
-.sub-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid #f5f5f5; font-size: 14px; transition: background 0.15s; }
-.sub-row:hover { background: #fafbfc; }
-.clickable { cursor: pointer; }
-.sub-status { padding: 2px 8px; border-radius: 3px; color: #fff; font-size: 12px; font-weight: 600; min-width: 36px; text-align: center; }
-.sub-title { flex: 1; font-weight: 500; color: #1a1a2e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sub-lang { color: #888; font-size: 12px; background: #f5f5f5; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; }
-.sub-meta, .sub-time { color: #aaa; font-size: 12px; }
-.sub-time { white-space: nowrap; }
-.no-data { text-align: center; color: #999; padding: 40px; font-size: 14px; }
-.no-data-sm { text-align: center; color: #bbb; padding: 20px 10px; font-size: 12px; }
-
-.settings { display: flex; flex-direction: column; gap: 16px; }
-.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.settings-card { border: 1px solid #eef0f4; border-radius: 12px; padding: 18px; background: #fcfdff; }
-.settings-card h3 { margin: 0 0 14px; }
-.settings-card label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; color: #4b5563; font-size: 13px; font-weight: 600; }
-.settings-card input, .settings-card select { height: 38px; border: 1px solid #dce1e8; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #fff; color: #1f2937; }
-.settings-card input:focus, .settings-card select:focus { outline: none; border-color: #4fc3f7; box-shadow: 0 0 0 3px rgba(79,195,247,0.16); }
-.hint { color: #8a94a6; font-size: 12px; line-height: 1.6; }
-.primary-btn, .ghost-btn, .danger-btn { border: none; border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
-.primary-btn { background: #1a1a2e; color: #fff; }
-.primary-btn:hover { background: #29294a; }
-.ghost-btn { background: #eef2f7; color: #394150; }
-.danger-btn { background: #fff1f0; color: #d93025; }
-.awards-card { background: #fff; }
-.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.award-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.award-list { margin-top: 16px; border-top: 1px solid #f0f2f5; }
-.award-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid #f5f5f5; }
-.award-row p { margin: 4px 0 0; color: #8a94a6; font-size: 12px; }
-.award-status { padding: 3px 9px; border-radius: 999px; background: #fff7e6; color: #ad6800; font-size: 12px; font-weight: 700; }
-.award-status.approved { background: #f0fff4; color: #218c4a; }
-.award-status.rejected { background: #fff1f0; color: #d93025; }
-
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.modal-card { background: #fff; border-radius: 12px; max-width: 780px; width: 100%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
-.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #eee; position: sticky; top: 0; background: #fff; border-radius: 12px 12px 0 0; z-index: 1; }
-.modal-header h3 { margin: 0; font-size: 17px; }
-.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #999; padding: 4px 8px; }
-.modal-close:hover { color: #333; }
-.modal-body { padding: 20px; }
-.detail-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 13px; color: #666; }
-.detail-meta b { color: #333; }
-.compile-box { background: #fff3e0; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; }
-.compile-box pre { margin: 4px 0 0; font-size: 12px; white-space: pre-wrap; }
-h4 { font-size: 15px; color: #333; margin: 16px 0 8px; }
-.code-block { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 6px; font-size: 13px; line-height: 1.5; overflow-x: auto; max-height: 400px; }
-.cases-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
-.cases-table th { background: #f8f9fa; padding: 8px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #eee; }
-.cases-table td { padding: 7px 12px; border-bottom: 1px solid #f0f0f0; }
-
-@media (max-width: 900px) {
-  .stats-grid { grid-template-columns: repeat(3, 1fr); }
-  .content-grid, .settings-grid { grid-template-columns: 1fr; }
-  .award-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.profile-page {
+  --ink: #17233a;
+  --muted: #728097;
+  --line: #dfe8f5;
+  --blue: #2f7cf2;
+  --soft: #f5f8ff;
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 28px 0 70px;
+  color: var(--ink);
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
 }
 
-@media (max-width: 560px) {
-  .profile-header { align-items: flex-start; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .award-form { grid-template-columns: 1fr; }
-  .award-row { grid-template-columns: 1fr; }
-  .sub-time { display: none; }
+.page-state {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  color: var(--muted);
 }
 
-/* Profile uses the same hierarchy as the learning and class workspaces. */
-.profile-page { width: min(1180px, calc(100% - 40px)); max-width: none; min-height: calc(100vh - 56px); padding: 28px 0 64px; font-family: 'Manrope Variable', 'Noto Sans SC Variable', 'Microsoft YaHei', sans-serif; }
-.profile-workspace-hero { display: flex; min-height: 158px; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 20px; padding: 28px 32px; border: 1px solid #dce5ef; border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .08); }
-.profile-workspace-hero p { margin: 0 0 7px; color: #3977aa; font-size: 11px; font-weight: 850; letter-spacing: 0; }
-.profile-workspace-hero h1 { margin: 0; color: #1f2a37; font-size: 34px; letter-spacing: 0; }
-.profile-workspace-hero > div > span { display: block; margin-top: 9px; color: #66778a; font-size: 14px; }
-.profile-workspace-state { display: grid; min-width: 150px; gap: 4px; padding: 14px 18px; border: 1px solid #dce5ef; border-radius: 8px; background: #f8faff; text-align: center; }
-.profile-workspace-state strong { color: #1f5eff; font-size: 14px; }.profile-workspace-state small { color: #728092; font-size: 11px; }
-.profile-header { margin-bottom: 18px; padding: 22px 26px; border: 1px solid #dfe7ef; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
-.avatar { border-radius: 8px; background: #e7efff; color: #1f5eff; }
-.profile-avatar-control { display: grid; justify-items: center; gap: 6px; flex: 0 0 92px; }
-.avatar-input { display: none; }
-.avatar-upload-button { display: inline-flex; min-height: 26px; align-items: center; justify-content: center; gap: 4px; padding: 0 7px; border: 1px solid #c9dbef; border-radius: 5px; background: #f5f9ff; color: #2469ad; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; white-space: nowrap; }
-.avatar-upload-button:hover { border-color: #9abbe0; background: #eaf3ff; }.avatar-upload-button:disabled { cursor: wait; opacity: .62; }.avatar-error { max-width: 116px; color: #c64148; font-size: 10px; line-height: 1.35; text-align: center; }
-.user-info h2 { color: #24364b; }.username { color: #728092; }.join-date { color: #8290a0; }
-.stats-grid { gap: 12px; margin-bottom: 18px; }.stat-card { border: 1px solid #dfe7ef; border-top: 3px solid #8fb9dc; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .035); }.stat-card.accent-green, .stat-card.accent-blue, .stat-card.accent-purple, .stat-card.accent-teal { border-top-color: #8fb9dc; }.stat-card.accent-orange { border-top-color: #e2aa4d; }.stat-value { color: #1f5eff; }.stat-label, .stat-unit { color: #728092; }
-.panel { border: 1px solid #dfe7ef; border-radius: 8px; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }.inner-panel { border-color: #e2eaf1; background: #fbfcfe; }.panel h3, .section-title { color: #24364b; }.difficulty-panel { background: #fbfcfe; }.diff-bar { background: #2469ad; box-shadow: none; }.dist-count, .sub-title { color: #24364b; }
-.tabs { border: 1px solid #dfe7ef; border-radius: 7px; background: #f4f7fb; }.tabs button { border-radius: 5px; color: #66778a; }.tabs button.active { background: #e7efff; color: #1f5eff; box-shadow: none; }.tabs button:hover:not(.active) { color: #1f5eff; background: #edf4ff; }
-.sub-row { border-bottom-color: #e9eef3; }.sub-row:hover { background: #f7faff; }.sub-lang { background: #edf3fa; color: #526f8d; }.settings-card { border-color: #dfe7ef; border-radius: 8px; background: #fbfcfe; }.settings-card input, .settings-card select { border-color: #ccd9e6; border-radius: 6px; }.settings-card input:focus, .settings-card select:focus { border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }.primary-btn { border-radius: 6px; background: #2469ad; }.primary-btn:hover { background: #1b578f; }.ghost-btn { border-radius: 6px; background: #e7efff; color: #1f5eff; }.danger-btn { border-radius: 6px; }
-@media (max-width: 560px) { .profile-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.profile-workspace-hero { align-items: stretch; flex-direction: column; padding: 22px; }.profile-workspace-hero h1 { font-size: 29px; }.profile-workspace-state { width: 100%; }.profile-header { padding: 20px; }.profile-avatar-control { flex-basis: 82px; } }
-
-/* User settings is a dedicated workspace, not a collection of nested cards. */
-.submissions-panel.settings-mode { padding: 0; border: 0; background: transparent; box-shadow: none; }
-.submissions-panel.settings-mode .sub-header { margin: 0 0 12px; }
-.tabs button { display: inline-flex; align-items: center; gap: 6px; }
-.settings-workspace { display: grid; gap: 12px; }
-.settings-tabs { display: flex; min-height: 52px; align-items: end; gap: 30px; padding: 0 6px; border-bottom: 1px solid #dce5ef; overflow-x: auto; background: #fff; }
-.settings-tabs button { display: inline-flex; flex: 0 0 auto; min-height: 52px; align-items: center; gap: 7px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #66778a; font: inherit; font-size: 14px; font-weight: 750; cursor: pointer; transition: color .18s ease, border-color .18s ease; }
-.settings-tabs button:hover { color: #2469ad; }
-.settings-tabs button.active { border-bottom-color: #1f5eff; color: #1f5eff; }
-.settings-surface { border: 1px solid #dfe7ef; border-radius: 8px; padding: 30px 32px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .045); }
-.settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; margin-bottom: 28px; }
-.settings-section-heading h2 { margin: 2px 0 7px; color: #24364b; font-size: 22px; line-height: 1.25; letter-spacing: 0; }
-.settings-section-heading > div > span { color: #728092; font-size: 13px; line-height: 1.6; }
-.section-kicker { margin: 0; color: #3977aa; font-size: 11px; font-weight: 850; letter-spacing: .08em; }
-.section-state { display: inline-flex; min-height: 28px; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid #dce8f5; border-radius: 5px; background: #f5f9ff; color: #3977aa; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.profile-settings-layout { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 34px; align-items: start; }
-.avatar-settings { display: grid; justify-items: start; gap: 10px; padding-right: 30px; border-right: 1px solid #e7edf3; }
-.setting-label, .setting-field { color: #4d6072; font-size: 13px; font-weight: 750; }
-.avatar-input { display: none; }
-.avatar-upload-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid #c9dbef; border-radius: 5px; background: #f5f9ff; color: #2469ad; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; white-space: nowrap; }
-.avatar-upload-button:hover { border-color: #9abbe0; background: #eaf3ff; }
-.avatar-upload-button:disabled { cursor: wait; opacity: .62; }
-.avatar-error { max-width: 150px; color: #c64148; font-size: 11px; line-height: 1.45; }
-.settings-form-area { min-width: 0; }
-.settings-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; }
-.setting-field { display: grid; min-width: 0; gap: 7px; }
-.setting-field input, .setting-field select { width: 100%; min-width: 0; height: 40px; border: 1px solid #ccd9e6; border-radius: 6px; padding: 0 11px; background: #fff; color: #24364b; font: inherit; font-size: 14px; font-weight: 500; box-sizing: border-box; transition: border-color .18s ease, box-shadow .18s ease; }
-.setting-field input[readonly] { background: #f6f8fb; color: #728092; cursor: default; }
-.setting-field input:focus, .setting-field select:focus { outline: none; border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }
-.settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
-.primary-btn, .ghost-btn, .danger-btn { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; border: 0; border-radius: 6px; padding: 0 14px; font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; transition: background .18s ease, border-color .18s ease, color .18s ease; }
-.primary-btn { background: #2469ad; color: #fff; }.primary-btn:hover { background: #1b578f; }
-.ghost-btn { background: #e7efff; color: #1f5eff; }.ghost-btn:hover { background: #dbe9ff; }
-.danger-btn { background: #fff0ef; color: #c64148; }.danger-btn:hover { background: #ffe1df; }
-.settings-divider { height: 1px; margin: 34px 0; background: #e7edf3; }
-.compact-heading { margin-bottom: 20px; }
-.account-settings-grid { max-width: 640px; }
-.award-state { color: #a06a19; border-color: #f1dfbc; background: #fff9ed; }
-.award-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 18px; }
-.award-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-.award-list-heading h3 { margin: 0; color: #24364b; font-size: 16px; }
-.award-list-heading span { color: #8290a0; font-size: 12px; }
-.award-list { margin-top: 8px; border-top: 1px solid #e7edf3; }
-.award-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid #e9eef3; }
-.award-row strong { color: #24364b; font-size: 14px; }
-.award-row p { margin: 5px 0 0; color: #728092; font-size: 12px; line-height: 1.5; }
-.award-status { display: inline-flex; min-height: 26px; align-items: center; justify-content: center; padding: 0 8px; border-radius: 5px; background: #fff7e6; color: #a06a19; font-size: 12px; font-weight: 750; white-space: nowrap; }
-.award-status.approved { background: #eef9f1; color: #218c4a; }.award-status.rejected { background: #fff0ef; color: #c64148; }
-.award-actions { display: flex; gap: 8px; }.award-actions .ghost-btn, .award-actions .danger-btn { min-height: 30px; padding: 0 10px; font-size: 12px; }
-.award-empty { display: grid; justify-items: center; gap: 7px; padding: 48px 18px; color: #8290a0; text-align: center; }
-.award-empty svg { color: #8fb9dc; }.award-empty strong { color: #526f8d; font-size: 14px; }.award-empty span { font-size: 12px; }
-.security-state { color: #218c4a; border-color: #cfe9d6; background: #f2fbf4; }
-.security-list { border-top: 1px solid #e7edf3; }
-.security-item { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 98px; border-bottom: 1px solid #e7edf3; }
-.security-item-copy { display: flex; min-width: 0; align-items: center; gap: 14px; }
-.security-item-icon { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; border: 1px solid #dce8f5; border-radius: 6px; background: #f5f9ff; color: #3977aa; }
-.security-item-copy strong { color: #24364b; font-size: 14px; }.security-item-copy p { margin: 5px 0 0; color: #728092; font-size: 13px; line-height: 1.5; }
-@media (max-width: 900px) {
-  .settings-surface { padding: 26px; }
-  .profile-settings-layout { grid-template-columns: 136px minmax(0, 1fr); gap: 24px; }
-  .avatar-settings { padding-right: 24px; }
-  .award-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.page-state.error,
+.error-msg {
+  color: #d93025;
 }
-@media (max-width: 620px) {
-  .settings-tabs { gap: 22px; padding: 0 2px; }
-  .settings-surface { padding: 22px 18px; }
-  .settings-section-heading { gap: 14px; margin-bottom: 22px; }
-  .settings-section-heading h2 { font-size: 20px; }
-  .section-state { display: none; }
-  .profile-settings-layout { grid-template-columns: 1fr; gap: 22px; }
-  .avatar-settings { justify-items: start; padding: 0 0 20px; border-right: 0; border-bottom: 1px solid #e7edf3; }
-  .settings-field-grid, .award-form { grid-template-columns: 1fr; }
-  .award-row { grid-template-columns: 1fr; gap: 10px; }
-  .award-actions { justify-content: flex-start; }
-  .security-item { align-items: flex-start; flex-direction: column; gap: 14px; padding: 18px 0; }
-  .security-item .primary-btn, .security-item .ghost-btn { width: 100%; }
+
+.error-msg.compact {
+  padding: 12px 14px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+.error-msg.compact { background: #fff1f0; }
+
+.profile-hero {
+  position: relative;
+  display: grid;
+  min-height: 230px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  overflow: hidden;
+  padding: 34px 40px;
+  border: 1px solid #d7e7ff;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 86% 20%, rgba(255, 255, 255, .76) 0 2px, transparent 3px) 0 0 / 22px 22px,
+    radial-gradient(ellipse at 78% 12%, rgba(151, 196, 255, .42), transparent 40%),
+    linear-gradient(124deg, #f9fcff 0%, #edf5ff 50%, #d8e9ff 100%);
+  box-shadow: 0 18px 38px rgba(47, 99, 180, .12);
+}
+
+.profile-hero::before,
+.profile-hero::after {
+  position: absolute;
+  border-radius: 50%;
+  content: '';
+}
+
+.profile-hero::before {
+  right: -115px;
+  bottom: -155px;
+  width: 390px;
+  height: 300px;
+  border: 1px solid rgba(255,255,255,.72);
+}
+
+.profile-hero::after {
+  top: -130px;
+  left: -120px;
+  width: 300px;
+  height: 240px;
+  background: rgba(255,255,255,.46);
+}
+
+.hero-copy,
+.hero-avatar {
+  position: relative;
+  z-index: 1;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  color: #2f70df;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+
+.profile-hero h1 {
+  margin: 0;
+  font-size: clamp(34px, 4.6vw, 54px);
+  font-weight: 860;
+  letter-spacing: -.06em;
+}
+
+.username {
+  margin: 7px 0 16px;
+  color: #61728f;
+  font-size: 15px;
+}
+
+.identity-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.identity-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(190, 210, 242, .8);
+  border-radius: 999px;
+  background: rgba(255,255,255,.68);
+  color: #60728e;
+  font-size: 12px;
+  font-weight: 720;
+  backdrop-filter: blur(8px);
+}
+
+.role-badge.admin { color: #b5222b; background: #fff0f0; }
+.role-badge.teacher { color: #1d63b7; background: #eef6ff; }
+.role-badge.student { color: #16834f; background: #eefaf2; }
+
+.hero-avatar {
+  display: grid;
+  width: 132px;
+  height: 132px;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.85);
+  border-radius: 36px;
+  background: linear-gradient(145deg, #ffffff, #8fc5ff);
+  box-shadow: 0 22px 34px rgba(54, 111, 203, .18);
+}
+
+.hero-avatar span {
+  display: grid;
+  width: 88px;
+  height: 88px;
+  place-items: center;
+  border-radius: 28px;
+  background: linear-gradient(135deg, #2f7cf2, #173b66);
+  color: #fff;
+  font-size: 40px;
+  font-weight: 900;
+}
+
+.hero-avatar :deep(.user-avatar) {
+  border: 4px solid rgba(255,255,255,.86);
+  box-shadow: inset 0 0 0 1px rgba(47,124,242,.14);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.metric-card {
+  display: grid;
+  gap: 8px;
+  min-height: 132px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 9px 22px rgba(38, 56, 89, .06);
+}
+
+.metric-card.primary {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #2f7cf2, #235fd3);
+  box-shadow: 0 14px 28px rgba(47, 124, 242, .22);
+}
+
+.metric-card span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 12px;
+  background: #eef5ff;
+  color: #2f70df;
+}
+
+.metric-card.primary span {
+  background: rgba(255,255,255,.18);
+  color: #fff;
+}
+
+.metric-card strong {
+  font-size: 27px;
+  line-height: 1;
+}
+
+.metric-card small {
+  color: var(--muted);
+  font-weight: 720;
+}
+
+.metric-card.primary small {
+  color: rgba(255,255,255,.78);
+}
+
+.profile-panel,
+.inner-card,
+.settings-card {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(23, 49, 80, .065);
+}
+
+.profile-panel {
+  padding: 18px;
+}
+
+.tab-nav,
+.panel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 6px;
+  border-radius: 16px;
+  background: #f4f7fb;
+}
+
+.tab-nav button,
+.panel-tabs button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #69778e;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 780;
+}
+
+.tab-nav button.active,
+.panel-tabs button.active {
+  background: #fff;
+  color: #1f63c6;
+  box-shadow: 0 5px 14px rgba(30, 72, 130, .1);
+}
+
+.overview-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+  align-items: start;
+  gap: 16px;
+}
+
+.inner-card,
+.settings-card {
+  padding: 20px;
+}
+
+.panel-title,
+.card-title,
+.settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.panel-title p,
+.card-title p {
+  margin: 0 0 4px;
+  color: #2f70df;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.panel-title h2,
+.card-title h2,
+.settings-card h2,
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.panel-title > span,
+.panel-title > svg,
+.card-title > span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #2f70df;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.heatmap-panel {
+  overflow: hidden;
+}
+
+.heatmap-wrapper {
+  width: 100%;
+  padding-bottom: 4px;
+}
+
+.heatmap-track {
+  --heatmap-week-count: 53;
+  --heatmap-weekday-width: 22px;
+  --heatmap-cell-size: 100%;
+  --heatmap-cell-gap: clamp(1px, .22vw, 3px);
+  display: grid;
+  width: 100%;
+  grid-template-columns: var(--heatmap-weekday-width) repeat(var(--heatmap-week-count), minmax(0, 1fr));
+  row-gap: 4px;
+}
+
+.month-row {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: repeat(var(--heatmap-week-count), minmax(0, 1fr));
+  margin-bottom: 4px;
+}
+
+.month-row span {
+  color: #8592a5;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.heatmap-body {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: var(--heatmap-weekday-width) repeat(var(--heatmap-week-count), minmax(0, 1fr));
+  align-items: start;
+}
+
+.weekday-gutter {
+  width: 22px;
+  flex-shrink: 0;
+}
+
+.month-cells {
+  display: grid;
+  grid-template-columns: repeat(var(--heatmap-week-count), minmax(0, 1fr));
+}
+
+.month-label {
+  color: #8592a5;
+  font-size: 10px;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: repeat(var(--heatmap-week-count), minmax(0, 1fr));
+  column-gap: var(--heatmap-cell-gap);
+}
+
+.weekday-col {
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  gap: var(--heatmap-cell-gap);
+  width: var(--heatmap-weekday-width);
+  padding-right: 5px;
+}
+
+.weekday-col span {
+  color: #9aa6b6;
+  font-size: 9px;
+  line-height: 1;
+  text-align: right;
+}
+
+.cells-grid {
+  display: flex;
+  gap: 3px;
+}
+
+.heat-week,
+.heatmap-week {
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  gap: var(--heatmap-cell-gap);
+  min-width: 0;
+}
+
+.heat-week i,
+.heatmap-cell {
+  display: block;
+  width: var(--heatmap-cell-size);
+  max-width: 12px;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  transition: transform .12s;
+}
+
+.heat-week i:hover,
+.heatmap-cell:hover {
+  position: relative;
+  z-index: 2;
+  transform: scale(1.55);
+  outline: 1px solid #475569;
+}
+
+.heatmap-cell.empty {
+  background: transparent !important;
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  color: #8592a5;
+  font-size: 10px;
+}
+
+.heatmap-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.difficulty-card {
+  align-self: start;
+  overflow: hidden;
+  padding-bottom: 22px;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+}
+
+.difficulty-bars,
+.dist-bars {
+  display: grid;
+  gap: 14px;
+}
+
+.difficulty-row,
+.dist-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 10px;
+}
+
+.difficulty-row span,
+.dist-row span {
+  overflow: hidden;
+  color: #607087;
+  font-size: 12px;
+  font-weight: 760;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.difficulty-row div,
+.dist-row div {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf2f7;
+}
+
+.difficulty-row i,
+.dist-row i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6bd6ff, #2f7cf2);
+}
+
+.difficulty-row b,
+.dist-row b {
+  color: #17233a;
+  font-size: 13px;
+  text-align: right;
+}
+
+.recent-card {
+  margin-top: 16px;
+}
+
+.accepted-card {
+  overflow: hidden;
+}
+
+.accepted-list {
+  display: grid;
+  max-height: 680px;
+  overflow-y: auto;
+}
+
+.accepted-row {
+  display: grid;
+  grid-template-columns: 106px minmax(0, 1fr) 96px 120px;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 11px 0;
+  border: 0;
+  border-bottom: 1px solid #eef2f6;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.accepted-row:hover {
+  background: #fafcff;
+}
+
+.accepted-source {
+  display: inline-flex;
+  width: 94px;
+  min-width: 94px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #2f70df;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accepted-source.local {
+  background: #eefaf2;
+  color: #16834f;
+}
+
+.accepted-source.codeforces {
+  background: #eef5ff;
+  color: #2f70df;
+}
+
+.accepted-title {
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accepted-difficulty,
+.accepted-remote,
+.accepted-time {
+  overflow: hidden;
+  color: #8a97aa;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accepted-difficulty {
+  color: #607087;
+  font-weight: 760;
+}
+
+.submission-list {
+  display: grid;
+  max-height: 620px;
+  overflow-y: auto;
+}
+
+.submission-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 84px 120px;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid #eef2f6;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.submission-row:hover {
+  background: #fafcff;
+}
+
+.status-dot,
+.sub-status {
+  display: inline-flex;
+  width: 58px;
+  min-width: 58px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  overflow: hidden;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.sub-title {
+  overflow: hidden;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub-lang {
+  justify-self: start;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: #f1f5f9;
+  color: #68768a;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.sub-meta,
+.sub-time {
+  color: #8a97aa;
+  font-size: 12px;
+}
+
+.sub-time {
+  white-space: nowrap;
+}
+
+.empty-state,
+.empty-mini {
+  display: grid;
+  place-items: center;
+  color: #9aa6b6;
+}
+
+.empty-state {
+  min-height: 170px;
+}
+
+.empty-mini {
+  min-height: 76px;
+  font-size: 13px;
+}
+
+.settings-view {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.avatar-settings-card {
+  grid-column: span 1;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+}
+
+.avatar-settings-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.avatar-settings-body :deep(.user-avatar) {
+  border: 3px solid #dceaff;
+  box-shadow: 0 12px 24px rgba(47, 100, 180, .12);
+}
+
+.avatar-input {
+  display: none;
+}
+
+.settings-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.profile-panel label,
+.settings-card label {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 13px;
+  color: #4b5b72;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.profile-panel input,
+.profile-panel select,
+.settings-card input,
+.settings-card select {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  border: 1px solid #d9e2ee;
+  border-radius: 11px;
+  padding: 0 12px;
+  background: #fff;
+  color: #17233a;
+  font: inherit;
+}
+
+.profile-panel input:focus,
+.profile-panel select:focus,
+.settings-card input:focus,
+.settings-card select:focus {
+  outline: none;
+  border-color: #6ca7ff;
+  box-shadow: 0 0 0 4px rgba(47,124,242,.12);
+}
+
+.hint {
+  color: #8290a3;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.cf-sync-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eef2f6;
+}
+
+.spinning {
+  animation: spin .9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+}
+
+.primary-btn,
+.secondary-btn,
+.ghost-btn,
+.danger-btn {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 11px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 820;
+}
+
+.primary-btn {
+  padding: 0 15px;
+  background: linear-gradient(135deg, #2f7cf2, #235fd3);
+  color: #fff;
+  box-shadow: 0 9px 17px rgba(47,124,242,.18);
+}
+
+.primary-btn:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+
+.secondary-btn,
+.ghost-btn {
+  padding: 0 13px;
+  background: #eef3f8;
+  color: #425169;
+}
+
+.danger-btn {
+  padding: 0 13px;
+  background: #fff1f0;
+  color: #d93025;
+}
+
+.awards-card {
+  background: linear-gradient(180deg, #fff, #fbfdff);
+}
+
+.award-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.award-form label.full {
+  grid-column: 1 / -1;
+}
+
+.award-list {
+  display: grid;
+  margin-top: 18px;
+  border-top: 1px solid #eef2f6;
+}
+
+.award-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.award-row p {
+  margin: 4px 0 0;
+  color: #8290a3;
+  font-size: 12px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: #eef3f8;
+  color: #425169;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.icon-btn.danger {
+  background: #fff1f0;
+  color: #d93025;
+}
+
+.award-status {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #fff7e6;
+  color: #ad6800;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.award-status.approved {
+  background: #eefaf2;
+  color: #16834f;
+}
+
+.award-status.rejected {
+  background: #fff1f0;
+  color: #d93025;
+}
+
+.modal-overlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, .44);
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  width: min(860px, 100%);
+  max-height: 86vh;
+  overflow-y: auto;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .28);
+}
+
+.modal-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eef2f6;
+  background: #fff;
+}
+
+.modal-header button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: #f1f5f9;
+  cursor: pointer;
+  font-size: 22px;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 11px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.detail-meta i {
+  font-style: normal;
+  font-weight: 850;
+}
+
+.compile-box {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #fff7e6;
+}
+
+.compile-box pre {
+  white-space: pre-wrap;
+}
+
+.code-block {
+  max-height: 420px;
+  overflow: auto;
+  padding: 16px;
+  border-radius: 14px;
+  background: #111827;
+  color: #dbeafe;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cases-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cases-table th,
+.cases-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #eef2f6;
+  text-align: left;
+}
+
+.cases-table th {
+  background: #f8fafc;
+}
+
+@media (max-width: 980px) {
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .overview-layout,
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .award-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .profile-page {
+    width: min(100% - 28px, 560px);
+    padding-top: 20px;
+  }
+
+  .profile-hero {
+    grid-template-columns: 1fr;
+    padding: 28px;
+  }
+
+  .hero-avatar {
+    width: 96px;
+    height: 96px;
+    border-radius: 28px;
+  }
+
+  .hero-avatar span {
+    width: 66px;
+    height: 66px;
+    border-radius: 21px;
+    font-size: 30px;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-panel {
+    padding: 12px;
+  }
+
+  .submission-row {
+    grid-template-columns: 72px minmax(0, 1fr) 70px;
+  }
+
+  .accepted-row {
+    grid-template-columns: 92px minmax(0, 1fr) 78px;
+  }
+
+  .sub-meta,
+  .sub-time,
+  .accepted-remote,
+  .accepted-time {
+    display: none;
+  }
+
+  .award-form,
+  .award-row {
+    grid-template-columns: 1fr;
+  }
+
+  .avatar-settings-body {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
 }
 </style>

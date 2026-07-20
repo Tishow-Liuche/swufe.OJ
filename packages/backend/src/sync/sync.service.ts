@@ -2,11 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProblemAccessService, type ProblemActor } from '../common/problem-access.service';
 import { sanitizeProblemContent } from '../common/content-sanitizer';
+import { normalizePointDifficulty } from '../problem/point-difficulty';
 
 export interface RemoteProblemData {
   remoteId: string;
   title: string;
-  difficulty?: string;
+  difficulty?: string | null;
   timeLimit?: number;
   memoryLimit?: number;
   tags?: string[];
@@ -92,7 +93,7 @@ export class SyncService {
         createdById: actor.id,
         title: data.title,
         source: 'EXTERNAL',
-        difficulty: data.difficulty || 'POPULAR',
+        difficulty: data.difficulty == null ? null : normalizePointDifficulty(data.difficulty),
         timeLimit: data.timeLimit || 1000,
         memoryLimit: data.memoryLimit || 256,
         status: 'PUBLISHED',

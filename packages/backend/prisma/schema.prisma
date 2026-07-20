@@ -35,6 +35,7 @@ model User {
   assignmentStudents       AssignmentStudent[]
   sessions                 UserSession[]
   externalAccounts         ExternalAccount[]
+  externalSolvedProblems   ExternalSolvedProblem[]
   competitionAwards        CompetitionAward[]
   helperDevices            HelperDevice[]
   remoteTasks              RemoteSubmissionTask[]
@@ -57,7 +58,7 @@ model User {
   reviewedContentReports   ContentReport[]          @relation("ContentReportReviewer")
   problemFeedbacks         ProblemFeedback[]        @relation("ProblemFeedbackReporter")
   reviewedProblemFeedbacks ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
-  createdProblems         Problem[]                @relation("ProblemCreator")
+  createdProblems          Problem[]               @relation("ProblemCreator")
 }
 
 model CompetitionAward {
@@ -235,6 +236,7 @@ model Problem {
   tags               ProblemTag[]
   permissions        ProblemPermission[]
   submissions        Submission[]
+  externalSolved     ExternalSolvedProblem[]
   contestProblems    ContestProblem[]
   assignmentProblems AssignmentProblem[]
   knowledgePoints    ProblemKnowledgePoint[]
@@ -249,6 +251,29 @@ model Problem {
   createdBy          User?                @relation("ProblemCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([createdById])
+}
+
+model ExternalSolvedProblem {
+  id                 String   @id @default(cuid())
+  userId             String
+  problemId          String
+  platform           String
+  remoteProblemId    String
+  remoteSubmissionId String?
+  acceptedAt         DateTime
+  timeUsed           Int?
+  memoryUsed         Int?
+  rawPayload         Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem            Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform, remoteProblemId])
+  @@unique([platform, remoteSubmissionId])
+  @@index([userId])
+  @@index([problemId])
+  @@index([platform, remoteProblemId])
 }
 
 model ProblemSource {

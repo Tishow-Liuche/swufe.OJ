@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+﻿import { PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as readline from 'readline';
@@ -22,29 +22,30 @@ interface LuoguProblem {
 }
 
 function mapDifficulty(d: number): string {
-  if (d <= 1) return 'BEGINNER';
-  if (d <= 3) return 'POPULAR';
-  if (d <= 5) return 'IMPROVE';
-  if (d <= 7) return 'PROVINCIAL';
-  return 'NOI';
+  if (d <= 1) return 'POINT_0';
+  if (d <= 3) return 'POINT_1';
+  if (d <= 4) return 'POINT_2';
+  if (d <= 5) return 'POINT_3';
+  if (d <= 6) return 'POINT_4';
+  return 'POINT_5';
 }
 
 function buildDescription(p: LuoguProblem): string {
   let md = '';
   if (p.background) md += p.background + '\n\n---\n\n';
-  md += `## 题目描述\n\n${p.description}\n\n`;
-  md += `## 输入格式\n\n${p.inputFormat}\n\n`;
-  md += `## 输出格式\n\n${p.outputFormat}\n\n`;
+  md += `## 棰樼洰鎻忚堪\n\n${p.description}\n\n`;
+  md += `## 杈撳叆鏍煎紡\n\n${p.inputFormat}\n\n`;
+  md += `## 杈撳嚭鏍煎紡\n\n${p.outputFormat}\n\n`;
 
   if (p.samples && p.samples.length > 0) {
     p.samples.forEach(([input, output], i) => {
-      md += `## 样例 #${i + 1}\n\n`;
-      md += `### 样例输入 #${i + 1}\n\n\`\`\`\n${input}\n\`\`\`\n\n`;
-      md += `### 样例输出 #${i + 1}\n\n\`\`\`\n${output}\n\`\`\`\n\n`;
+      md += `## 鏍蜂緥 #${i + 1}\n\n`;
+      md += `### 鏍蜂緥杈撳叆 #${i + 1}\n\n\`\`\`\n${input}\n\`\`\`\n\n`;
+      md += `### 鏍蜂緥杈撳嚭 #${i + 1}\n\n\`\`\`\n${output}\n\`\`\`\n\n`;
     });
   }
 
-  if (p.hint) md += `## 提示\n\n${p.hint}\n\n`;
+  if (p.hint) md += `## 鎻愮ず\n\n${p.hint}\n\n`;
 
   return md;
 }
@@ -90,7 +91,7 @@ async function main() {
 
         // Update tags
         await p.problemTag.deleteMany({ where: { problemId: existing.problem.id } });
-        // Map numeric tag IDs to names — we'll use the IDs as names for simplicity
+        // Map numeric tag IDs to names 鈥?we'll use the IDs as names for simplicity
         await p.problemTag.createMany({
           data: tags.map(name => ({ problemId: existing.problem.id, name, type: 'TAG' })),
         });
@@ -129,7 +130,7 @@ async function main() {
   }
 
   const total = await p.problem.count();
-  console.log(`\n✅ Done! Lines: ${lineNum}, Created: ${created}, Updated: ${updated}, Skipped: ${skipped}`);
+  console.log(`\n鉁?Done! Lines: ${lineNum}, Created: ${created}, Updated: ${updated}, Skipped: ${skipped}`);
   console.log(`Total problems in DB: ${total}`);
   console.log(`LOCAL: ${await p.problem.count({ where: { source: 'LOCAL' } })}`);
   console.log(`EXTERNAL: ${await p.problem.count({ where: { source: 'EXTERNAL' } })}`);

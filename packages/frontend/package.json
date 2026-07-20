@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "test:markdown": "node scripts/check-markdown-renderer.mjs",
+    "test:cf-helper": "node scripts/check-cf-helper.mjs",
+    "test:luogu-helper": "node scripts/check-luogu-helper.mjs",
+    "test:leaderboard": "node scripts/check-leaderboard-frame.mjs",
+    "test:profile-ui": "node scripts/check-profile-ui.mjs",
+    "test:point-difficulty": "node scripts/check-point-difficulty.mjs",
     "preview": "vite preview",
     "test": "vitest"
   },

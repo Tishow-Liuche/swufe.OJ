@@ -1,5 +1,6 @@
 import { SyncAdapter, RemoteProblemData } from '../sync.service';
 import { Logger } from '@nestjs/common';
+import { mapLuoguDifficultyToPointDifficulty } from '../../problem/point-difficulty';
 
 /**
  * 洛谷题目同步适配器
@@ -116,10 +117,6 @@ export class LuoguAdapter implements SyncAdapter {
   }
 
   private mapDifficulty(diff: number): string {
-    if (diff <= 1) return 'BEGINNER';
-    if (diff <= 3) return 'POPULAR';
-    if (diff <= 5) return 'IMPROVE';
-    if (diff <= 7) return 'PROVINCIAL';
-    return 'NOI';
+    return mapLuoguDifficultyToPointDifficulty(diff);
   }
 }

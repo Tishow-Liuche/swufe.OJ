@@ -12,6 +12,7 @@ import {
   AssignProblemOwnerDto,
   CreateProblemDto,
   GrantProblemPermissionDto,
+  QueryAuthoredProblemDto,
   QueryProblemDto,
   UpdateProblemDto,
 } from './dto';
@@ -60,6 +61,21 @@ export class ProblemController {
   @Get()
   findAll(@Query() query: QueryProblemDto) {
     return this.problem.findAll(query);
+  }
+
+  /** 历史录题列表 */
+  @Get('mine/created')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('TEACHER', 'ADMIN')
+  findAuthored(@Query() query: QueryAuthoredProblemDto, @Req() req: any) {
+    return this.problem.findAuthored(query, req.user);
+  }
+
+  @Get('mine/created/:id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('TEACHER', 'ADMIN')
+  findAuthoredOne(@Param('id') id: string, @Req() req: any) {
+    return this.problem.findManageable(id, req.user);
   }
 
   /** 题目详情（公开） */

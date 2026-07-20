@@ -49,9 +49,9 @@ onMounted(async () => {
     <section class="hero">
       <div class="hero-shell">
         <div class="hero-content">
-          <span class="hero-eyebrow"><Sparkles :size="16" aria-hidden="true" /> SWUFE ONLINE JUDGE</span>
-          <h1 class="hero-title">西财 <em>OJ</em></h1>
-          <p class="hero-subtitle">面向程序设计与算法竞赛的在线评测训练平台</p>
+          <span class="hero-eyebrow"><Sparkles :size="16" aria-hidden="true" /> 西财奇点OJ</span>
+          <h1 class="hero-title">SWUFE <em>Singularity OJ</em></h1>
+          <p class="hero-subtitle">西财奇点OJ · 面向程序设计与算法竞赛的在线评测训练平台</p>
           <p class="hero-desc">多源题库 · 实时评测 · 教学管理 · 能力分析 · 竞赛训练</p>
           <div class="hero-actions">
             <button class="btn-primary" @click="openProblemLibrary">进入题库 <ArrowRight :size="18" aria-hidden="true" /></button>
@@ -219,7 +219,7 @@ onMounted(async () => {
 
     <!-- 页脚 -->
     <footer class="footer">
-      <p>西南财经大学 · 多源 OJ 教学与竞赛平台</p>
+      <p>SWUFE Singularity OJ · 西财奇点OJ · 多源 OJ 教学与竞赛平台</p>
       <p class="footer-tech">Vue 3 + NestJS + PostgreSQL + go-judge</p>
     </footer>
   </div>

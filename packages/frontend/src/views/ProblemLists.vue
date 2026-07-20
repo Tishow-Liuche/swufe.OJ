@@ -1,31 +1,22 @@
-<script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+﻿<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue';
 import { useStorage } from '@vueuse/core';
 import { BookOpenCheck, CalendarRange, LayoutDashboard, Library, ListChecks, NotebookTabs, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 import api from '../api/client';
 import CheckInModal from '../components/CheckInModal.vue';
 import LearningProgress from '../components/LearningProgress.vue';
 import { useAuthStore } from '../stores/auth';
+import { pointDifficultyOrder, pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
 type Tab = 'overview' | 'lists' | 'plans' | 'library' | 'notes';
 type ListSort = 'difficulty' | 'number' | 'joined';
 
 const router = useRouter();
-const route = useRoute();
 const auth = useAuthStore();
-const workspaceTabIds: Tab[] = ['overview', 'lists', 'plans', 'library', 'notes'];
-
-function tabFromQuery(value: unknown): Tab {
-  const candidate = Array.isArray(value) ? value[0] : value;
-  return typeof candidate === 'string' && workspaceTabIds.includes(candidate as Tab)
-    ? candidate as Tab
-    : 'overview';
-}
-
-const activeTab = ref<Tab>(tabFromQuery(route.query.tab));
+const activeTab = ref<Tab>('overview');
 const sidebarCollapsed = useStorage('swufe-oj:learning-sidebar-collapsed', false);
 const loading = ref(true);
 const saving = ref(false);
@@ -64,16 +55,12 @@ const noteSearch = ref('');
 const noteProblems = ref<any[]>([]);
 
 const selectedListItems = computed(() => selectedList.value?.items || []);
-const difficultyOrder: Record<string, number> = {
-  BEGINNER: 0, EASY: 0, POPULAR: 1, INTERMEDIATE: 1, IMPROVE: 2,
-  ADVANCED: 3, HARD: 4, EXPERT: 5, UNRATED: 99,
-};
 const sortedListItems = computed(() => {
   const direction = listSortDirection.value === 'asc' ? 1 : -1;
   return [...selectedListItems.value].sort((left, right) => {
     if (listSort.value === 'difficulty') {
-      const a = difficultyOrder[left.problem?.difficulty] ?? 98;
-      const b = difficultyOrder[right.problem?.difficulty] ?? 98;
+      const a = pointDifficultyOrder(left.problem?.difficulty);
+      const b = pointDifficultyOrder(right.problem?.difficulty);
       if (a !== b) return (a - b) * direction;
     } else if (listSort.value === 'number') {
       const numberOf = (title = '') => Number(title.match(/P\s*(\d+)/i)?.[1] ?? Number.MAX_SAFE_INTEGER);
@@ -290,14 +277,6 @@ function reverseListSort() {
   listSortDirection.value = listSortDirection.value === 'asc' ? 'desc' : 'asc';
 }
 
-function selectTab(tab: Tab) {
-  activeTab.value = tab;
-  const query = { ...route.query };
-  if (tab === 'overview') delete query.tab;
-  else query.tab = tab;
-  void router.replace({ query });
-}
-
 function openProblem(problemId: string) { router.push(`/problems/${problemId}`); }
 
 async function openPublicList(id: string) {
@@ -439,7 +418,6 @@ async function archiveNote(note: any) {
 }
 
 onMounted(loadAll);
-watch(() => route.query.tab, (value) => { activeTab.value = tabFromQuery(value); });
 </script>
 
 <template>
@@ -452,7 +430,7 @@ watch(() => route.query.tab, (value) => { activeTab.value = tabFromQuery(value);
       </div>
       <p class="learning-sidebar-label">学习模块</p>
       <nav class="workspace-nav" aria-label="学习工作台">
-        <button v-for="item in workspaceTabs" :key="item.id" :title="sidebarCollapsed ? item.label : undefined" :class="{ active: activeTab === item.id }" @click="selectTab(item.id)">
+        <button v-for="item in workspaceTabs" :key="item.id" :title="sidebarCollapsed ? item.label : undefined" :class="{ active: activeTab === item.id }" @click="activeTab = item.id">
           <component :is="item.icon" :size="18" />
           <span><strong>{{ item.label }}</strong><small>{{ item.detail }}</small></span>
           <b v-if="item.count !== undefined">{{ item.count }}</b>
@@ -469,7 +447,7 @@ watch(() => route.query.tab, (value) => { activeTab.value = tabFromQuery(value);
       </div>
       <div class="header-actions">
         <button class="secondary-btn" @click="router.push('/problems')"><BookOpenCheck :size="17" />进入题库</button>
-        <button v-if="auth.isLoggedIn()" class="primary-btn" @click="selectTab('notes')"><NotebookTabs :size="17" />今日复习 {{ dueNotes.length }}</button>
+        <button v-if="auth.isLoggedIn()" class="primary-btn" @click="activeTab = 'notes'"><NotebookTabs :size="17" />今日复习 {{ dueNotes.length }}</button>
       </div>
     </header>
 
@@ -509,15 +487,15 @@ watch(() => route.query.tab, (value) => { activeTab.value = tabFromQuery(value);
             </div>
           </section>
           <section class="panel quick-panel">
-            <div class="panel-heading"><div><span class="section-kicker">YOUR LIBRARY</span><h2>继续学习</h2></div><button class="text-btn" @click="selectTab('library')">查看全部</button></div>
+            <div class="panel-heading"><div><span class="section-kicker">YOUR LIBRARY</span><h2>继续学习</h2></div><button class="text-btn" @click="activeTab = 'library'">查看全部</button></div>
             <div class="quick-list">
-              <button v-for="item in continueItems" :key="item.problemId" class="quick-row" @click="openProblem(item.problemId)"><span class="quick-icon">{{ item.types.includes('错题') ? '✓' : '☆' }}</span><span><strong>{{ item.problem?.title }}</strong><small><b>{{ item.types.join(' / ') }}</b> · {{ item.problem?.difficulty || '未分级' }}</small></span><span>›</span></button>
+              <button v-for="item in continueItems" :key="item.problemId" class="quick-row" @click="openProblem(item.problemId)"><span class="quick-icon">{{ item.types.includes('错题') ? '✓' : '☆' }}</span><span><strong>{{ item.problem?.title }}</strong><small><b>{{ item.types.join(' / ') }}</b> · {{ pointDifficultyShortLabel(item.problem?.difficulty) }}</small></span><span>›</span></button>
               <div v-if="!continueItems.length" class="empty-state">收藏和错题会集中出现在这里。</div>
             </div>
           </section>
         </div>
         <section class="public-section">
-          <div class="panel-heading"><div><span class="section-kicker">COMMUNITY LISTS</span><h2>公开题单</h2></div><button class="text-btn" @click="selectTab('lists')">管理题单</button></div>
+          <div class="panel-heading"><div><span class="section-kicker">COMMUNITY LISTS</span><h2>公开题单</h2></div><button class="text-btn" @click="activeTab = 'lists'">管理题单</button></div>
           <div class="public-grid"><button v-for="list in publicLists.slice(0, 6)" :key="list.id" class="public-list" @click="openPublicList(list.id)"><strong>{{ list.name }}</strong><span>{{ list._count?.items || 0 }} 道题</span><small>{{ list.description || '暂无说明' }}</small></button><div v-if="!publicLists.length" class="empty-state">还没有公开题单。</div></div>
         </section>
       </section>
@@ -541,7 +519,7 @@ watch(() => route.query.tab, (value) => { activeTab.value = tabFromQuery(value);
               <button class="sort-direction" :title="`倒转排序，当前为${sortDirectionLabel}`" aria-label="倒转排序" @click="reverseListSort">{{ listSortDirection === 'asc' ? '↑' : '↓' }}</button>
             </div>
             <div v-if="selectedListOwned" class="problem-catalog"><div class="catalog-heading"><span>站内题目</span><small>{{ listProblemKeyword ? `“${listProblemKeyword}”的搜索结果` : '最近发布' }}</small></div><div v-if="listProblems.length" class="search-results"><button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)"><span><strong>{{ problem.title }}</strong><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }}{{ problem.sourceInfo?.remoteProblemId ? ` · ${problem.sourceInfo.remoteProblemId}` : '' }}</small></span><b>＋加入</b></button></div><div v-else-if="listProblemsLoading" class="problem-search-empty">正在获取站内题目...</div><div v-else-if="listProblemsLoaded" class="problem-search-empty">{{ listProblemKeyword ? '没有找到匹配题目，请尝试标题或平台题号。' : '暂无其他可加入的已发布题目。' }}</div></div>
-            <div v-if="selectedListItems.length" class="ordered-list"><div v-for="(item, index) in sortedListItems" :key="item.id" class="ordered-row"><span class="order-number">{{ index + 1 }}</span><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span v-if="listSort === 'joined'" class="joined-at">{{ new Date(item.createdAt).toLocaleDateString() }}</span><span class="difficulty">{{ item.problem?.difficulty || '未分级' }}</span><button v-if="selectedListOwned" class="icon-btn danger" title="移出题单" @click="removeFromList(item.id)">×</button><button v-else class="icon-btn" title="打开题目" @click="openProblem(item.problemId)">›</button></div></div>
+            <div v-if="selectedListItems.length" class="ordered-list"><div v-for="(item, index) in sortedListItems" :key="item.id" class="ordered-row"><span class="order-number">{{ index + 1 }}</span><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span v-if="listSort === 'joined'" class="joined-at">{{ new Date(item.createdAt).toLocaleDateString() }}</span><span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span><button v-if="selectedListOwned" class="icon-btn danger" title="移出题单" @click="removeFromList(item.id)">×</button><button v-else class="icon-btn" title="打开题目" @click="openProblem(item.problemId)">›</button></div></div>
             <div v-else class="empty-state">从上方站内题目中选择并加入这个题单。</div>
           </main>
           <div v-else class="empty-state panel">选择一个题单开始编辑。</div>
@@ -555,7 +533,7 @@ watch(() => route.query.tab, (value) => { activeTab.value = tabFromQuery(value);
         <div class="panel plan-builder"><div class="panel-heading"><div><span class="section-kicker">TODAY</span><h2>每日练习编排</h2></div><button class="text-btn" @click="generateDaily">按计划补充</button></div><div class="daily-progress"><div><strong>{{ daily.progress?.completed || 0 }} / {{ daily.progress?.total || 0 }}</strong><span>今日完成</span></div><div class="progress-track"><i :style="{ width: `${completionPercent}%` }"></i></div><span>{{ completionPercent }}%</span></div><div class="search-inline wide"><input v-model="planSearch" placeholder="搜索题目加入今日练习" @keyup.enter="searchPlanProblems"><button class="secondary-btn" @click="searchPlanProblems">搜索</button></div><div v-if="planProblems.length" class="search-results"><button v-for="problem in planProblems" :key="problem.id" @click="addToDaily(problem.id)"><span>{{ problem.title }}</span><small>＋加入今日</small></button></div><div class="daily-list schedule-list"><label v-for="item in daily.items" :key="item.id" class="daily-row" :class="{ done: item.completed }"><input type="checkbox" :checked="item.completed" @change="toggleDaily(item)"><span class="history-check" :class="{ visible: item.previouslyDone || item.completed }">✓</span><span class="daily-type">{{ item.type === 'REVIEW' ? '复习题' : '新题' }}</span><button class="problem-link" @click.prevent="openProblem(item.problemId)">{{ item.problem?.title }}</button></label></div></div>
       </section>
 
-      <section v-else-if="activeTab === 'library'" class="library-section"><div class="section-toolbar"><div><span class="section-kicker">RETAIN & REVIEW</span><h2>收藏与错题</h2></div><button class="secondary-btn" @click="generateDaily">把重点加入今日练习</button></div><div class="library-grid"><section class="panel library-column"><div class="panel-heading"><div><h2>收藏题目</h2><small>{{ favorites.length }} 道题</small></div></div><div class="library-list"><div v-for="item in favorites" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span>{{ item.problem?.difficulty || '未分级' }}</span><button class="icon-btn" title="取消收藏" @click="removeFavorite(item.problemId)">☆</button></div><div v-if="!favorites.length" class="empty-state">在题目页点击收藏，建立自己的练习清单。</div></div></section><section class="panel library-column"><div class="panel-heading"><div><h2>错题本</h2><small>{{ wrongBook.length }} 道题</small></div></div><div class="library-list"><div v-for="item in wrongBook" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span class="wrong-tag">{{ item.errorType }}</span><button class="icon-btn" title="移出错题本" @click="removeWrong(item.problemId)">✓</button></div><div v-if="!wrongBook.length" class="empty-state">提交出现错误的题目会自动进入这里。</div></div></section></div></section>
+      <section v-else-if="activeTab === 'library'" class="library-section"><div class="section-toolbar"><div><span class="section-kicker">RETAIN & REVIEW</span><h2>收藏与错题</h2></div><button class="secondary-btn" @click="generateDaily">把重点加入今日练习</button></div><div class="library-grid"><section class="panel library-column"><div class="panel-heading"><div><h2>收藏题目</h2><small>{{ favorites.length }} 道题</small></div></div><div class="library-list"><div v-for="item in favorites" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span>{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span><button class="icon-btn" title="取消收藏" @click="removeFavorite(item.problemId)">☆</button></div><div v-if="!favorites.length" class="empty-state">在题目页点击收藏，建立自己的练习清单。</div></div></section><section class="panel library-column"><div class="panel-heading"><div><h2>错题本</h2><small>{{ wrongBook.length }} 道题</small></div></div><div class="library-list"><div v-for="item in wrongBook" :key="item.id" class="library-row"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><span class="wrong-tag">{{ item.errorType }}</span><button class="icon-btn" title="移出错题本" @click="removeWrong(item.problemId)">✓</button></div><div v-if="!wrongBook.length" class="empty-state">提交出现错误的题目会自动进入这里。</div></div></section></div></section>
 
       <section v-else class="notes-section"><div class="section-toolbar"><div><span class="section-kicker">SPACED REVIEW</span><h2>笔记与复习</h2></div><span class="due-counter">{{ dueNotes.length }} 条待复习</span></div><div class="notes-grid"><section class="panel note-composer"><div class="panel-heading"><div><h2>新建笔记</h2><small>为题目记录思路、易错点或复习结论</small></div></div><div class="note-form"><label>关联题目<div class="search-inline"><input v-model="noteSearch" placeholder="搜索题目" @keyup.enter="searchNoteProblems"><button class="secondary-btn" @click="searchNoteProblems">搜索</button></div></label><div v-if="noteProblems.length" class="search-results"><button v-for="problem in noteProblems" :key="problem.id" @click="noteForm.problemId = problem.id; noteSearch = problem.title; noteProblems = []"><span>{{ problem.title }}</span><small>选择</small></button></div><div v-if="noteForm.problemId" class="selected-problem">已关联：{{ noteSearch }}<button class="icon-btn" @click="noteForm.problemId = ''; noteSearch = ''">×</button></div><label>笔记内容<textarea v-model="noteForm.content" rows="7" maxlength="10000" placeholder="写下这道题的关键思路…"></textarea></label><label>下次复习日期<input v-model="noteForm.nextReviewAt" type="date"></label><button class="primary-btn full-btn" @click="saveNote">保存笔记</button></div></section><section class="panel note-list"><div class="panel-heading"><div><h2>复习队列</h2><small>完成一次复习后自动安排下一次间隔</small></div><button class="text-btn" @click="notes = notes.filter((note) => note.reviewStatus !== 'ARCHIVED')">隐藏归档</button></div><div v-if="notes.length" class="notes-list"><article v-for="note in notes" :key="note.id" class="note-row" :class="{ due: dueNotes.some((item) => item.id === note.id), archived: note.reviewStatus === 'ARCHIVED' }"><div class="note-row-top"><button class="problem-link" @click="openProblem(note.problemId)">{{ note.problem?.title }}</button><span class="note-date">{{ note.nextReviewAt ? new Date(note.nextReviewAt).toLocaleDateString() : '待安排' }}</span></div><p>{{ note.content }}</p><div class="note-actions"><span>已复习 {{ note.reviewCount }} 次</span><button v-if="note.reviewStatus !== 'ARCHIVED'" class="secondary-btn" @click="reviewNote(note)">完成复习</button><button v-if="note.reviewStatus !== 'ARCHIVED'" class="text-btn" @click="archiveNote(note)">归档</button></div></article></div><div v-else class="empty-state">还没有笔记，先从题目页记录一个解题思路。</div></section></div></section>
         </template>
@@ -798,28 +776,4 @@ input:focus,textarea:focus { border-color:#3979ad; box-shadow:0 0 0 2px #deedf9;
 .public-list:hover { border-color:#8fb7d8; box-shadow:0 10px 22px rgba(23,59,102,.09); }
 .modal { border-radius:8px; }
 @media(max-width:860px){.learning-page{display:block}.learning-main{padding:18px 16px 52px}.learning-sidebar,.learning-page.sidebar-collapsed .learning-sidebar{position:static;width:auto;height:auto;padding:12px;border-right:0}.learning-sidebar-title{display:none}.workspace-nav{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:5px;border:1px solid var(--workspace-line);border-radius:8px;background:#fff}.workspace-nav button,.sidebar-collapsed .workspace-nav button{grid-template-columns:22px minmax(0,1fr) auto;justify-items:initial;min-height:46px;padding:7px 10px}.workspace-nav button:last-child{grid-column:1/-1}.workspace-nav button small,.sidebar-collapsed .workspace-nav button small,.sidebar-collapsed .workspace-nav button>span,.sidebar-collapsed .workspace-nav button>b{display:initial}.workspace-nav button>span,.sidebar-collapsed .workspace-nav button>span{display:grid}.workspace-nav button>b,.sidebar-collapsed .workspace-nav button>b{display:grid}.learning-content{margin-top:20px!important}.learning-header{align-items:flex-start;flex-direction:column}.learning-header h1{font-size:29px}}
-/* Match the problem library's white surfaces and pale-blue selected state. */
-.learning-header {
-  border: 1px solid #dce5ef;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
-  color: #1f2a37;
-}
-.learning-header .eyebrow { color: #3977aa; }
-.learning-header h1 { color: #1f2a37; }
-.learning-header p { color: #66778a; }
-.header-actions .secondary-btn,
-.header-actions .primary-btn {
-  border-color: #aec7f4;
-  background: #e7efff;
-  color: #1f5eff;
-  box-shadow: none;
-}
-.workspace-nav button.active {
-  background: #e7efff;
-  color: #1f5eff;
-  box-shadow: none;
-}
-.workspace-nav button.active small { color: #1f5eff; }
-.workspace-nav button.active b { background: #dce9ff; color: #1f5eff; }
 </style>

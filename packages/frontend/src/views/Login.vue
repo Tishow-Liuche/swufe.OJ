@@ -87,6 +87,7 @@ const passwordChecks = computed(() => ({
 
 const passwordScore = computed(() => Object.values(passwordChecks.value).filter(Boolean).length);
 const passwordLabel = computed(() => ['尚未输入', '较弱', '可用', '安全'][passwordScore.value]);
+const passwordChangedNotice = computed(() => route.query.passwordChanged === '1');
 const usernameHint = computed(() => {
   const username = registerForm.value.username;
   if (!username) return '';
@@ -181,11 +182,11 @@ async function submit() {
 <template>
   <div class="auth-page">
     <div class="auth-frame">
-      <router-link to="/" class="auth-brand" aria-label="返回西财 OJ 首页">
+      <router-link to="/" class="auth-brand" aria-label="返回 SWUFE Singularity OJ 首页">
         <span class="brand-mark"><BookOpenCheck :size="22" aria-hidden="true" /></span>
         <span>
-          <strong>西财 OJ</strong>
-          <small>校园算法训练平台</small>
+          <strong>SWUFE Singularity OJ</strong>
+          <small>西财奇点OJ · 校园算法训练平台</small>
         </span>
       </router-link>
 
@@ -445,6 +446,7 @@ async function submit() {
             </div>
           </template>
 
+          <p v-if="passwordChangedNotice" class="form-success" role="status">密码已修改，请使用新密码重新登录。</p>
           <p v-if="error" class="form-error" role="alert">{{ error }}</p>
 
           <button class="primary-action" type="submit" :disabled="!canSubmit">
@@ -836,6 +838,17 @@ async function submit() {
   border-radius: 4px;
   background: #fff0ef;
   color: #9c2f28;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.form-success {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #22a06b;
+  border-radius: 4px;
+  background: #eefaf4;
+  color: #177245;
   font-size: 13px;
   line-height: 1.5;
 }

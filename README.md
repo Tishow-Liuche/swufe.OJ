@@ -1,4 +1,4 @@
-# 西财 OJ 平台
+# SWUFE Singularity OJ（西财奇点OJ）
 
 > 面向高校的「统一题库 + 在线评测 + 教学管理 + 竞赛训练」综合性平台
 
@@ -13,7 +13,7 @@
 
 ## 📖 平台定位
 
-西财 OJ 不是单纯的在线评测系统，而是由四个平台融合而成：
+SWUFE Singularity OJ（西财奇点OJ）不是单纯的在线评测系统，而是由四个平台融合而成：
 
 | 平台 | 定位 |
 |------|------|
@@ -239,7 +239,7 @@ flowchart TB
 ## 📂 项目结构
 
 ```
-西财OJ平台/
+SWUFE Singularity OJ/
 ├── docker-compose.yml             # 基础设施一键编排
 ├── config/.env.example            # 环境变量模板
 ├── packages/

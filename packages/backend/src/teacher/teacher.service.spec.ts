@@ -222,16 +222,17 @@ describe('TeacherService', () => {
   });
 
   it('generates a time-limited join code for an approved class', async () => {
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
     prisma.class.findUnique
       .mockResolvedValueOnce({ id: 'class-1', teacherId: 'teacher-1', status: 'APPROVED' })
       .mockResolvedValueOnce(null);
     prisma.class.update.mockResolvedValue({
       id: 'class-1',
       joinCode: 'ABCD2345',
-      joinCodeExpiresAt: new Date('2026-07-20T00:00:00.000Z'),
+      joinCodeExpiresAt: expiresAt,
     });
 
-    const result = await service.setJoinCode('class-1', 'teacher-1', '2026-07-20T00:00:00.000Z');
+    const result = await service.setJoinCode('class-1', 'teacher-1', expiresAt.toISOString());
 
     expect(prisma.class.update).toHaveBeenCalledWith({
       where: { id: 'class-1' },
