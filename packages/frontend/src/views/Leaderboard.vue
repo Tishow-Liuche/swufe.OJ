@@ -38,6 +38,15 @@ const scopeMeta = computed(() => ({
   },
 })[scope.value]);
 
+const currentScopeTitle = computed(() => (
+  scope.value === 'OVERALL' ? '综合排名' : scopeMeta.value.title
+));
+const currentScopeDesc = computed(() => (
+  scope.value === 'OVERALL'
+    ? '综合分 = 做题分 + 比赛分；当前做题分只统计本地原创题 AC，比赛分暂为 0。'
+    : scopeMeta.value.desc
+));
+
 const contestOptions = computed(() => [
   { value: '', label: '选择比赛' },
   ...contests.value.map((item: any) => ({ value: item.id, label: item.title })),
@@ -55,6 +64,10 @@ const boardColumns = computed(() => {
   }
   return ['排名', '用户', '已解决', '提交数', '通过率'];
 });
+
+const displayBoardColumns = computed(() => (
+  scope.value === 'OVERALL' ? ['排名', '用户', '综合分数', '构成'] : boardColumns.value
+));
 
 async function loadContests() {
   try {
@@ -87,7 +100,8 @@ async function load() {
         username: row.user?.username || row.username,
       }));
     } else {
-      rows.value = [];
+      const { data } = await api.get('/api/leaderboard/overall');
+      rows.value = Array.isArray(data) ? data : [];
     }
   } catch (e: any) {
     error.value = e.response?.data?.message || '排行榜加载失败';
@@ -130,8 +144,8 @@ onMounted(async () => {
     <section class="leaderboard-hero">
       <div>
         <p class="eyebrow"><BarChart3 :size="16" /> LEADERBOARD</p>
-        <h1>{{ scopeMeta.title }}</h1>
-        <p>{{ scopeMeta.desc }}</p>
+        <h1>{{ currentScopeTitle }}</h1>
+        <p>{{ currentScopeDesc }}</p>
       </div>
       <div class="hero-orb">
         <component :is="scopeMeta.icon" :size="54" />
@@ -157,7 +171,7 @@ onMounted(async () => {
         <Sparkles :size="18" />
         <span>
           <strong>综合排名</strong>
-          <small>积分公式待接入</small>
+          <small>做题分 + 比赛分</small>
         </span>
       </button>
     </section>
@@ -176,23 +190,23 @@ onMounted(async () => {
     <section v-if="scope === 'OVERALL'" class="overall-placeholder">
       <div class="placeholder-icon"><Medal :size="34" /></div>
       <div>
-        <p class="eyebrow">FRAME READY</p>
-        <h2>综合积分榜框架已搭好</h2>
-        <p>后续只需要补充你的积分公式，我会把“过题、比赛、奖项、活跃度”等指标映射成统一积分，并在这里展示正式排名。</p>
+        <p class="eyebrow">SCORE FORMULA</p>
+        <h2>综合分公式已启用</h2>
+        <p>做题分只统计本地原创题 AC：P0=1，P1=4，P2=10，P3=20，P4=40，P5=66；比赛分当前为 0，后续创建比赛积分后会加入总分。</p>
       </div>
     </section>
 
     <p v-if="error" class="notice">{{ error }}</p>
     <div v-if="loading" class="state">正在计算排行榜…</div>
-    <div v-else-if="scope !== 'OVERALL' && !rows.length" class="state">
+    <div v-else-if="!rows.length" class="state">
       {{ scope === 'CONTEST' && !targetId ? '请选择一场比赛查看排名' : '暂无可展示的排名数据' }}
     </div>
 
-    <section v-else-if="scope !== 'OVERALL'" class="board">
-      <div class="board-head" :class="{ contest: scope === 'CONTEST' }">
-        <span v-for="column in boardColumns" :key="column">{{ column }}</span>
+    <section v-else class="board">
+      <div class="board-head" :class="{ contest: scope === 'CONTEST', overall: scope === 'OVERALL' }">
+        <span v-for="column in displayBoardColumns" :key="column">{{ column }}</span>
       </div>
-      <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="{ top: row.rank <= 3, contest: scope === 'CONTEST' }">
+      <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="{ top: row.rank <= 3, contest: scope === 'CONTEST', overall: scope === 'OVERALL' }">
         <span class="rank">
           <i v-if="rankMedal(row.rank)">{{ rankMedal(row.rank) }}</i>
           <b v-else>{{ row.rank }}</b>
@@ -201,11 +215,20 @@ onMounted(async () => {
           <strong>{{ row.nickname || row.username }}</strong>
           <small>@{{ row.username }}</small>
         </span>
+        <template v-if="scope === 'OVERALL'">
+          <strong>{{ row.overallScore }}</strong>
+          <span class="score-breakdown">
+            做题 {{ row.problemScore }} + 比赛 {{ row.contestScore }}
+            <small>{{ row.localSolvedCount }} 题</small>
+          </span>
+        </template>
+        <template v-else>
         <strong v-if="scope === 'CONTEST' && contest?.mode === 'IOI'">{{ row.score }} 分</strong>
         <strong v-else>{{ row.solvedCount }}</strong>
         <span v-if="scope === 'CONTEST' && contest?.mode === 'ACM'">{{ row.penalty }} min</span>
         <span v-else-if="scope === 'CONTEST'">{{ row.solvedCount }}</span>
         <span v-else>{{ row.submissionCount }}</span>
+        </template>
         <span v-if="scope === 'GLOBAL'">{{ row.acceptRate }}%</span>
       </div>
     </section>
@@ -447,6 +470,11 @@ onMounted(async () => {
   grid-template-columns: 82px minmax(180px, 1fr) 120px 110px;
 }
 
+.board-head.overall,
+.board-row.overall {
+  grid-template-columns: 82px minmax(180px, 1fr) 130px minmax(220px, .8fr);
+}
+
 .board-head {
   border-bottom: 1px solid var(--line);
   background: #f8fafc;
@@ -498,6 +526,23 @@ onMounted(async () => {
 
 .board-row > strong {
   color: #1e66b4;
+}
+
+.score-breakdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4e5f75;
+  font-weight: 750;
+}
+
+.score-breakdown small {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #2f70df;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 @media (max-width: 760px) {

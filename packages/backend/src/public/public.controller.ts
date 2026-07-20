@@ -23,5 +23,10 @@ export class PublicController {
   getLeaderboard() {
     return this.contests.globalLeaderboard();
   }
+
+  @Get('leaderboard/overall')
+  getOverallLeaderboard() {
+    return this.contests.overallLeaderboard();
+  }
 }
 

@@ -405,6 +405,80 @@ export class ContestService {
     return this.practiceRows();
   }
 
+  async overallLeaderboard() {
+    const [users, acceptedLocalSubmissions] = await Promise.all([
+      this.prisma.user.findMany({
+        select: { id: true, username: true, nickname: true, avatar: true, role: true },
+      }),
+      this.prisma.submission.findMany({
+        where: {
+          status: 'ACCEPTED',
+          problem: { source: 'LOCAL', status: 'PUBLISHED' },
+        },
+        select: {
+          userId: true,
+          problemId: true,
+          problem: { select: { difficulty: true } },
+        },
+      }),
+    ]);
+
+    const acceptedByUser = new Map<string, Map<string, number>>();
+    for (const submission of acceptedLocalSubmissions) {
+      const solved = acceptedByUser.get(submission.userId) || new Map<string, number>();
+      if (!solved.has(submission.problemId)) {
+        solved.set(submission.problemId, this.problemScore(submission.problem?.difficulty));
+      }
+      acceptedByUser.set(submission.userId, solved);
+    }
+
+    const rows = users.map((user) => {
+      const solved = acceptedByUser.get(user.id) || new Map<string, number>();
+      const problemScore = [...solved.values()].reduce((sum, score) => sum + score, 0);
+      const contestScore = 0;
+      return {
+        userId: user.id,
+        username: user.username,
+        nickname: user.nickname || user.username,
+        avatar: user.avatar,
+        role: user.role,
+        localSolvedCount: solved.size,
+        problemScore,
+        contestScore,
+        overallScore: problemScore + contestScore,
+        scoreBreakdown: { problemScore, contestScore },
+      };
+    });
+
+    rows.sort((a, b) => (
+      b.overallScore - a.overallScore
+      || b.problemScore - a.problemScore
+      || b.localSolvedCount - a.localSolvedCount
+      || a.username.localeCompare(b.username)
+    ));
+
+    return rows.map((row, index) => ({ rank: index + 1, ...row }));
+  }
+
+  private problemScore(difficulty?: string | null) {
+    const normalized = String(difficulty || '').trim().toUpperCase();
+    const scores: Record<string, number> = {
+      POINT_0: 1,
+      P0: 1,
+      POINT_1: 4,
+      P1: 4,
+      POINT_2: 10,
+      P2: 10,
+      POINT_3: 20,
+      P3: 20,
+      POINT_4: 40,
+      P4: 40,
+      POINT_5: 66,
+      P5: 66,
+    };
+    return scores[normalized] || 0;
+  }
+
   async classLeaderboard(classId: string, viewer: Viewer) {
     const classroom = await this.prisma.class.findUnique({
       where: { id: classId },
