@@ -11,6 +11,7 @@
     "test:luogu-helper": "node scripts/check-luogu-helper.mjs",
     "test:leaderboard": "node scripts/check-leaderboard-frame.mjs",
     "test:profile-ui": "node scripts/check-profile-ui.mjs",
+    "test:header-utilities": "node scripts/check-header-utilities.mjs",
     "test:point-difficulty": "node scripts/check-point-difficulty.mjs",
     "preview": "vite preview",
     "test": "vitest"
