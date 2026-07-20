@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Menu, X } from '@lucide/vue';
+import { CalendarCheck, Menu, X } from '@lucide/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
 import UserAvatar from './components/UserAvatar.vue';
@@ -48,7 +48,7 @@ async function logout() {
           <router-link :to="protectedNavigation('/problems')">题库</router-link>
           <router-link :to="protectedNavigation('/leaderboard')">排行榜</router-link>
           <router-link :to="protectedNavigation('/contests')">比赛</router-link>
-          <router-link :to="protectedNavigation('/problem-lists')">题单</router-link>
+          <router-link :to="protectedNavigation('/problem-lists')">学习</router-link>
           <router-link to="/community">社区</router-link>
           <router-link v-if="auth.isTeacher()" to="/teacher/classes">班级</router-link>
           <router-link v-if="auth.isStudent()" to="/classes">班级</router-link>
@@ -60,6 +60,7 @@ async function logout() {
           <router-link v-if="auth.isTeacher()" to="/admin/create-problem" class="admin-link">录题</router-link>
           <router-link v-if="auth.isTeacher()" to="/admin/problems/history" class="admin-link">历史录题</router-link>
           <router-link v-if="auth.isAdmin()" to="/admin/users" class="admin-link">管理</router-link>
+          <router-link to="/check-in" class="checkin-link"><CalendarCheck :size="15" />签到</router-link>
           <router-link class="header-avatar-link" to="/profile" title="个人中心" aria-label="个人中心">
             <UserAvatar :name="auth.user?.nickname || auth.user?.username" :avatar="auth.user?.avatar" :size="32" />
             <span>个人中心</span>
@@ -88,7 +89,7 @@ async function logout() {
         <router-link :to="protectedNavigation('/problems')" @click="closeMobileMenu">题库</router-link>
         <router-link :to="protectedNavigation('/leaderboard')" @click="closeMobileMenu">排行榜</router-link>
         <router-link :to="protectedNavigation('/contests')" @click="closeMobileMenu">比赛</router-link>
-        <router-link :to="protectedNavigation('/problem-lists')" @click="closeMobileMenu">题单</router-link>
+        <router-link :to="protectedNavigation('/problem-lists')" @click="closeMobileMenu">学习</router-link>
         <router-link to="/community" @click="closeMobileMenu">社区</router-link>
         <router-link v-if="auth.isTeacher()" to="/teacher/classes" @click="closeMobileMenu">班级</router-link>
         <router-link v-if="auth.isStudent()" to="/classes" @click="closeMobileMenu">班级</router-link>
@@ -96,6 +97,7 @@ async function logout() {
           <router-link v-if="auth.isTeacher()" to="/admin/create-problem" class="admin-link" @click="closeMobileMenu">录题</router-link>
           <router-link v-if="auth.isTeacher()" to="/admin/problems/history" class="admin-link" @click="closeMobileMenu">历史录题</router-link>
           <router-link v-if="auth.isAdmin()" to="/admin/users" class="admin-link" @click="closeMobileMenu">管理</router-link>
+          <router-link to="/check-in" class="checkin-link" @click="closeMobileMenu"><CalendarCheck :size="15" />签到</router-link>
           <router-link to="/profile" @click="closeMobileMenu">个人中心</router-link>
           <button type="button" @click="logout">退出登录</button>
         </template>
@@ -243,6 +245,12 @@ nav a.router-link-exact-active,
 .header-right a.router-link-exact-active {
   background: rgba(79, 195, 247, 0.1);
   color: #4fc3f7;
+}
+
+.checkin-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .admin-link {

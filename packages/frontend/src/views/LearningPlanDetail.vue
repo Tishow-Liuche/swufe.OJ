@@ -1,29 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { ArrowLeft, CheckCircle2, Circle, CircleStop, RotateCcw } from '@lucide/vue';
 import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
-import CheckInModal from '../components/CheckInModal.vue';
-import LearningProgress from '../components/LearningProgress.vue';
-import { useAuthStore } from '../stores/auth';
+import ProblemStateBadges from '../components/ProblemStateBadges.vue';
+import { pointDifficultyShortLabel } from '../utils/pointDifficulty';
 
 const route = useRoute();
 const router = useRouter();
-const auth = useAuthStore();
 const plan = ref<any>(null);
 const loading = ref(true);
+const saving = ref(false);
 const error = ref('');
-const checkInOpen = ref(false);
-const checkInSaving = ref(false);
 
-const daily = computed(() => plan.value?.today || { items: [], progress: {} });
-const planRange = computed(() => {
-  if (!plan.value) return '';
-  return `${formatDate(plan.value.startDate)} - ${formatDate(plan.value.endDate)}`;
-});
-
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
-}
+const items = computed(() => plan.value?.items || []);
 
 function fail(err: any, fallback: string) {
   error.value = err?.response?.data?.message || fallback;
@@ -33,11 +23,6 @@ async function loadPlan() {
   loading.value = true;
   error.value = '';
   try {
-    if (auth.token && !auth.user) await auth.fetchProfile();
-    if (!auth.isLoggedIn()) {
-      await router.push('/login');
-      return;
-    }
     plan.value = (await api.get(`/api/learning/plans/${route.params.id}`)).data;
   } catch (err: any) {
     fail(err, '学习计划加载失败');
@@ -46,44 +31,20 @@ async function loadPlan() {
   }
 }
 
-async function generateDaily() {
+async function setStatus(status: 'ACTIVE' | 'COMPLETED') {
+  if (status === 'COMPLETED' && !window.confirm('确定结束这个学习计划吗？之后仍可重新开始。')) return;
+  saving.value = true;
   try {
-    await api.post('/api/learning/daily/generate');
-    await loadPlan();
+    plan.value = (await api.patch(`/api/learning/plans/${route.params.id}`, { status })).data;
   } catch (err: any) {
-    fail(err, '今日练习生成失败');
-  }
-}
-
-async function toggleDaily(item: any) {
-  const wasEligible = Boolean(daily.value.progress?.canCheckIn);
-  try {
-    await api.patch(`/api/learning/plans/${item.planId}/items/${item.id}`, { completed: !item.completed });
-    await loadPlan();
-    if (!wasEligible && daily.value.progress?.canCheckIn && !daily.value.progress?.checkedIn) {
-      checkInOpen.value = true;
-    }
-  } catch (err: any) {
-    fail(err, '今日进度更新失败');
-  }
-}
-
-async function confirmCheckIn() {
-  if (!plan.value) return;
-  checkInSaving.value = true;
-  try {
-    await api.post(`/api/learning/plans/${plan.value.id}/check-in`, { date: daily.value.date });
-    checkInOpen.value = false;
-    await loadPlan();
-  } catch (err: any) {
-    fail(err, '今日打卡失败');
+    fail(err, '学习计划更新失败');
   } finally {
-    checkInSaving.value = false;
+    saving.value = false;
   }
 }
 
 function openProblem(problemId: string) {
-  router.push(`/problems/${problemId}`);
+  void router.push(`/problems/${problemId}`);
 }
 
 onMounted(loadPlan);
@@ -91,105 +52,92 @@ onMounted(loadPlan);
 
 <template>
   <main class="plan-detail-page">
-    <button class="back-button" @click="router.push('/problem-lists')">← 返回题单与计划</button>
+    <button class="back-button" @click="router.push({ path: '/problem-lists', query: { tab: 'plans' } })"><ArrowLeft :size="17" />返回学习计划</button>
     <div v-if="error" class="notice">{{ error }}<button aria-label="关闭" @click="error = ''">×</button></div>
-    <div v-if="loading" class="loading-state">正在加载学习计划…</div>
+    <div v-if="loading" class="loading-state">正在加载学习计划...</div>
+
     <template v-else-if="plan">
       <header class="plan-header">
         <div>
           <span class="kicker">LEARNING PLAN</span>
-          <h1>{{ plan.name }}</h1>
-          <p>{{ plan.description || '专注完成每天的计划量。' }}</p>
+          <div class="status-line"><span :class="['status', plan.status.toLowerCase()]">{{ plan.status === 'ACTIVE' ? '进行中' : '已结束' }}</span><span>题单学习计划</span></div>
+          <h1>{{ plan.problemList?.name }}</h1>
+          <p>{{ plan.problemList?.description || '按题单顺序完成每一道题。' }}</p>
         </div>
-        <div class="plan-range"><span>计划周期</span><strong>{{ planRange }}</strong></div>
+        <button v-if="plan.status === 'ACTIVE'" class="secondary-button stop" :disabled="saving" @click="setStatus('COMPLETED')"><CircleStop :size="17" />结束计划</button>
+        <button v-else class="primary-button" :disabled="saving" @click="setStatus('ACTIVE')"><RotateCcw :size="17" />重新开始</button>
       </header>
 
-      <LearningProgress :daily="daily" :plan-progress="plan.progress" />
+      <section class="progress-band">
+        <div><span>已完成题目</span><strong>{{ plan.progress?.solved || 0 }} <small>/ {{ plan.progress?.total || 0 }}</small></strong></div>
+        <div class="progress-visual"><div class="track"><i :style="{ width: `${plan.progress?.percent || 0}%` }"></i></div><b>{{ plan.progress?.percent || 0 }}%</b></div>
+      </section>
 
-      <div class="detail-grid">
-        <section class="panel today-panel">
-          <div class="panel-heading">
-            <div><span class="kicker">TODAY</span><h2>今日计划</h2></div>
-            <button class="text-button" @click="generateDaily">生成 / 补充</button>
-          </div>
-          <div v-if="daily.progress?.checkedIn" class="checked-banner"><span>✓</span>今日已打卡</div>
-          <div v-if="daily.items?.length" class="daily-list">
-            <label v-for="item in daily.items" :key="item.id" class="daily-row" :class="{ done: item.completed }">
-              <input type="checkbox" :checked="item.completed" @change="toggleDaily(item)">
-              <span class="history-check" :class="{ visible: item.previouslyDone || item.completed }">✓</span>
-              <span class="type-tag">{{ item.type === 'REVIEW' ? '复习题' : '新题' }}</span>
-              <button class="problem-link" @click.prevent="openProblem(item.problemId)">{{ item.problem?.title || '题目已移除' }}</button>
-            </label>
-          </div>
-          <div v-else class="empty-state">
-            <strong>今日还没有题目</strong>
-            <p>优先安排未做过的新题，不足时自动补充复习题。</p>
-            <button class="primary-button" @click="generateDaily">生成今日计划</button>
-          </div>
-        </section>
-
-        <aside class="panel checkin-history">
-          <div class="panel-heading"><div><span class="kicker">CHECK-IN</span><h2>打卡记录</h2></div><strong>{{ plan.progress?.checkedInDays || 0 }} 天</strong></div>
-          <div v-if="plan.checkIns?.length" class="history-list">
-            <div v-for="entry in plan.checkIns" :key="entry.id" class="history-row"><span>✓</span><time :datetime="entry.date">{{ formatDate(entry.date) }}</time></div>
-          </div>
-          <div v-else class="empty-state compact">完成今日目标后开始累计打卡。</div>
-        </aside>
-      </div>
+      <section class="problem-section">
+        <div class="section-heading"><div><span class="kicker">PROBLEMS</span><h2>题单内容</h2></div><span>{{ items.length }} 道题</span></div>
+        <div v-if="items.length" class="problem-list">
+          <button v-for="(item, index) in items" :key="item.id" class="problem-row" :class="{ solved: item.solved }" @click="openProblem(item.problemId)">
+            <span class="order">{{ index + 1 }}</span>
+            <CheckCircle2 v-if="item.solved" :size="18" />
+            <Circle v-else :size="18" />
+            <span class="problem-copy"><strong>{{ item.problem?.title || '题目已移除' }}</strong><ProblemStateBadges :state="item.state" compact /></span>
+            <span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
+          </button>
+        </div>
+        <div v-else class="empty-state">这个题单还没有题目。</div>
+      </section>
     </template>
-
-    <CheckInModal
-      v-if="checkInOpen"
-      :date="daily.date"
-      :plan-name="plan?.name"
-      :saving="checkInSaving"
-      @confirm="confirmCheckIn"
-      @close="checkInOpen = false"
-    />
   </main>
 </template>
 
 <style scoped>
-.plan-detail-page { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 34px 0 72px; color: #1f2937; }
-.back-button, .text-button { border: 0; background: transparent; color: #0f766e; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
-.back-button { padding: 6px 0; }
-.plan-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin: 24px 0 28px; }
-.kicker { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
-h1 { margin: 6px 0 8px; color: #0f172a; font-size: 40px; line-height: 1.1; letter-spacing: 0; }
-h2 { margin: 4px 0 0; color: #0f172a; font-size: 20px; letter-spacing: 0; }
-.plan-header p { margin: 0; color: #64748b; font-size: 14px; }
-.plan-range { min-width: 210px; padding-left: 18px; border-left: 3px solid #4fc3f7; }
-.plan-range span, .plan-range strong { display: block; }
-.plan-range span { color: #64748b; font-size: 11px; }
-.plan-range strong { margin-top: 4px; color: #334155; font-size: 14px; }
-.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
-.panel { border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 2px 10px rgba(15, 23, 42, .035); }
-.today-panel, .checkin-history { padding: 22px; }
-.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.checked-banner { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 12px; border-left: 3px solid #0f766e; background: #f0fdfa; color: #0f766e; font-size: 13px; font-weight: 700; }
-.daily-list, .history-list { border-top: 1px solid #e2e8f0; }
-.daily-row { display: flex; align-items: center; gap: 9px; min-height: 50px; border-bottom: 1px solid #f1f5f9; color: #475569; }
-.daily-row input { width: 16px; height: 16px; accent-color: #0f766e; }
-.daily-row.done .problem-link { color: #94a3b8; text-decoration: line-through; }
-.history-check { width: 16px; color: transparent; font-weight: 800; }
-.history-check.visible { color: #0f766e; }
-.type-tag { min-width: 42px; color: #64748b; font-size: 11px; font-weight: 700; }
-.problem-link { flex: 1; min-width: 0; overflow: hidden; border: 0; padding: 0; background: transparent; color: #0f766e; cursor: pointer; font: inherit; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.history-row { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 13px; }
-.history-row span { color: #0f766e; font-weight: 800; }
-.checkin-history .panel-heading > strong { color: #0f766e; font-size: 18px; }
-.empty-state, .loading-state { padding: 40px 16px; color: #64748b; text-align: center; }
-.empty-state strong { display: block; color: #334155; }
-.empty-state p { margin: 6px 0 18px; font-size: 13px; }
-.empty-state.compact { padding: 28px 10px; font-size: 13px; }
-.primary-button { border: 0; border-radius: 6px; padding: 10px 16px; background: #0f766e; color: #fff; cursor: pointer; font: inherit; font-weight: 700; }
-.notice { position: fixed; top: 74px; right: 24px; z-index: 120; display: flex; gap: 12px; max-width: 420px; padding: 12px 16px; border: 1px solid #fecaca; border-radius: 6px; background: #fef2f2; color: #991b1b; box-shadow: 0 8px 24px rgba(15, 23, 42, .14); }
-.notice button { border: 0; background: transparent; color: inherit; cursor: pointer; }
-@media (max-width: 760px) {
-  .plan-detail-page { width: min(100% - 28px, 1120px); padding-top: 24px; }
-  .plan-header { align-items: flex-start; flex-direction: column; }
-  .detail-grid { grid-template-columns: 1fr; }
-  .plan-range { min-width: 0; }
-  h1 { font-size: 32px; }
+.plan-detail-page { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 32px 0 72px; color: #26384d; }
+.back-button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 0; border: 0; color: #316d9f; background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 750; }
+.plan-header { display: flex; min-height: 210px; align-items: flex-end; justify-content: space-between; gap: 30px; margin: 20px 0 18px; padding: 30px; border: 1px solid #dbe4ed; border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .07); }
+.kicker { color: #3977aa; font-size: 10px; font-weight: 850; letter-spacing: 0; }
+.status-line { display: flex; align-items: center; gap: 8px; margin-top: 14px; color: #8492a2; font-size: 10px; }
+.status { padding: 4px 7px; border-radius: 5px; font-weight: 800; }
+.status.active { color: #1e7356; background: #e6f6ef; }
+.status.completed { color: #69798a; background: #edf1f4; }
+h1 { margin: 10px 0 8px; color: #203247; font-size: 36px; line-height: 1.12; letter-spacing: 0; }
+h2 { margin-top: 4px; font-size: 19px; letter-spacing: 0; }
+.plan-header p { max-width: 680px; color: #718094; font-size: 13px; }
+.primary-button, .secondary-button { display: inline-flex; min-height: 39px; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.primary-button { border: 1px solid #1f5eff; color: #fff; background: #1f5eff; }
+.secondary-button { border: 1px solid #e5bfbc; color: #9b3d37; background: #fff7f6; }
+.primary-button:disabled, .secondary-button:disabled { opacity: .6; cursor: wait; }
+.progress-band { display: grid; grid-template-columns: minmax(180px, .35fr) minmax(0, 1fr); align-items: center; gap: 30px; margin-bottom: 18px; padding: 22px 25px; border: 1px solid #dbe4ed; border-left: 4px solid #4f83d8; border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.progress-band > div:first-child span { display: block; color: #718094; font-size: 11px; }
+.progress-band strong { display: block; margin-top: 5px; color: #244f7d; font-size: 28px; line-height: 1; }
+.progress-band strong small { color: #8794a3; font-size: 13px; }
+.progress-visual { display: flex; align-items: center; gap: 13px; }
+.track { height: 8px; flex: 1; overflow: hidden; border-radius: 4px; background: #e5ebf0; }
+.track i { display: block; height: 100%; border-radius: inherit; background: #1f5eff; }
+.progress-visual b { min-width: 42px; color: #365c82; font-size: 12px; text-align: right; }
+.problem-section { padding: 23px 25px; border: 1px solid #dbe4ed; border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.section-heading > span { color: #7c8998; font-size: 10px; }
+.problem-list { overflow: hidden; border: 1px solid #dbe4ed; border-radius: 7px; }
+.problem-row { display: grid; grid-template-columns: 34px 20px minmax(0, 1fr) auto; min-height: 58px; align-items: center; gap: 10px; width: 100%; padding: 0 13px; border: 0; border-bottom: 1px solid #e9eef3; color: #8190a0; text-align: left; background: #fff; cursor: pointer; }
+.problem-row:last-child { border-bottom: 0; }
+.problem-row:hover { background: #f8fafc; }
+.problem-row.solved { color: #2f8a69; }
+.order { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 6px; color: #697b8e; background: #edf2f6; font-size: 10px; }
+.problem-copy { display: grid; min-width: 0; gap: 3px; }
+.problem-copy strong { overflow: hidden; color: #2a5279; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.problem-copy small { color: #8895a4; font-size: 9px; }
+.problem-row.solved .problem-copy strong { color: #50715f; }
+.difficulty { padding: 4px 7px; border-radius: 5px; color: #557086; background: #eef3f7; font-size: 9px; white-space: nowrap; }
+.empty-state, .loading-state { padding: 48px 18px; color: #718094; text-align: center; font-size: 12px; }
+.notice { position: fixed; z-index: 150; top: 74px; right: 24px; display: flex; align-items: center; gap: 12px; max-width: 420px; padding: 12px 16px; border: 1px solid #efc0bd; border-radius: 7px; color: #9d342e; background: #fff5f4; box-shadow: 0 8px 24px rgba(15, 23, 42, .14); }
+.notice button { border: 0; color: inherit; background: transparent; cursor: pointer; }
+@media (max-width: 700px) {
+  .plan-detail-page { width: min(100% - 28px, 1120px); padding-top: 22px; }
+  .plan-header { min-height: 0; align-items: flex-start; flex-direction: column; padding: 23px 20px; }
+  h1 { font-size: 29px; }
+  .progress-band { grid-template-columns: 1fr; gap: 15px; }
+  .problem-section { padding: 19px 14px; }
+  .problem-row { grid-template-columns: 31px 20px minmax(0, 1fr); padding: 0 9px; }
+  .difficulty { display: none; }
 }
 </style>

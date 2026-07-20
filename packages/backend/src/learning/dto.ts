@@ -1,17 +1,16 @@
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
-  IsDateString,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
-  Max,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export class CreateProblemListDto {
   @IsString()
@@ -72,75 +71,30 @@ export class ReorderProblemListDto {
 
 export class CreateLearningPlanDto {
   @IsString()
-  @MaxLength(80)
-  name: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  description?: string;
-
-  @IsOptional()
-  @IsIn(['DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM'])
-  type?: string;
-
-  @IsDateString()
-  startDate: string;
-
-  @IsDateString()
-  endDate: string;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(50)
-  dailyTarget?: number;
+  problemListId: string;
 }
 
 export class UpdateLearningPlanDto {
-  @IsOptional()
   @IsString()
-  @MaxLength(80)
-  name?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  description?: string;
-
-  @IsOptional()
-  @IsDateString()
-  startDate?: string;
-
-  @IsOptional()
-  @IsDateString()
-  endDate?: string;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(50)
-  dailyTarget?: number;
+  @IsIn(['ACTIVE', 'COMPLETED'])
+  status: string;
 }
 
-export class AddLearningPlanItemDto {
-  @IsString()
-  problemId: string;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  dayIndex?: number;
-
-  @IsOptional()
-  @IsIn(['PRACTICE', 'REVIEW', 'CHALLENGE'])
-  type?: string;
+export class ProblemStatesDto {
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  problemIds: string[];
 }
 
-export class CheckInLearningPlanDto {
-  @IsOptional()
-  @IsDateString()
-  date?: string;
+export class SaveProblemDraftDto {
+  @IsString()
+  @MaxLength(30)
+  language: string;
+
+  @IsString()
+  @MaxLength(200000)
+  sourceCode: string;
 }
 
 export class ToggleFavoriteDto {
@@ -158,30 +112,7 @@ export class UpsertWrongBookDto {
   errorType?: string;
 }
 
-export class CreateProblemNoteDto {
-  @IsString()
-  problemId: string;
-
-  @IsString()
-  @MaxLength(10000)
-  content: string;
-
-  @IsOptional()
-  @IsDateString()
-  nextReviewAt?: string;
-}
-
-export class UpdateProblemNoteDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(10000)
-  content?: string;
-
-  @IsOptional()
-  @IsDateString()
-  nextReviewAt?: string;
-
-  @IsOptional()
-  @IsIn(['ACTIVE', 'MASTERED', 'ARCHIVED'])
-  reviewStatus?: string;
+export class ResolveWrongBookDto {
+  @IsBoolean()
+  favorite: boolean;
 }
