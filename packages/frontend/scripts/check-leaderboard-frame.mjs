@@ -25,4 +25,14 @@ for (const token of ['GLOBAL', 'CONTEST', 'OVERALL', '全站过题数排名', '�
   }
 }
 
+for (const token of ['/api/leaderboard/overall', 'overallScore', 'problemScore', 'contestScore']) {
+  if (!source.includes(token)) {
+    throw new Error(`Overall leaderboard must render real score data token: ${token}`);
+  }
+}
+
+if (source.includes('FRAME READY')) {
+  throw new Error('Overall leaderboard must not remain a placeholder frame.');
+}
+
 console.log('Leaderboard frame check passed');

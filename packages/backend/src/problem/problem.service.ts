@@ -212,6 +212,40 @@ export class ProblemService {
     return { items, total, page: currentPage, pageSize: currentPageSize };
   }
 
+  async getMetadata() {
+    const publishedWhere = { status: 'PUBLISHED' };
+    const [total, localCount, tagGroups, difficultyGroups, sourceGroups] = await Promise.all([
+      this.prisma.problem.count({ where: publishedWhere }),
+      this.prisma.problem.count({ where: { ...publishedWhere, source: 'LOCAL' } }),
+      this.prisma.problemTag.groupBy({
+        by: ['name'],
+        where: { problem: publishedWhere },
+        _count: { name: true },
+        orderBy: [{ _count: { name: 'desc' } }, { name: 'asc' }],
+      }),
+      this.prisma.problem.groupBy({
+        by: ['difficulty'],
+        where: publishedWhere,
+        _count: { _all: true },
+      }),
+      this.prisma.problemSource.groupBy({
+        by: ['platform'],
+        where: { problem: publishedWhere },
+        _count: { _all: true },
+      }),
+    ]);
+
+    return {
+      total,
+      tags: tagGroups.map((item) => ({ name: item.name, count: item._count.name })),
+      difficulties: difficultyGroups.map((item) => ({ difficulty: item.difficulty, count: item._count._all })),
+      sources: [
+        ...(localCount > 0 ? [{ source: 'LOCAL', count: localCount }] : []),
+        ...sourceGroups.map((item) => ({ source: item.platform, count: item._count._all })),
+      ],
+    };
+  }
+
   async findAuthored(query: any, viewer: ProblemActor) {
     const { keyword, status, page = 1, pageSize = 20 } = query;
     const where: any = { source: 'LOCAL' };

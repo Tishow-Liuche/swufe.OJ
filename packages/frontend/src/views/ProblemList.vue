@@ -71,6 +71,13 @@ interface ProblemResponse {
   pageSize: number;
 }
 
+interface ProblemMetadata {
+  total: number;
+  tags: Array<{ name: string; count: number }>;
+  difficulties: Array<{ difficulty: string | null; count: number }>;
+  sources: Array<{ source: string; count: number }>;
+}
+
 type PageToken = number | 'start-ellipsis' | 'end-ellipsis';
 
 const difficultyOptions = [
@@ -114,11 +121,12 @@ const keyword = ref(initialKeyword);
 const difficulty = ref(initialDifficulty);
 const source = ref(initialSource);
 const selectedTag = ref(queryValue('tag'));
+const tagSearchKeyword = ref('');
 const page = ref(Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1);
 const pageSize = 10;
 
 const problems = ref<ProblemItem[]>([]);
-const metadataProblems = ref<ProblemItem[]>([]);
+const metadata = ref<ProblemMetadata | null>(null);
 const total = ref(0);
 const publishedTotal = ref<number | null>(null);
 const loading = ref(true);
@@ -140,23 +148,26 @@ const publicProblemCount = computed(() => {
 });
 
 const tagCounts = computed(() => {
-  const counts = new Map<string, number>();
-  for (const problem of metadataProblems.value) {
-    for (const item of problem.tags || []) {
-      counts.set(item.name, (counts.get(item.name) || 0) + 1);
-    }
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
-    .map(([name, count]) => ({ name, count }));
+  return [...(metadata.value?.tags || [])]
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN'))
+    .map((item) => ({ name: item.name, count: item.count }));
 });
 
 const popularTagCounts = computed(() => tagCounts.value.slice(0, 9));
-const metadataIsSample = computed(() => (
-  publishedTotal.value !== null && publishedTotal.value > metadataProblems.value.length
-));
+const normalizedTagSearchKeyword = computed(() => tagSearchKeyword.value.trim().toLocaleLowerCase());
+const visibleTagCounts = computed(() => {
+  const query = normalizedTagSearchKeyword.value;
+  if (!query) return popularTagCounts.value;
+  return tagCounts.value
+    .filter((item) => item.name.toLocaleLowerCase().includes(query))
+    .slice(0, 60);
+});
+const tagSearchSummary = computed(() => {
+  if (!normalizedTagSearchKeyword.value) return '输入关键词搜索全部标签';
+  return `匹配 ${visibleTagCounts.value.length} / ${tagCounts.value.length} 个标签`;
+});
 const tagOptions = computed(() => [
-  { value: '', label: metadataIsSample.value ? '样本内标签' : '全部标签' },
+  { value: '', label: '全部标签' },
   ...tagCounts.value.map((item) => ({
     value: item.name,
     label: `${item.name} (${item.count})`,
@@ -164,16 +175,16 @@ const tagOptions = computed(() => [
 ]);
 const metadataScopeLabel = computed(() => {
   if (metadataLoading.value) return '统计加载中';
-  if (metadataIsSample.value) {
-    return `前 ${metadataProblems.value.length} 道样本`;
-  }
-  return `${metadataProblems.value.length} 道已载入`;
+  if (publishedTotal.value !== null) return `全题库 ${formatNumber(publishedTotal.value)} 道`;
+  return '全题库统计';
 });
 
 const difficultyDistribution = computed(() => difficultyOptions.slice(1)
   .map((option) => ({
     ...option,
-    count: metadataProblems.value.filter((problem) => normalizePointDifficulty(problem.difficulty) === option.value).length,
+    count: (metadata.value?.difficulties || [])
+      .filter((item) => normalizePointDifficulty(item.difficulty) === option.value)
+      .reduce((sum, item) => sum + item.count, 0),
   }))
   .filter((option) => option.count > 0));
 
@@ -182,7 +193,7 @@ const maxDifficultyCount = computed(() => Math.max(
   ...difficultyDistribution.value.map((item) => item.count),
 ));
 
-const sourceCount = computed(() => new Set(metadataProblems.value.map((problem) => problemPlatform(problem))).size);
+const sourceCount = computed(() => (metadata.value?.sources || []).filter((item) => item.count > 0).length);
 
 const paginationTokens = computed<PageToken[]>(() => {
   const count = totalPages.value;
@@ -223,13 +234,11 @@ async function loadMetadata() {
   metadataLoading.value = true;
   metadataError.value = false;
   try {
-    const { data } = await api.get<ProblemResponse>('/api/problems', {
-      params: { page: 1, pageSize: 100 },
-    });
-    metadataProblems.value = data.items || [];
+    const { data } = await api.get<ProblemMetadata>('/api/problems/metadata');
+    metadata.value = data;
     publishedTotal.value = data.total || 0;
   } catch {
-    metadataProblems.value = [];
+    metadata.value = null;
     publishedTotal.value = null;
     metadataError.value = true;
   } finally {
@@ -509,7 +518,7 @@ function requireLogin(redirect: string) {
           </div>
           <div class="summary-item" role="listitem">
             <Layers3 :size="19" aria-hidden="true" />
-            <span><strong>{{ sourceCount }}</strong><small>{{ metadataIsSample ? '样本来源' : '题库来源' }}</small></span>
+            <span><strong>{{ sourceCount }}</strong><small>题库来源</small></span>
           </div>
         </div>
       </header>
@@ -795,13 +804,30 @@ function requireLogin(redirect: string) {
               <div class="insight-heading">
                 <span class="insight-icon accent"><Tag :size="18" aria-hidden="true" /></span>
                 <div>
-                  <span>热门标签</span>
-                  <small>{{ metadataIsSample ? `${tagCounts.length} 个样本标签` : `${tagCounts.length} 个标签` }}</small>
+                  <span>标签筛选</span>
+                  <small>{{ tagSearchSummary }}</small>
                 </div>
               </div>
+              <label class="tag-search-box">
+                <Search :size="14" aria-hidden="true" />
+                <input
+                  v-model="tagSearchKeyword"
+                  type="search"
+                  placeholder="搜索标签，例如 dp / 数学 / greedy"
+                  autocomplete="off"
+                />
+                <button
+                  v-if="tagSearchKeyword"
+                  type="button"
+                  aria-label="清空标签搜索"
+                  @click="tagSearchKeyword = ''"
+                >
+                  <X :size="13" aria-hidden="true" />
+                </button>
+              </label>
               <div class="tag-cloud">
                 <button
-                  v-for="item in popularTagCounts"
+                  v-for="item in visibleTagCounts"
                   :key="item.name"
                   type="button"
                   :class="{ selected: selectedTag === item.name }"
@@ -811,6 +837,9 @@ function requireLogin(redirect: string) {
                   <strong>{{ item.count }}</strong>
                 </button>
               </div>
+              <p v-if="!visibleTagCounts.length && !metadataLoading" class="tag-empty-state">
+                没有匹配标签
+              </p>
             </section>
           </template>
 
@@ -1787,6 +1816,62 @@ function requireLogin(redirect: string) {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+.tag-search-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  margin-bottom: 10px;
+  padding: 0 10px;
+  border: 1px solid var(--outline);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.74);
+  color: #8a94a6;
+}
+
+.tag-search-box:focus-within {
+  border-color: #a9bfff;
+  box-shadow: 0 0 0 3px rgba(31, 94, 255, 0.08);
+}
+
+.tag-search-box input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.tag-search-box input::placeholder {
+  color: #9aa3b2;
+}
+
+.tag-search-box button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: var(--primary-strong);
+  cursor: pointer;
+}
+
+.tag-empty-state {
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface-low);
+  color: #7a8392;
+  font-size: 11px;
+  text-align: center;
 }
 
 .tag-cloud button {
