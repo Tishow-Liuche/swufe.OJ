@@ -114,6 +114,25 @@ export class FileUploadService {
     return this.uploadFile(file, 'avatars');
   }
 
+  /** 上传社区讨论图片，避免 SVG 在用户内容区被当作可执行文档展示。 */
+  async uploadCommunityImage(file: Express.Multer.File): Promise<string> {
+    if (!file) throw new BadRequestException('请选择要上传的图片');
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new BadRequestException('讨论图片仅支持 PNG/JPEG/GIF/WebP 格式');
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('讨论图片不能超过 5MB');
+    }
+    return this.uploadFile(file, 'community-images');
+  }
+
+  isStoredPathInPrefix(value: unknown, prefix: string): value is string {
+    if (typeof value !== 'string') return false;
+    const match = value.match(/^s3:\/\/([^/]+)\/(.+)$/);
+    return Boolean(match && match[1] === this.bucket && match[2].startsWith(`${prefix}/`));
+  }
+
   private async validateZip(file: Express.Multer.File) {
     // 检查 ZIP 文件头
     if (file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b) {

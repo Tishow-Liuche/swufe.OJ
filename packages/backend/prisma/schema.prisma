@@ -52,6 +52,7 @@ model User {
   communityPosts                      CommunityPost[]
   communityReplies                    CommunityReply[]
   communityReactions                  CommunityReaction[]
+  communityReplyReactions             CommunityReplyReaction[]
   announcements                       Announcement[]
   notifications                       Notification[]
   directConversationsAsParticipantOne DirectConversation[]     @relation("DirectConversationParticipantOne")
@@ -725,6 +726,7 @@ model CommunityPost {
   isPinned     Boolean             @default(false)
   isResolved   Boolean             @default(false)
   viewCount    Int                 @default(0)
+  imagePaths   String[]            @default([])
   authorId     String
   problemId    String?
   createdAt    DateTime            @default(now())
@@ -740,18 +742,23 @@ model CommunityPost {
 }
 
 model CommunityReply {
-  id        String        @id @default(cuid())
-  postId    String
-  authorId  String
-  content   String
-  status    String        @default("PUBLISHED")
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  id            String           @id @default(cuid())
+  postId        String
+  authorId      String
+  parentReplyId String?
+  content       String
+  status        String           @default("PUBLISHED")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  post          CommunityPost    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author        User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentReply   CommunityReply?  @relation("CommunityReplyThread", fields: [parentReplyId], references: [id], onDelete: SetNull)
+  childReplies  CommunityReply[] @relation("CommunityReplyThread")
+  reactions     CommunityReplyReaction[]
 
   @@index([postId, status, createdAt])
   @@index([authorId, createdAt])
+  @@index([parentReplyId, createdAt])
 }
 
 model CommunityReaction {
@@ -765,6 +772,19 @@ model CommunityReaction {
 
   @@unique([userId, postId, type])
   @@index([postId, createdAt])
+}
+
+model CommunityReplyReaction {
+  id        String         @id @default(cuid())
+  userId    String
+  replyId   String
+  type      String         @default("UPVOTE")
+  createdAt DateTime       @default(now())
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reply     CommunityReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, replyId, type])
+  @@index([replyId, createdAt])
 }
 
 model Announcement {
@@ -802,6 +822,8 @@ model DirectConversation {
   id               String          @id @default(cuid())
   participantOneId String
   participantTwoId String
+  initiatorId       String?
+  messagingUnlocked Boolean         @default(false)
   lastMessageAt    DateTime        @default(now())
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt

@@ -34,6 +34,16 @@ export class MessageService {
     return Promise.all(users.map((user) => this.serializeUser(user)));
   }
 
+  async getContact(userId: string, contactId: string) {
+    if (!contactId || contactId === userId) throw new BadRequestException('不能给自己发送私信');
+    const user = await this.prisma.user.findUnique({
+      where: { id: contactId },
+      select: { id: true, username: true, nickname: true, avatar: true },
+    });
+    if (!user) throw new NotFoundException('联系人不存在');
+    return this.serializeUser(user);
+  }
+
   async listConversations(userId: string) {
     const conversations = await this.prisma.directConversation.findMany({
       where: { OR: [{ participantOneId: userId }, { participantTwoId: userId }] },
@@ -106,18 +116,38 @@ export class MessageService {
     if (!recipient) throw new NotFoundException('联系人不存在');
 
     const [participantOneId, participantTwoId] = [senderId, recipientId].sort();
-    const conversation = await this.prisma.directConversation.upsert({
-      where: {
-        participantOneId_participantTwoId: { participantOneId, participantTwoId },
-      },
-      create: { participantOneId, participantTwoId },
-      update: { lastMessageAt: new Date() },
-    });
-    const message = await this.prisma.directMessage.create({
-      data: { conversationId: conversation.id, senderId, content },
-      include: {
-        sender: { select: { id: true, username: true, nickname: true, avatar: true } },
-      },
+    const { conversation, message } = await this.prisma.$transaction(async (tx: any) => {
+      const existing = await tx.directConversation.findUnique({
+        where: { participantOneId_participantTwoId: { participantOneId, participantTwoId } },
+        select: { id: true, initiatorId: true, messagingUnlocked: true },
+      });
+      const sentAt = new Date();
+      let conversation: { id: string };
+
+      if (existing) {
+        if (!existing.messagingUnlocked && existing.initiatorId === senderId) {
+          throw new BadRequestException('对方回复前只能发送一条私信');
+        }
+        const unlockedByReply = !existing.messagingUnlocked && existing.initiatorId !== senderId;
+        await tx.directConversation.update({
+          where: { id: existing.id },
+          data: { lastMessageAt: sentAt, ...(unlockedByReply ? { messagingUnlocked: true } : {}) },
+        });
+        conversation = existing;
+      } else {
+        conversation = await tx.directConversation.create({
+          data: { participantOneId, participantTwoId, lastMessageAt: sentAt, initiatorId: senderId },
+          select: { id: true },
+        });
+      }
+
+      const message = await tx.directMessage.create({
+        data: { conversationId: conversation.id, senderId, content },
+        include: {
+          sender: { select: { id: true, username: true, nickname: true, avatar: true } },
+        },
+      });
+      return { conversation, message };
     });
     const senderName = message.sender.nickname || message.sender.username;
     await this.prisma.notification.create({
@@ -141,6 +171,8 @@ export class MessageService {
     return {
       id: conversation.id,
       lastMessageAt: conversation.lastMessageAt,
+      canSend: conversation.messagingUnlocked || conversation.initiatorId !== viewerId,
+      messagingUnlocked: conversation.messagingUnlocked,
       counterpart: await this.serializeUser(counterpart),
       lastMessage: latest ? await this.serializeMessage(latest) : null,
     };

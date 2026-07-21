@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { FileUploadService } from '../common/file-upload.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type Viewer = { id: string; role: string };
@@ -12,7 +13,10 @@ const FEEDBACK_STATUSES = new Set(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'DISMISSED
 
 @Injectable()
 export class CommunityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fileUpload: FileUploadService,
+  ) {}
 
   async listAnnouncements() {
     const now = new Date();
@@ -26,7 +30,7 @@ export class CommunityService {
       select: {
         id: true, title: true, content: true, audience: true, isPinned: true,
         publishAt: true, expiresAt: true,
-        author: { select: { id: true, username: true, nickname: true, role: true } },
+        author: { select: { id: true, username: true, nickname: true, avatar: true, role: true, createdAt: true } },
       },
       orderBy: [{ isPinned: 'desc' }, { publishAt: 'desc' }],
       take: 30,
@@ -56,7 +60,7 @@ export class CommunityService {
     const posts = await this.prisma.communityPost.findMany({
       where,
       include: {
-        author: { select: { id: true, username: true, nickname: true, role: true } },
+        author: { select: { id: true, username: true, nickname: true, avatar: true, role: true, createdAt: true } },
         problem: { select: { id: true, title: true } },
         _count: { select: { replies: { where: { status: 'PUBLISHED' } }, reactions: true } },
       },
@@ -73,7 +77,7 @@ export class CommunityService {
       }
       return Number(right.updatedAt) - Number(left.updatedAt);
     });
-    return sorted.map((post) => this.serializePostPreview(post));
+    return Promise.all(sorted.map((post) => this.serializePostPreview(post)));
   }
 
   async getPost(postId: string, viewer: Viewer) {
@@ -84,11 +88,11 @@ export class CommunityService {
     const post = await this.prisma.communityPost.findFirst({
       where: { id: postId, status: 'PUBLISHED' },
       include: {
-        author: { select: { id: true, username: true, nickname: true, role: true } },
+        author: { select: { id: true, username: true, nickname: true, avatar: true, role: true, createdAt: true } },
         problem: { select: { id: true, title: true } },
         replies: {
           where: { status: 'PUBLISHED' },
-          include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
+          include: { author: { select: { id: true, username: true, nickname: true, avatar: true, role: true, createdAt: true } } },
           orderBy: { createdAt: 'asc' },
         },
         _count: { select: { replies: { where: { status: 'PUBLISHED' } }, reactions: true } },
@@ -100,11 +104,13 @@ export class CommunityService {
       where: { userId_postId_type: { userId: viewer.id, postId, type: 'UPVOTE' } },
       select: { id: true },
     });
+    const replyReactionState = await this.getReplyReactionState(post.replies, viewer.id);
 
     if (!(await this.canReadSpoiler(post, viewer))) {
       return {
-        ...this.serializePostPreview(post),
+        ...(await this.serializePostPreview(post)),
         content: null,
+        imageUrls: [],
         contentLocked: true,
         lockReason: '通过本题后即可查看完整题解，避免在练习前剧透。',
         replies: [],
@@ -113,10 +119,8 @@ export class CommunityService {
     }
 
     return {
-      ...post,
+      ...(await this.serializePostDetail(post, replyReactionState)),
       contentLocked: false,
-      reactionCount: post._count.reactions,
-      replyCount: post._count.replies,
       viewerReacted: Boolean(viewerReaction),
     };
   }
@@ -128,6 +132,7 @@ export class CommunityService {
     const problemId = body.problemId ? String(body.problemId) : undefined;
     const category = this.cleanText(body.category, 40, false);
     const requestedSpoiler = String(body.spoilerLevel || 'NONE').toUpperCase();
+    const imagePaths = this.normalizeImagePaths(body.imagePaths);
 
     if (!POST_TYPES.has(type)) throw new BadRequestException('不支持的帖子类型');
     if (type === 'FORUM' && !title) throw new BadRequestException('论坛帖子需要标题');
@@ -149,16 +154,21 @@ export class CommunityService {
     const post = await this.prisma.communityPost.create({
       data: {
         type, title: title || null, content, category: category || null,
-        spoilerLevel, problemId: problemId || null, authorId: viewer.id,
+        spoilerLevel, problemId: problemId || null, authorId: viewer.id, imagePaths,
       },
-      include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
+      include: { author: { select: { id: true, username: true, nickname: true, avatar: true, role: true, createdAt: true } } },
     });
-    await this.audit(viewer.id, 'COMMUNITY_POST_CREATE', 'CommunityPost', post.id, { type, problemId });
+    await this.audit(viewer.id, 'COMMUNITY_POST_CREATE', 'CommunityPost', post.id, { type, problemId, imageCount: imagePaths.length });
     await this.notifyMentions(content, viewer, `/community?post=${post.id}`);
-    return post;
+    return {
+      ...post,
+      imagePaths: undefined,
+      imageUrls: await this.getDisplayImageUrls(imagePaths),
+      author: await this.withDisplayAvatar(post.author),
+    };
   }
 
-  async createReply(postId: string, viewer: Viewer, rawContent: string) {
+  async createReply(postId: string, viewer: Viewer, rawContent: string, rawParentReplyId?: string) {
     const content = this.cleanText(rawContent, 4000, true);
     const post = await this.prisma.communityPost.findFirst({ where: { id: postId, status: 'PUBLISHED' } });
     if (!post) throw new NotFoundException('帖子不存在或已隐藏');
@@ -166,15 +176,30 @@ export class CommunityService {
       throw new ForbiddenException('通过本题后才能参与该题解讨论');
     }
 
+    const parentReplyId = this.cleanText(rawParentReplyId, 64, false) || undefined;
+    if (parentReplyId) {
+      const parentReply = await this.prisma.communityReply.findFirst({
+        where: { id: parentReplyId, postId, status: 'PUBLISHED' },
+        select: { id: true },
+      });
+      if (!parentReply) throw new NotFoundException('要回复的内容不存在或已隐藏');
+    }
+
     const reply = await this.prisma.communityReply.create({
-      data: { postId, authorId: viewer.id, content },
-      include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
+      data: { postId, authorId: viewer.id, content, parentReplyId: parentReplyId || null },
+      include: { author: { select: { id: true, username: true, nickname: true, avatar: true, role: true, createdAt: true } } },
     });
     if (post.authorId !== viewer.id) {
       await this.notify(post.authorId, 'POST_REPLY', '你的帖子收到了新回复', content.slice(0, 120), `/community?post=${postId}`);
     }
     await this.notifyMentions(content, viewer, `/community?post=${postId}`, [post.authorId]);
-    return reply;
+    return { ...reply, author: await this.withDisplayAvatar(reply.author) };
+  }
+
+  async uploadCommunityImage(viewer: Viewer, file: Express.Multer.File) {
+    const path = await this.fileUpload.uploadCommunityImage(file);
+    await this.audit(viewer.id, 'COMMUNITY_IMAGE_UPLOAD', 'CommunityImage', path, { size: file.size, mimetype: file.mimetype });
+    return { path, url: await this.fileUpload.getPresignedUrl(path) };
   }
 
   async toggleReaction(postId: string, viewer: Viewer) {
@@ -194,6 +219,29 @@ export class CommunityService {
       await this.prisma.communityReaction.create({ data: { userId: viewer.id, postId, type: 'UPVOTE' } });
     }
     const reactionCount = await this.prisma.communityReaction.count({ where: { postId, type: 'UPVOTE' } });
+    return { reacted: !existing, reactionCount };
+  }
+
+  async toggleReplyReaction(replyId: string, viewer: Viewer) {
+    const reply = await this.prisma.communityReply.findFirst({
+      where: { id: replyId, status: 'PUBLISHED', post: { status: 'PUBLISHED' } },
+      include: { post: { select: { spoilerLevel: true, problemId: true, authorId: true } } },
+    });
+    if (!reply) throw new NotFoundException('回复不存在或已隐藏');
+    if (!(await this.canReadSpoiler(reply.post, viewer))) {
+      throw new ForbiddenException('通过本题后才能为该题解回复点赞');
+    }
+
+    const existing = await this.prisma.communityReplyReaction.findUnique({
+      where: { userId_replyId_type: { userId: viewer.id, replyId, type: 'UPVOTE' } },
+      select: { id: true },
+    });
+    if (existing) {
+      await this.prisma.communityReplyReaction.delete({ where: { id: existing.id } });
+    } else {
+      await this.prisma.communityReplyReaction.create({ data: { userId: viewer.id, replyId, type: 'UPVOTE' } });
+    }
+    const reactionCount = await this.prisma.communityReplyReaction.count({ where: { replyId, type: 'UPVOTE' } });
     return { reacted: !existing, reactionCount };
   }
 
@@ -308,7 +356,10 @@ export class CommunityService {
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
-    });
+    }).then(async (reports) => Promise.all(reports.map(async (report) => ({
+      ...report,
+      target: await this.getReportTargetPreview(report.targetType, report.targetId),
+    }))));
   }
 
   async reviewReport(reportId: string, viewer: Viewer, body: any) {
@@ -365,16 +416,106 @@ export class CommunityService {
     return updated;
   }
 
-  private serializePostPreview(post: any) {
+  private async serializePostPreview(post: any) {
     const locked = post.spoilerLevel === 'SOLUTION';
+    const { imagePaths = [], _count, author, ...postValue } = post;
     return {
-      ...post,
+      ...postValue,
+      author: await this.withDisplayAvatar(author),
       content: locked ? null : post.content,
       contentPreview: locked ? '这是一篇题解，完成题目后可查看全文。' : post.content.slice(0, 220),
       contentLocked: locked,
-      reactionCount: post._count?.reactions || 0,
-      replyCount: post._count?.replies || 0,
+      imageUrls: locked ? [] : await this.getDisplayImageUrls(imagePaths),
+      reactionCount: _count?.reactions || 0,
+      replyCount: _count?.replies || 0,
     };
+  }
+
+  private async serializePostDetail(post: any, replyReactionState = new Map<string, { reactionCount: number; viewerReacted: boolean }>()) {
+    const { imagePaths = [], _count, author, replies = [], ...postValue } = post;
+    return {
+      ...postValue,
+      author: await this.withDisplayAvatar(author),
+      imageUrls: await this.getDisplayImageUrls(imagePaths),
+      reactionCount: _count?.reactions || 0,
+      replyCount: _count?.replies || 0,
+      replies: await Promise.all(replies.map((reply: any) => this.serializeReply(reply, replyReactionState.get(reply.id)))),
+    };
+  }
+
+  private async serializeReply(reply: any, reactionState?: { reactionCount: number; viewerReacted: boolean }) {
+    return {
+      ...reply,
+      author: await this.withDisplayAvatar(reply.author),
+      reactionCount: reactionState?.reactionCount || 0,
+      viewerReacted: reactionState?.viewerReacted || false,
+    };
+  }
+
+  private async getReplyReactionState(replies: Array<{ id: string }>, viewerId: string) {
+    const replyIds = replies.map((reply) => reply.id);
+    if (!replyIds.length) return new Map<string, { reactionCount: number; viewerReacted: boolean }>();
+    const [counts, viewerReactions] = await Promise.all([
+      this.prisma.communityReplyReaction.groupBy({
+        by: ['replyId'],
+        where: { replyId: { in: replyIds }, type: 'UPVOTE' },
+        _count: { _all: true },
+      }),
+      this.prisma.communityReplyReaction.findMany({
+        where: { replyId: { in: replyIds }, userId: viewerId, type: 'UPVOTE' },
+        select: { replyId: true },
+      }),
+    ]);
+    const countByReply = new Map(counts.map((item) => [item.replyId, item._count._all]));
+    const reactedReplyIds = new Set(viewerReactions.map((item) => item.replyId));
+    return new Map(replyIds.map((replyId) => [replyId, {
+      reactionCount: countByReply.get(replyId) || 0,
+      viewerReacted: reactedReplyIds.has(replyId),
+    }]));
+  }
+
+  private async getReportTargetPreview(targetType: string, targetId: string) {
+    if (targetType === 'POST') {
+      return this.prisma.communityPost.findUnique({
+        where: { id: targetId },
+        select: { id: true, title: true, content: true, status: true, author: { select: { username: true, nickname: true } } },
+      });
+    }
+    return this.prisma.communityReply.findUnique({
+      where: { id: targetId },
+      select: { id: true, content: true, status: true, author: { select: { username: true, nickname: true } } },
+    });
+  }
+
+  private normalizeImagePaths(value: unknown) {
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value)) throw new BadRequestException('讨论图片格式不正确');
+    if (value.length > 6) throw new BadRequestException('每条讨论最多上传 6 张图片');
+    const paths = [...new Set(value.map((item) => typeof item === 'string' ? item : ''))];
+    if (paths.some((path) => !this.fileUpload.isStoredPathInPrefix(path, 'community-images'))) {
+      throw new BadRequestException('讨论图片来源不正确');
+    }
+    return paths;
+  }
+
+  private async getDisplayImageUrls(paths: string[]) {
+    const urls = await Promise.all(paths.map(async (path) => {
+      try {
+        return await this.fileUpload.getPresignedUrl(path);
+      } catch {
+        return null;
+      }
+    }));
+    return urls.filter((url): url is string => Boolean(url));
+  }
+
+  private async withDisplayAvatar<T extends { avatar?: string | null }>(author: T | null | undefined) {
+    if (!author || !author.avatar || !author.avatar.startsWith('s3://')) return author;
+    try {
+      return { ...author, avatar: await this.fileUpload.getPresignedUrl(author.avatar) };
+    } catch {
+      return { ...author, avatar: null };
+    }
   }
 
   private async canReadSpoiler(post: { spoilerLevel: string; problemId?: string | null; authorId: string }, viewer: Viewer) {

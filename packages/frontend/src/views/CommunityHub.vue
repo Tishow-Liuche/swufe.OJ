@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useStorage } from '@vueuse/core';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Bell, BookmarkCheck, Check, ChevronRight, CircleHelp, FileWarning, Flame,
-  LockKeyhole, Megaphone, MessageCircle, MessageSquarePlus, PanelLeftClose,
-  PanelLeftOpen, Search, Send, ShieldCheck, ThumbsUp, Users, X,
+  ImagePlus, LockKeyhole, Megaphone, MessageCircle, MessageSquarePlus, PanelLeftClose,
+  Flag, Mail, PanelLeftOpen, Reply, Search, Send, ShieldCheck, ThumbsUp, Users, X,
 } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
 import FilterSelect from '../components/FilterSelect.vue';
+import CommunityReplyThread from '../components/CommunityReplyThread.vue';
+import UserAvatar from '../components/UserAvatar.vue';
 
 type Panel = 'feed' | 'solutions' | 'announcements' | 'help';
 type Post = Record<string, any>;
+type PendingImage = { id: string; file: File; previewUrl: string };
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -49,6 +52,14 @@ const errorMessage = ref('');
 const replyContent = ref('');
 const postForm = ref({ title: '', content: '', category: '学习交流' });
 const announcementForm = ref({ title: '', content: '', isPinned: false });
+const imageInput = ref<HTMLInputElement | null>(null);
+const replyInput = ref<HTMLTextAreaElement | null>(null);
+const pendingImages = ref<PendingImage[]>([]);
+const isPublishingPost = ref(false);
+const replyingTo = ref<any | null>(null);
+const reportTarget = ref<{ type: 'POST' | 'REPLY'; id: string; label: string } | null>(null);
+const reportForm = ref({ reason: '不当内容', detail: '' });
+const profileTarget = ref<any | null>(null);
 
 const isModerator = computed(() => auth.isTeacher() || auth.isAdmin());
 const isFeed = computed(() => panel.value === 'feed' || panel.value === 'solutions');
@@ -65,15 +76,21 @@ const topicFilterOptions = [
   { value: '', label: '全部话题' },
   ...composerCategoryOptions,
 ];
+const replyThreads = computed(() => {
+  const replies: any[] = Array.isArray(selectedPost.value?.replies) ? selectedPost.value.replies : [];
+  const replyById = new Map<string, any>(replies.map((reply) => [reply.id, { ...reply, children: [] as any[] }]));
+  const roots: any[] = [];
+  for (const reply of replyById.values()) {
+    const parent = reply.parentReplyId ? replyById.get(reply.parentReplyId) : undefined;
+    if (parent) parent.children.push(reply);
+    else roots.push(reply);
+  }
+  return roots;
+});
 
 function formatDate(value?: string) {
   if (!value) return '';
   return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
-}
-
-function initials(value?: string) {
-  const text = (value || 'OJ').trim();
-  return text.slice(0, 2).toUpperCase();
 }
 
 function requireLogin() {
@@ -156,19 +173,69 @@ async function openDiscussionComposer() {
 async function publishPost() {
   if (!requireLogin()) return;
   resetMessage();
+  isPublishingPost.value = true;
   try {
+    const imagePaths = await Promise.all(pendingImages.value.map(async (image) => {
+      const formData = new FormData();
+      formData.append('file', image.file);
+      const { data } = await api.post('/api/community/images', formData);
+      return data.path as string;
+    }));
     await api.post('/api/community/posts', {
       type: 'FORUM',
       problemId: scopedProblemId.value || undefined,
       ...postForm.value,
+      imagePaths,
     });
     postForm.value = { title: '', content: '', category: '学习交流' };
+    clearPendingImages();
     showComposer.value = false;
     feedbackMessage.value = '已发布到学习社区。';
     await loadPosts();
   } catch (error: any) {
     errorMessage.value = error.response?.data?.message || '发布失败。';
+  } finally {
+    isPublishingPost.value = false;
   }
+}
+
+function selectImages(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  input.value = '';
+  if (!files.length) return;
+  if (!requireLogin()) return;
+
+  const allowed = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+  const remaining = Math.max(0, 6 - pendingImages.value.length);
+  const accepted = files.slice(0, remaining);
+  const invalid = accepted.find((file) => !allowed.has(file.type) || file.size > 5 * 1024 * 1024);
+  if (invalid) {
+    errorMessage.value = '图片仅支持 PNG/JPEG/GIF/WebP 格式，单张不能超过 5MB。';
+    return;
+  }
+  if (files.length > remaining) errorMessage.value = '每条讨论最多附加 6 张图片。';
+  pendingImages.value.push(...accepted.map((file) => ({
+    id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+    file,
+    previewUrl: URL.createObjectURL(file),
+  })));
+}
+
+function removePendingImage(imageId: string) {
+  const image = pendingImages.value.find((item) => item.id === imageId);
+  if (image) URL.revokeObjectURL(image.previewUrl);
+  pendingImages.value = pendingImages.value.filter((item) => item.id !== imageId);
+}
+
+function clearPendingImages() {
+  pendingImages.value.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+  pendingImages.value = [];
+}
+
+function closeComposer() {
+  showComposer.value = false;
+  clearPendingImages();
 }
 
 async function openPost(post: Post) {
@@ -178,6 +245,7 @@ async function openPost(post: Post) {
     const { data } = await api.get(`/api/community/posts/${post.id}`);
     selectedPost.value = data;
     replyContent.value = '';
+    replyingTo.value = null;
   } catch (error: any) {
     errorMessage.value = error.response?.data?.message || '无法打开该内容。';
   }
@@ -219,14 +287,99 @@ async function toggleReaction(post: any) {
 async function replyToPost() {
   if (!selectedPost.value || !replyContent.value.trim()) return;
   try {
-    await api.post(`/api/community/posts/${selectedPost.value.id}/replies`, { content: replyContent.value });
+    await api.post(`/api/community/posts/${selectedPost.value.id}/replies`, {
+      content: replyContent.value,
+      parentReplyId: replyingTo.value?.id,
+    });
     const { data } = await api.get(`/api/community/posts/${selectedPost.value.id}`);
     selectedPost.value = data;
     replyContent.value = '';
+    replyingTo.value = null;
     await loadNotifications();
+    await loadPosts();
   } catch (error: any) {
     errorMessage.value = error.response?.data?.message || '回复失败。';
   }
+}
+
+async function toggleReplyReaction(reply: any) {
+  if (!requireLogin()) return;
+  try {
+    const { data } = await api.post(`/api/community/replies/${reply.id}/reaction`);
+    reply.reactionCount = data.reactionCount;
+    reply.viewerReacted = data.reacted;
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '点赞操作失败。';
+  }
+}
+
+function openReport(type: 'POST' | 'REPLY', item: any) {
+  if (!requireLogin()) return;
+  reportTarget.value = {
+    type,
+    id: item.id,
+    label: type === 'POST' ? (item.title || '当前讨论') : `${item.author?.nickname || item.author?.username || '该用户'}的回复`,
+  };
+  reportForm.value = { reason: '不当内容', detail: '' };
+}
+
+function closeReport() {
+  reportTarget.value = null;
+}
+
+function openUserCard(author: any) {
+  if (!author?.id) return;
+  profileTarget.value = author;
+}
+
+function closeUserCard() {
+  profileTarget.value = null;
+}
+
+function startDirectMessage() {
+  if (!profileTarget.value?.id || !requireLogin()) return;
+  const userId = profileTarget.value.id;
+  closeUserCard();
+  void router.push({ path: '/messages', query: { contact: userId } });
+}
+
+function roleLabel(role?: string | null) {
+  if (role === 'ADMIN') return '管理员';
+  if (role === 'TEACHER') return '教师';
+  return '学习者';
+}
+
+function joinedDays(createdAt?: string) {
+  if (!createdAt) return '不久';
+  const days = Math.max(1, Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000));
+  return String(days);
+}
+
+async function submitReport() {
+  if (!reportTarget.value) return;
+  try {
+    await api.post('/api/community/reports', {
+      targetType: reportTarget.value.type,
+      targetId: reportTarget.value.id,
+      reason: reportForm.value.reason,
+      detail: reportForm.value.detail,
+    });
+    feedbackMessage.value = '已提交举报，审核结果会通过站内通知告知你。';
+    closeReport();
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '举报提交失败。';
+  }
+}
+
+function startReply(reply?: any) {
+  if (!requireLogin()) return;
+  replyingTo.value = reply || null;
+  void nextTick(() => replyInput.value?.focus());
+}
+
+function clearReplyTarget() {
+  replyingTo.value = null;
+  void nextTick(() => replyInput.value?.focus());
 }
 
 async function resolvePost() {
@@ -304,6 +457,7 @@ onMounted(async () => {
   await Promise.all([loadPosts(), loadAnnouncements(), loadNotifications()]);
   await openPostFromRoute(route.query.post);
 });
+onBeforeUnmount(clearPendingImages);
 </script>
 
 <template>
@@ -344,10 +498,19 @@ onMounted(async () => {
             </div>
           </div>
           <div class="feed-heading"><div><p class="section-kicker">{{ panel === 'solutions' ? '通过后解锁' : '学习社区' }}</p><h2>{{ feedTitle }}</h2><p>{{ feedDescription }}</p></div><button v-if="panel === 'feed'" class="primary-command" type="button" @click="showComposer = !showComposer"><MessageSquarePlus :size="17" />发起讨论</button></div>
-          <form v-if="showComposer && panel === 'feed'" class="discussion-composer" @submit.prevent="publishPost"><input v-model="postForm.title" maxlength="120" placeholder="用一句话说清你的讨论主题" required><div><FilterSelect v-model="postForm.category" class="composer-category-select" :options="composerCategoryOptions" label="讨论分类" /><span>公开发布，请勿在普通讨论区直接公布完整题解。</span></div><textarea v-model="postForm.content" maxlength="12000" placeholder="描述背景、尝试过的方法或你的思路" required /><footer><button type="button" class="plain-command" @click="showComposer = false">取消</button><button class="primary-command" type="submit"><Send :size="16" />发布</button></footer></form>
+          <form v-if="showComposer && panel === 'feed'" class="discussion-composer" @submit.prevent="publishPost">
+            <input v-model="postForm.title" maxlength="120" placeholder="用一句话说清你的讨论主题" required>
+            <div><FilterSelect v-model="postForm.category" class="composer-category-select" :options="composerCategoryOptions" label="讨论分类" /><span>公开发布，请勿在普通讨论区直接公布完整题解。</span></div>
+            <textarea v-model="postForm.content" maxlength="12000" placeholder="描述背景、尝试过的方法或你的思路" required />
+            <input ref="imageInput" class="image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change="selectImages">
+            <div v-if="pendingImages.length" class="composer-image-grid" aria-label="待发布图片">
+              <figure v-for="image in pendingImages" :key="image.id"><img :src="image.previewUrl" :alt="image.file.name"><button type="button" title="移除图片" :aria-label="`移除 ${image.file.name}`" @click="removePendingImage(image.id)"><X :size="15" /></button></figure>
+            </div>
+            <footer><button class="image-command" type="button" :disabled="pendingImages.length >= 6" @click="imageInput?.click()"><ImagePlus :size="17" />添加图片</button><span class="composer-image-count">{{ pendingImages.length }}/6</span><span class="composer-spacer"></span><button type="button" class="plain-command" @click="closeComposer">取消</button><button class="primary-command" type="submit" :disabled="isPublishingPost"><Send :size="16" />{{ isPublishingPost ? '正在发布' : '发布' }}</button></footer>
+          </form>
           <div class="feed-toolbar"><div class="sort-tabs"><button type="button" :class="{ active: sort === 'LATEST' }" @click="sort = 'LATEST'">最新</button><button type="button" :class="{ active: sort === 'HOT' }" @click="sort = 'HOT'"><Flame :size="15" />热门</button><button type="button" :class="{ active: sort === 'UNANSWERED' }" @click="sort = 'UNANSWERED'">未回复</button></div><FilterSelect v-model="category" class="topic-filter-select" :options="topicFilterOptions" label="话题筛选" /></div>
           <div v-if="loading" class="empty-feed">正在加载社区内容...</div>
-          <article v-for="post in posts" :key="post.id" class="feed-post"><button class="post-body" type="button" @click="openPost(post)"><div class="author-avatar" :title="post.author?.nickname || post.author?.username">{{ initials(post.author?.nickname || post.author?.username) }}</div><div class="post-copy"><div class="post-labels"><span>{{ post.category || (post.type === 'SOLUTION' ? '题解复盘' : '学习交流') }}</span><span v-if="post.problem" class="problem-link">关联题目：{{ post.problem.title }}</span><span v-if="post.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span><span v-if="post.contentLocked" class="locked"><LockKeyhole :size="13" />通过后可见</span></div><h3>{{ post.title || (post.type === 'SOLUTION' ? '题解复盘' : '题目讨论') }}</h3><p>{{ post.contentPreview }}</p><footer><span>{{ post.author?.nickname || post.author?.username }}</span><span class="author-separator"></span><time>{{ formatDate(post.updatedAt) }}</time></footer></div></button><div class="post-metrics"><button type="button" :class="{ reacted: post.viewerReacted }" title="点赞" @click="toggleReaction(post)"><ThumbsUp :size="16" />{{ post.reactionCount || 0 }}</button><button type="button" title="查看回复" @click="openPost(post)"><MessageCircle :size="16" />{{ post.replyCount || 0 }}</button><span>{{ post.viewCount || 0 }} 浏览</span></div></article>
+          <article v-for="post in posts" :key="post.id" class="feed-post"><div class="post-body"><button class="community-author-avatar" type="button" :title="`查看 ${post.author?.nickname || post.author?.username || '用户'} 的资料`" @click="openUserCard(post.author)"><UserAvatar :name="post.author?.nickname || post.author?.username" :avatar="post.author?.avatar" :size="38" /></button><button class="post-copy" type="button" @click="openPost(post)"><span class="post-labels"><span>{{ post.category || (post.type === 'SOLUTION' ? '题解复盘' : '学习交流') }}</span><span v-if="post.problem" class="problem-link">关联题目：{{ post.problem.title }}</span><span v-if="post.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span><span v-if="post.contentLocked" class="locked"><LockKeyhole :size="13" />通过后可见</span></span><h3>{{ post.title || (post.type === 'SOLUTION' ? '题解复盘' : '题目讨论') }}</h3><p>{{ post.contentPreview }}</p><span v-if="post.imageUrls?.length" class="post-image-count"><ImagePlus :size="14" />{{ post.imageUrls.length }} 张图片</span><footer><span>{{ post.author?.nickname || post.author?.username }}</span><span class="author-separator"></span><time>{{ formatDate(post.updatedAt) }}</time></footer></button></div><div class="post-metrics"><button type="button" :class="{ reacted: post.viewerReacted }" title="点赞" @click="toggleReaction(post)"><ThumbsUp :size="16" />{{ post.reactionCount || 0 }}</button><button type="button" title="查看回复" @click="openPost(post)"><MessageCircle :size="16" />{{ post.replyCount || 0 }}</button><span>{{ post.viewCount || 0 }} 浏览</span></div></article>
           <div v-if="!loading && !posts.length" class="empty-feed"><MessageCircle :size="26" /><b>{{ panel === 'solutions' ? '暂无可展示的题解' : '还没有讨论' }}</b><span>{{ panel === 'solutions' ? '在题目页通过题目后可发布题解。' : '发起一个有上下文的问题，通常更容易获得有效回复。' }}</span></div>
         </template>
 
@@ -370,10 +533,27 @@ onMounted(async () => {
       </aside>
       </div>
 
-      <section v-if="moderationOpen" class="moderation-drawer"><header><div><p>教师 / 管理员</p><h2>审核中心</h2></div><button class="icon-command" type="button" title="关闭" @click="moderationOpen = false"><X :size="18" /></button></header><div class="moderation-columns"><div><h3>内容举报 <span>{{ reports.length }}</span></h3><article v-for="item in reports" :key="item.id"><b>{{ item.reason }}</b><p>{{ item.detail || '未填写补充说明' }}</p><small>举报人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleReport(item, false)">保留</button><button type="button" class="danger" @click="handleReport(item, true)">隐藏内容</button></footer></article><p v-if="!reports.length" class="no-item">暂无待处理举报</p></div><div><h3>题目纠错 <span>{{ feedbacks.length }}</span></h3><article v-for="item in feedbacks" :key="item.id"><b>{{ item.problem?.title }} · {{ item.type }}</b><p>{{ item.content }}</p><small>反馈人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleFeedback(item)">开始核实</button></footer></article><p v-if="!feedbacks.length" class="no-item">暂无待处理反馈</p></div></div></section>
+      <section v-if="moderationOpen" class="moderation-drawer"><header><div><p>教师 / 管理员</p><h2>审核中心</h2></div><button class="icon-command" type="button" title="关闭" @click="moderationOpen = false"><X :size="18" /></button></header><div class="moderation-columns"><div><h3>内容举报 <span>{{ reports.length }}</span></h3><article v-for="item in reports" :key="item.id"><b>{{ item.targetType === 'REPLY' ? '回复举报' : '帖子举报' }} · {{ item.reason }}</b><p class="report-target-content">{{ item.target?.title || item.target?.content || '原内容已不可见' }}</p><p>{{ item.detail || '未填写补充说明' }}</p><small>被举报者：{{ item.target?.author?.nickname || item.target?.author?.username || '未知' }} · 举报人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleReport(item, false)">保留</button><button type="button" class="danger" @click="handleReport(item, true)">隐藏内容</button></footer></article><p v-if="!reports.length" class="no-item">暂无待处理举报</p></div><div><h3>题目纠错 <span>{{ feedbacks.length }}</span></h3><article v-for="item in feedbacks" :key="item.id"><b>{{ item.problem?.title }} · {{ item.type }}</b><p>{{ item.content }}</p><small>反馈人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleFeedback(item)">开始核实</button></footer></article><p v-if="!feedbacks.length" class="no-item">暂无待处理反馈</p></div></div></section>
     </main>
 
-    <div v-if="selectedPost" class="dialog-backdrop" @click.self="closePost"><article class="post-dialog"><button class="icon-command close-dialog" type="button" title="关闭" @click="closePost"><X :size="18" /></button><div class="post-labels"><span>{{ selectedPost.category || selectedPost.type }}</span><span v-if="selectedPost.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span></div><h2>{{ selectedPost.title || (selectedPost.type === 'SOLUTION' ? '题解复盘' : '讨论') }}</h2><div v-if="selectedPost.contentLocked" class="spoiler-state"><LockKeyhole :size="22" /><div><b>题解内容尚未解锁</b><p>{{ selectedPost.lockReason }}</p></div></div><template v-else><p class="post-content">{{ selectedPost.content }}</p><footer class="dialog-actions"><button type="button" :class="{ reacted: selectedPost.viewerReacted }" @click="toggleReaction(selectedPost)"><ThumbsUp :size="16" />{{ selectedPost.reactionCount || 0 }}</button><button v-if="selectedPost.authorId === auth.user?.id || isModerator" type="button" @click="resolvePost"><BookmarkCheck :size="16" />{{ selectedPost.isResolved ? '重新打开讨论' : '标记为已解决' }}</button></footer><section class="reply-list"><h3>回复 {{ selectedPost.replyCount || selectedPost.replies?.length || 0 }}</h3><article v-for="reply in selectedPost.replies" :key="reply.id"><b>{{ reply.author?.nickname || reply.author?.username }}</b><p>{{ reply.content }}</p><time>{{ formatDate(reply.createdAt) }}</time></article><form @submit.prevent="replyToPost"><textarea v-model="replyContent" maxlength="4000" placeholder="补充思路、给出建议或回答问题" required /><button class="primary-command" type="submit"><Send :size="16" />回复</button></form></section></template></article></div>
+    <div v-if="selectedPost" class="dialog-backdrop" @click.self="closePost">
+      <article class="post-dialog thread-dialog" aria-label="讨论详情">
+        <button class="icon-command close-dialog" type="button" title="关闭" @click="closePost"><X :size="18" /></button>
+        <header class="thread-author"><button class="community-author-avatar" type="button" :title="`查看 ${selectedPost.author?.nickname || selectedPost.author?.username || '用户'} 的资料`" @click="openUserCard(selectedPost.author)"><UserAvatar :name="selectedPost.author?.nickname || selectedPost.author?.username" :avatar="selectedPost.author?.avatar" :size="42" /></button><div><b>{{ selectedPost.author?.nickname || selectedPost.author?.username }}</b><span>{{ formatDate(selectedPost.createdAt) }} 发布了讨论</span></div></header>
+        <div class="post-labels"><span>{{ selectedPost.category || selectedPost.type }}</span><span v-if="selectedPost.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span></div>
+        <h2>{{ selectedPost.title || (selectedPost.type === 'SOLUTION' ? '题解复盘' : '讨论') }}</h2>
+        <div v-if="selectedPost.contentLocked" class="spoiler-state"><LockKeyhole :size="22" /><div><b>题解内容尚未解锁</b><p>{{ selectedPost.lockReason }}</p></div></div>
+        <template v-else>
+          <p class="post-content">{{ selectedPost.content }}</p>
+          <div v-if="selectedPost.imageUrls?.length" class="post-image-grid" aria-label="讨论附图"><img v-for="(imageUrl, index) in selectedPost.imageUrls" :key="imageUrl" :src="imageUrl" :alt="`讨论附图 ${index + 1}`"></div>
+          <footer class="dialog-actions"><button type="button" :class="{ reacted: selectedPost.viewerReacted }" @click="toggleReaction(selectedPost)"><ThumbsUp :size="16" />{{ selectedPost.reactionCount || 0 }}</button><button type="button" @click="startReply()"><Reply :size="16" />回复</button><button type="button" class="report-action" @click="openReport('POST', selectedPost)"><Flag :size="16" />举报</button><button v-if="selectedPost.authorId === auth.user?.id || isModerator" type="button" @click="resolvePost"><BookmarkCheck :size="16" />{{ selectedPost.isResolved ? '重新打开讨论' : '标记为已解决' }}</button><time>{{ selectedPost.viewCount || 0 }} 浏览</time></footer>
+          <section class="reply-list"><header><h3>评论 {{ selectedPost.replyCount || selectedPost.replies?.length || 0 }}</h3><span>按发布时间排列</span></header><div v-if="!replyThreads.length" class="reply-empty">还没有评论，成为第一个参与讨论的人。</div><CommunityReplyThread v-for="reply in replyThreads" :key="reply.id" :reply="reply" @reply="startReply" @react="toggleReplyReaction" @report="(item) => openReport('REPLY', item)" @profile="openUserCard" /><form class="reply-composer" @submit.prevent="replyToPost"><div v-if="replyingTo" class="reply-target">回复 <b>{{ replyingTo.author?.nickname || replyingTo.author?.username }}</b><button type="button" title="取消回复目标" aria-label="取消回复目标" @click="clearReplyTarget"><X :size="14" /></button></div><textarea ref="replyInput" v-model="replyContent" maxlength="4000" :placeholder="replyingTo ? `回复 ${replyingTo.author?.nickname || replyingTo.author?.username}` : '写下你的评论'" required /><footer><span>支持 @用户名 提醒对方</span><button class="primary-command" type="submit"><Send :size="16" />{{ replyingTo ? '发布回复' : '发布评论' }}</button></footer></form></section>
+        </template>
+      </article>
+    </div>
+    <div v-if="reportTarget" class="dialog-backdrop report-backdrop" @click.self="closeReport"><form class="report-dialog" @submit.prevent="submitReport"><header><div><p>社区治理</p><h2>举报{{ reportTarget.type === 'POST' ? '讨论' : '回复' }}</h2><span>{{ reportTarget.label }}</span></div><button class="icon-command" type="button" title="关闭" @click="closeReport"><X :size="18" /></button></header><label>举报原因<select v-model="reportForm.reason"><option>不当内容</option><option>人身攻击</option><option>广告或灌水</option><option>剧透或抄袭</option><option>违法违规</option></select></label><label>补充说明<textarea v-model="reportForm.detail" maxlength="1000" placeholder="可选：描述需要审核员关注的部分"></textarea></label><footer><button class="plain-command" type="button" @click="closeReport">取消</button><button class="primary-command" type="submit"><Flag :size="16" />提交举报</button></footer></form></div>
+    <div v-if="reportTarget" class="dialog-backdrop report-backdrop" @click.self="closeReport"><form class="report-dialog" @submit.prevent="submitReport"><header><div><p>社区治理</p><h2>举报{{ reportTarget.type === 'POST' ? '讨论' : '回复' }}</h2><span>{{ reportTarget.label }}</span></div><button class="icon-command" type="button" title="关闭" @click="closeReport"><X :size="18" /></button></header><label>举报原因<select v-model="reportForm.reason"><option>不当内容</option><option>人身攻击</option><option>广告或灌水</option><option>剧透或抄袭</option><option>违法违规</option></select></label><label>补充说明<textarea v-model="reportForm.detail" maxlength="1000" placeholder="可选：描述需要审核员关注的部分"></textarea></label><footer><button class="plain-command" type="button" @click="closeReport">取消</button><button class="primary-command" type="submit"><Flag :size="16" />提交举报</button></footer></form></div>
+    <div v-if="profileTarget" class="dialog-backdrop profile-card-backdrop" @click.self="closeUserCard"><article class="community-profile-card" :aria-label="`${profileTarget.nickname || profileTarget.username} 的资料`"><button class="profile-card-close" type="button" title="关闭" @click="closeUserCard"><X :size="18" /></button><UserAvatar :name="profileTarget.nickname || profileTarget.username" :avatar="profileTarget.avatar" :size="80" /><div class="profile-card-copy"><h2>{{ profileTarget.nickname || profileTarget.username }}<span v-if="profileTarget.role === 'TEACHER'" title="教师身份">教</span><span v-else-if="profileTarget.role === 'ADMIN'" title="管理员身份">管</span></h2><p>@{{ profileTarget.username }}</p><small>{{ roleLabel(profileTarget.role) }} · 加入社区 {{ joinedDays(profileTarget.createdAt) }} 天</small></div><button v-if="profileTarget.id !== auth.user?.id" class="profile-message-button" type="button" @click="startDirectMessage"><Mail :size="18" />私信</button><p v-else class="profile-self-note">这是你自己的社区资料</p></article></div>
   </div>
 </template>
 
@@ -554,5 +734,76 @@ onMounted(async () => {
 .feed-toolbar .topic-filter-select :deep(.filter-select__option.is-selected) { background: #e7efff; color: #1f5eff; }
 @media (max-width: 720px) {
   .discussion-composer .composer-category-select { flex: 0 0 36px; }
+}
+
+/* Discussion detail follows a readable thread instead of stacking nested cards. */
+.image-input { display: none; }
+.composer-image-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.composer-image-grid figure { position: relative; width: 92px; height: 72px; margin: 0; overflow: hidden; border: 1px solid #cbd9e8; border-radius: 6px; background: #f7fafc; }
+.composer-image-grid img { width: 100%; height: 100%; object-fit: cover; }
+.composer-image-grid button { position: absolute; top: 4px; right: 4px; display: grid; width: 24px; height: 24px; place-items: center; border: 0; border-radius: 50%; background: rgba(28, 43, 59, .76); color: #fff; cursor: pointer; }
+.image-command { display: inline-flex; height: 36px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid #bcd0e4; border-radius: 6px; background: #fff; color: #34536f; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+.image-command:hover:not(:disabled) { border-color: #8fb8ef; background: #f2f7ff; color: #1f5eff; }
+.image-command:disabled { cursor: default; opacity: .5; }
+.composer-image-count { color: #7b8da0; font-size: 11px; }
+.composer-spacer { flex: 1; }
+.post-body { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px; }
+.post-image-count { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; color: #3977aa; font-size: 11px; font-weight: 750; }
+.thread-dialog { width: min(830px, 100%); padding: 28px 30px 32px; border: 1px solid #d8e3ed; border-radius: 8px; box-shadow: 0 24px 60px rgba(25, 45, 69, .28); }
+.thread-author { display: flex; align-items: center; gap: 10px; padding-right: 44px; }
+.community-author-avatar { display: inline-grid; flex: 0 0 auto; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.community-author-avatar:hover :deep(.user-avatar) { box-shadow: 0 0 0 3px #dbeafe; }
+.post-copy { display: block; min-width: 0; flex: 1; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.post-copy:hover h3 { color: #1f6098; }
+.profile-card-backdrop { z-index: 70; }
+.community-profile-card { position: relative; display: grid; width: min(394px, calc(100% - 32px)); min-height: 238px; align-content: start; justify-items: start; padding: 40px 24px 22px; overflow: hidden; border: 1px solid #49515d; border-radius: 8px; background: #202833; color: #fff; box-shadow: 0 24px 60px rgba(16, 24, 40, .42); }
+.community-profile-card :deep(.user-avatar) { position: relative; border-color: rgba(255,255,255,.42); box-shadow: 0 4px 12px rgba(0,0,0,.24); }
+.profile-card-close { position: absolute; z-index: 1; top: 12px; right: 12px; display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 6px; background: rgba(255,255,255,.08); color: #d7e0ea; cursor: pointer; }
+.profile-card-close:hover { background: rgba(255,255,255,.16); color: #fff; }
+.profile-card-copy { position: relative; margin-top: 15px; }.profile-card-copy h2 { display: flex; align-items: center; gap: 7px; margin: 0; color: #fff; font-size: 24px; }.profile-card-copy h2 span { display: inline-grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: #2a91d3; color: #fff; font-size: 10px; }.profile-card-copy p { margin: 5px 0 0; color: #bfc9d5; font-size: 13px; }.profile-card-copy small { display: block; margin-top: 8px; color: #8fa0b2; font-size: 12px; }
+.profile-message-button { display: inline-flex; width: 100%; min-height: 40px; align-items: center; justify-content: center; gap: 7px; margin-top: 24px; border: 0; border-radius: 5px; background: #1674d1; color: #fff; font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; }.profile-message-button:hover { background: #0e64ba; }.profile-self-note { margin: 24px 0 0; color: #aebdcb; font-size: 12px; }
+.thread-author > div { display: grid; gap: 3px; min-width: 0; }
+.thread-author b { overflow: hidden; color: #24364b; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.thread-author span { color: #8796a7; font-size: 11px; }
+.thread-dialog .post-labels { margin-top: 18px; }
+.thread-dialog h2 { margin: 11px 46px 16px 0; color: #203147; font-size: 23px; line-height: 1.45; }
+.thread-dialog .post-content { color: #2d4054; font-size: 15px; line-height: 1.85; }
+.post-image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 9px; margin-top: 16px; }
+.post-image-grid img { display: block; width: 100%; max-height: 360px; border: 1px solid #dbe5ee; border-radius: 6px; object-fit: cover; }
+.dialog-actions { align-items: center; margin-top: 20px; padding: 13px 0; border-top-color: #e4ebf1; border-bottom: 1px solid #e4ebf1; }
+.dialog-actions time { margin-left: auto; color: #94a1ae; font-size: 11px; }
+.dialog-actions .report-action:hover { color: #bf4a47; }
+.reply-list { margin-top: 22px; }
+.reply-list > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 11px; border-bottom: 1px solid #e5ebf0; }
+.reply-list > header h3 { margin: 0; color: #2b3d52; font-size: 16px; }
+.reply-list > header span { color: #97a4b2; font-size: 11px; }
+.reply-empty { padding: 24px 0; color: #8997a5; font-size: 13px; text-align: center; }
+.reply-composer { display: grid; gap: 8px; margin-top: 18px; padding: 12px; border: 1px solid #cbdbea; border-radius: 7px; background: #f8fbfe; }
+.reply-composer textarea { min-height: 88px; border-color: #c4d4e3; border-radius: 5px; }
+.reply-target { display: flex; align-items: center; gap: 4px; color: #60758a; font-size: 12px; }
+.reply-target b { color: #2b5d9b; }
+.reply-target button { display: grid; width: 20px; height: 20px; place-items: center; margin-left: 3px; border: 0; border-radius: 50%; background: #e6eef6; color: #60758a; cursor: pointer; }
+.reply-composer footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.reply-composer footer > span { color: #8796a5; font-size: 11px; }
+.report-target-content { padding: 8px 9px; border-left: 2px solid #bad0e5; color: #4b6176; background: #f7fafc; line-height: 1.55; white-space: pre-wrap; }
+.report-backdrop { z-index: 60; }
+.report-dialog { width: min(460px, calc(100% - 32px)); padding: 22px; border: 1px solid #d5e1ec; border-radius: 8px; background: #fff; box-shadow: 0 22px 52px rgba(16, 24, 40, .26); }
+.report-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.report-dialog header p { margin: 0 0 4px; color: #3977aa; font-size: 11px; font-weight: 800; }
+.report-dialog h2 { margin: 0; color: #283c51; font-size: 18px; }
+.report-dialog header span { display: block; max-width: 330px; margin-top: 5px; overflow: hidden; color: #8392a1; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.report-dialog label { display: grid; gap: 7px; margin-top: 13px; color: #52667a; font-size: 12px; font-weight: 750; }
+.report-dialog select, .report-dialog textarea { width: 100%; border: 1px solid #c6d6e5; border-radius: 6px; background: #fff; color: #2d4054; font: inherit; font-size: 13px; }
+.report-dialog select { height: 38px; padding: 0 10px; }
+.report-dialog textarea { min-height: 96px; padding: 9px 10px; resize: vertical; }
+.report-dialog footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 18px; }
+@media (max-width: 720px) {
+  .composer-spacer { display: none; }
+  .discussion-composer footer { flex-wrap: wrap; justify-content: flex-start; }
+  .thread-dialog { width: 100%; max-height: 100vh; padding: 22px 16px; border-radius: 0; }
+  .dialog-backdrop { padding: 0; }
+  .thread-dialog h2 { font-size: 20px; }
+  .post-image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-dialog { width: calc(100% - 24px); padding: 18px; }
 }
 </style>

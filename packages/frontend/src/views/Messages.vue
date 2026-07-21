@@ -36,6 +36,8 @@ interface DirectMessage {
 interface Conversation {
   id: string;
   lastMessageAt: string;
+  canSend?: boolean;
+  messagingUnlocked?: boolean;
   counterpart: Person;
   lastMessage?: DirectMessage | null;
   unreadCount?: number;
@@ -62,13 +64,14 @@ const selectedConversation = computed(() => conversations.value.find((item) => i
 const target = computed<Person | null>(() => selectedConversation.value?.counterpart || selectedContact.value);
 const targetName = computed(() => target.value?.nickname || target.value?.username || '私信');
 const searched = computed(() => contactSearch.value.trim().length > 0);
+const canSendMessage = computed(() => !selectedConversation.value || selectedConversation.value.canSend !== false);
+const composerHint = computed(() => canSendMessage.value
+  ? `${messageDraft.value.length}/2000`
+  : '已发送首条私信，等待对方回复后可继续发送');
 
 onMounted(async () => {
   await loadConversations();
-  const requestedId = routeConversationId();
-  if (requestedId && conversations.value.some((item) => item.id === requestedId)) {
-    await selectConversation(requestedId, false);
-  }
+  await syncRouteSelection();
 });
 
 watch(contactSearch, () => {
@@ -81,16 +84,34 @@ watch(contactSearch, () => {
   contactSearchTimer = window.setTimeout(() => void searchContacts(keyword), 220);
 });
 
-watch(() => route.query.conversation, async () => {
-  const requestedId = routeConversationId();
-  if (requestedId && requestedId !== selectedConversationId.value) {
-    await selectConversation(requestedId, false);
-  }
+watch(() => [route.query.conversation, route.query.contact], async () => {
+  await syncRouteSelection();
 });
 
 function routeConversationId() {
   const value = route.query.conversation;
   return Array.isArray(value) ? value[0] || '' : typeof value === 'string' ? value : '';
+}
+
+function routeContactId() {
+  const value = route.query.contact;
+  return Array.isArray(value) ? value[0] || '' : typeof value === 'string' ? value : '';
+}
+
+async function syncRouteSelection() {
+  const requestedConversationId = routeConversationId();
+  if (requestedConversationId) {
+    if (requestedConversationId !== selectedConversationId.value) await selectConversation(requestedConversationId, false);
+    return;
+  }
+  const contactId = routeContactId();
+  if (!contactId || contactId === selectedContact.value?.id || contactId === selectedConversation.value?.counterpart.id) return;
+  try {
+    const { data } = await api.get<Person>(`/api/messages/contacts/${contactId}`);
+    selectContact(data, false);
+  } catch (requestError: any) {
+    error.value = requestError.response?.data?.message || '该联系人暂时无法发起私信';
+  }
 }
 
 function formatTime(value?: string) {
@@ -104,9 +125,9 @@ function formatTime(value?: string) {
   ).format(date);
 }
 
-function updateConversationRoute(conversationId = '') {
-  const query = conversationId ? { conversation: conversationId } : {};
-  if (routeConversationId() === conversationId) return;
+function updateConversationRoute(conversationId = '', contactId = '') {
+  const query = conversationId ? { conversation: conversationId } : (contactId ? { contact: contactId } : {});
+  if (routeConversationId() === conversationId && routeContactId() === contactId) return;
   void router.replace({ path: '/messages', query });
 }
 
@@ -156,7 +177,7 @@ async function selectConversation(conversationId: string, syncRoute = true) {
   }
 }
 
-function selectContact(contact: Person) {
+function selectContact(contact: Person, syncRoute = true) {
   const existing = conversations.value.find((item) => item.counterpart.id === contact.id);
   if (existing) {
     void selectConversation(existing.id);
@@ -166,13 +187,13 @@ function selectContact(contact: Person) {
   selectedContact.value = contact;
   messages.value = [];
   error.value = '';
-  updateConversationRoute();
+  if (syncRoute) updateConversationRoute('', contact.id);
 }
 
 async function sendMessage() {
   const content = messageDraft.value.trim();
   const recipientId = target.value?.id;
-  if (!content || !recipientId || sending.value) return;
+  if (!content || !recipientId || sending.value || !canSendMessage.value) return;
   sending.value = true;
   error.value = '';
   try {
@@ -271,11 +292,12 @@ async function scrollToLatest() {
             <textarea
               v-model="messageDraft"
               maxlength="2000"
-              placeholder="输入私信内容，Enter 发送，Shift + Enter 换行"
+              :disabled="!canSendMessage"
+              :placeholder="canSendMessage ? '输入私信内容，Enter 发送，Shift + Enter 换行' : '等待对方回复后可继续发送'"
               aria-label="私信内容"
               @keydown.enter.exact.prevent="sendMessage"
             />
-            <footer><span>{{ messageDraft.length }}/2000</span><button type="submit" :disabled="!messageDraft.trim() || sending"><Send :size="16" />{{ sending ? '发送中' : '发送' }}</button></footer>
+            <footer><span :class="{ 'turn-locked': !canSendMessage }">{{ composerHint }}</span><button type="submit" :disabled="!messageDraft.trim() || sending || !canSendMessage"><Send :size="16" />{{ sending ? '发送中' : '发送' }}</button></footer>
           </form>
         </template>
 
@@ -301,7 +323,7 @@ async function scrollToLatest() {
 .conversation-panel { display: flex; min-width: 0; flex-direction: column; background: #fff; }.conversation-header { display: flex; min-height: 60px; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid #e2e9f1; }.conversation-header h2 { margin: 0; color: #283c52; font-size: 15px; }.conversation-header span { display: block; margin-top: 2px; color: #8190a2; font-size: 11px; }.mobile-back { display: none; }
 .message-stream { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 13px; overflow-y: auto; padding: 22px 24px; background: #f8faff; }.stream-state { display: grid; min-height: 100%; place-items: center; color: #8897a8; font-size: 13px; }.stream-state.empty { align-content: center; justify-items: center; gap: 8px; }.stream-state.empty svg { color: #90b7e4; }.stream-state.empty b { color: #53687e; font-size: 14px; }.stream-state.empty span { color: #8996a5; font-size: 12px; }
 .message-row { display: flex; max-width: 76%; align-items: flex-end; gap: 8px; }.message-row.mine { align-self: flex-end; }.message-bubble { min-width: 0; padding: 9px 11px 6px; border: 1px solid #dce6f2; border-radius: 7px 7px 7px 2px; background: #fff; box-shadow: 0 2px 5px rgba(55, 84, 118, .04); }.message-row.mine .message-bubble { border-color: #a7c7f3; border-radius: 7px 7px 2px 7px; background: #eaf3ff; }.message-bubble p { margin: 0; overflow-wrap: anywhere; color: #31475e; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }.message-bubble time { display: block; margin-top: 3px; color: #8a99a9; font-size: 10px; text-align: right; }
-.message-composer { display: grid; gap: 8px; padding: 13px 18px 14px; border-top: 1px solid #e2e9f1; background: #fff; }.message-composer textarea { width: 100%; min-height: 66px; resize: vertical; border: 1px solid #ccd9e6; border-radius: 6px; padding: 8px 10px; outline: 0; color: #273b50; font: inherit; font-size: 13px; line-height: 1.5; }.message-composer textarea:focus { border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }.message-composer footer { display: flex; align-items: center; justify-content: space-between; }.message-composer footer > span { color: #94a0ae; font-size: 11px; }.message-composer button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 6px; background: #2469ad; color: #fff; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }.message-composer button:hover { background: #1b578f; }.message-composer button:disabled { cursor: not-allowed; opacity: .55; }
+.message-composer { display: grid; gap: 8px; padding: 13px 18px 14px; border-top: 1px solid #e2e9f1; background: #fff; }.message-composer textarea { width: 100%; min-height: 66px; resize: vertical; border: 1px solid #ccd9e6; border-radius: 6px; padding: 8px 10px; outline: 0; color: #273b50; font: inherit; font-size: 13px; line-height: 1.5; }.message-composer textarea:focus { border-color: #3979ad; box-shadow: 0 0 0 3px #deedf9; }.message-composer textarea:disabled { resize: none; border-color: #dce4ed; background: #f7f9fb; color: #91a0af; cursor: not-allowed; }.message-composer footer { display: flex; align-items: center; justify-content: space-between; }.message-composer footer > span { color: #94a0ae; font-size: 11px; }.message-composer footer > .turn-locked { color: #a66a18; }.message-composer button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 6px; background: #2469ad; color: #fff; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }.message-composer button:hover { background: #1b578f; }.message-composer button:disabled { cursor: not-allowed; opacity: .55; }
 .blank-conversation { display: grid; min-height: 100%; place-items: center; padding: 30px; background: #fbfcfe; text-align: center; }.blank-conversation > div { display: grid; justify-items: center; gap: 8px; color: #8b98a8; }.blank-conversation svg { color: #96b8e0; }.blank-conversation h2 { margin: 2px 0 0; color: #51657b; font-size: 16px; }.blank-conversation p { margin: 0; font-size: 13px; }.messages-error { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #f1c9ca; border-radius: 6px; background: #fff5f5; color: #bf3c42; font-size: 13px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) { .messages-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.messages-hero { min-height: 116px; padding: 20px; }.messages-hero h1 { font-size: 26px; }.refresh-button { align-self: flex-start; }.messages-workspace { min-height: calc(100vh - 214px); grid-template-columns: 1fr; }.messages-sidebar { border-right: 0; }.conversation-panel { display: none; }.messages-workspace:has(.conversation-header) .messages-sidebar { display: none; }.messages-workspace:has(.conversation-header) .conversation-panel { display: flex; }.mobile-back { display: inline-grid; width: 32px; height: 32px; place-items: center; border: 1px solid #d6e2ee; border-radius: 6px; background: #fff; color: #4d637a; }.message-stream { padding: 18px 14px; }.message-row { max-width: 88%; }.message-composer { padding: 12px; } }

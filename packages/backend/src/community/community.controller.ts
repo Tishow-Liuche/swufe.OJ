@@ -8,8 +8,11 @@ import {
   Query,
   Req,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CommunityService } from './community.service';
 
 @Controller('api/community')
@@ -44,10 +47,28 @@ export class CommunityController {
     return this.community.createPost(req.user, body);
   }
 
+  @Post('images')
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  uploadImage(@Req() req: any, @UploadedFile() file: Express.Multer.File) {
+    return this.community.uploadCommunityImage(req.user, file);
+  }
+
   @Post('posts/:id/replies')
   @UseGuards(AuthGuard('jwt'))
-  createReply(@Param('id') id: string, @Req() req: any, @Body('content') content: string) {
-    return this.community.createReply(id, req.user, content);
+  createReply(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body('content') content: string,
+    @Body('parentReplyId') parentReplyId?: string,
+  ) {
+    return this.community.createReply(id, req.user, content, parentReplyId);
+  }
+
+  @Post('replies/:id/reaction')
+  @UseGuards(AuthGuard('jwt'))
+  reactToReply(@Param('id') id: string, @Req() req: any) {
+    return this.community.toggleReplyReaction(id, req.user);
   }
 
   @Post('posts/:id/reaction')
