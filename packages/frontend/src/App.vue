@@ -196,6 +196,8 @@ async function logout() {
 </template>
 
 <style>
+@import './styles/workspace-sidebars.css';
+
 * {
   box-sizing: border-box;
   margin: 0;

@@ -1,0 +1,245 @@
+:root {
+  --workspace-sidebar-width: 300px;
+  --workspace-sidebar-collapsed-width: 72px;
+  --workspace-sidebar-surface: #f8fbfe;
+  --workspace-sidebar-line: #dce5ee;
+  --workspace-sidebar-ink: #24364b;
+  --workspace-sidebar-muted: #8493a5;
+  --workspace-sidebar-hover: #eaf3fb;
+  --workspace-sidebar-active: #e7efff;
+  --workspace-sidebar-active-ink: #1f5eff;
+  --workspace-sidebar-count: #dce9ff;
+}
+
+/* Shared desktop rail geometry for every workspace navigation. */
+#app .app-main .contest-sidebar,
+#app .app-main .community-nav,
+#app .app-main .library-sidebar,
+#app .app-main .learning-sidebar,
+#app .app-main .workspace-sidebar {
+  width: var(--workspace-sidebar-width);
+  flex-basis: var(--workspace-sidebar-width);
+  padding: 22px 14px;
+  border-color: var(--workspace-sidebar-line);
+  background: var(--workspace-sidebar-surface);
+  color: var(--workspace-sidebar-ink);
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+#app .app-main .messages-workspace,
+#app .app-main .notification-workspace {
+  grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr);
+}
+
+#app .app-main .messages-sidebar,
+#app .app-main .notification-nav {
+  border-color: var(--workspace-sidebar-line);
+  background: var(--workspace-sidebar-surface);
+  color: var(--workspace-sidebar-ink);
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* Title block: icon, heading and supporting text match the contest rail. */
+#app .app-main .community-nav-title,
+#app .app-main .learning-sidebar-title,
+#app .app-main .workspace-sidebar .sidebar-brand,
+#app .app-main .library-sidebar .sidebar-title {
+  gap: 10px;
+  padding: 1px 5px 15px;
+}
+
+#app .app-main .community-nav-icon,
+#app .app-main .learning-sidebar-icon,
+#app .app-main .workspace-sidebar .sidebar-brand > span,
+#app .app-main .library-sidebar .sidebar-title-icon {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+  border-radius: 8px;
+  background: #ddecfa;
+  color: #1c5688;
+}
+
+#app .app-main .community-nav-copy strong,
+#app .app-main .learning-sidebar-copy strong,
+#app .app-main .workspace-sidebar .sidebar-brand strong,
+#app .app-main .library-sidebar .sidebar-title strong {
+  color: var(--workspace-sidebar-ink);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+#app .app-main .community-nav-copy small,
+#app .app-main .learning-sidebar-copy small,
+#app .app-main .workspace-sidebar .sidebar-brand small,
+#app .app-main .library-sidebar .sidebar-title small {
+  margin-top: 2px;
+  color: var(--workspace-sidebar-muted);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+#app .app-main .community-nav-collapse,
+#app .app-main .learning-sidebar-collapse,
+#app .app-main .library-sidebar .sidebar-collapse-button {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+  border-radius: 7px;
+  color: #6f7e8f;
+}
+
+#app .app-main .community-nav-collapse:hover,
+#app .app-main .learning-sidebar-collapse:hover,
+#app .app-main .library-sidebar .sidebar-collapse-button:hover {
+  background: #e8eef4;
+  color: var(--workspace-sidebar-ink);
+}
+
+/* Small labels, dividers and option rows use the same type scale. */
+#app .app-main .community-nav .nav-caption,
+#app .app-main .learning-sidebar-label,
+#app .app-main .workspace-sidebar .sidebar-label,
+#app .app-main .library-sidebar .sidebar-section-label,
+#app .app-main .notification-nav .nav-heading,
+#app .app-main .messages-sidebar .contact-results > p,
+#app .app-main .messages-sidebar .conversation-list > p {
+  color: var(--workspace-sidebar-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+#app .app-main .community-nav .nav-rule,
+#app .app-main .workspace-sidebar .sidebar-divider,
+#app .app-main .library-sidebar .sidebar-divider {
+  background: var(--workspace-sidebar-line);
+}
+
+#app .app-main .community-nav > button,
+#app .app-main .learning-sidebar .workspace-nav button,
+#app .app-main .workspace-sidebar .workspace-nav button,
+#app .app-main .library-sidebar .sidebar-navigation .sidebar-link,
+#app .app-main .notification-nav button,
+#app .app-main .messages-sidebar .contact-results > button,
+#app .app-main .messages-sidebar .conversation-list > button {
+  border-color: transparent;
+  border-radius: 10px;
+  color: #607187;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+#app .app-main .community-nav > button:hover,
+#app .app-main .learning-sidebar .workspace-nav button:hover,
+#app .app-main .workspace-sidebar .workspace-nav button:hover,
+#app .app-main .library-sidebar .sidebar-navigation .sidebar-link:hover,
+#app .app-main .notification-nav button:hover,
+#app .app-main .messages-sidebar .contact-results > button:hover,
+#app .app-main .messages-sidebar .conversation-list > button:hover {
+  border-color: transparent;
+  background: var(--workspace-sidebar-hover);
+  color: #1e5688;
+}
+
+#app .app-main .community-nav > button.active,
+#app .app-main .learning-sidebar .workspace-nav button.active,
+#app .app-main .workspace-sidebar .workspace-nav button.active,
+#app .app-main .library-sidebar .sidebar-navigation .sidebar-link.router-link-exact-active,
+#app .app-main .notification-nav button.active,
+#app .app-main .messages-sidebar .conversation-list > button.active {
+  border-color: transparent;
+  background: var(--workspace-sidebar-active);
+  box-shadow: none;
+  color: var(--workspace-sidebar-active-ink);
+}
+
+#app .app-main .library-sidebar .sidebar-navigation .sidebar-link.router-link-exact-active::before {
+  display: none;
+}
+
+#app .app-main .community-nav > button b,
+#app .app-main .learning-sidebar .workspace-nav button b,
+#app .app-main .workspace-sidebar .workspace-nav button b,
+#app .app-main .notification-nav button i,
+#app .app-main .messages-sidebar .unread-dot {
+  border-radius: 6px;
+  background: #edf1f5;
+  color: #8c9bad;
+  font-size: 10px;
+}
+
+#app .app-main .community-nav > button.active b,
+#app .app-main .learning-sidebar .workspace-nav button.active b,
+#app .app-main .workspace-sidebar .workspace-nav button.active b,
+#app .app-main .notification-nav button.active i {
+  background: var(--workspace-sidebar-count);
+  color: var(--workspace-sidebar-active-ink);
+}
+
+#app .app-main .community-nav > button strong,
+#app .app-main .learning-sidebar .workspace-nav button strong,
+#app .app-main .workspace-sidebar .workspace-nav button strong,
+#app .app-main .messages-sidebar .conversation-copy b,
+#app .app-main .messages-sidebar .contact-results b {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+#app .app-main .community-nav > button small,
+#app .app-main .learning-sidebar .workspace-nav button small,
+#app .app-main .workspace-sidebar .workspace-nav button small,
+#app .app-main .messages-sidebar .conversation-copy small,
+#app .app-main .messages-sidebar .contact-results small {
+  color: var(--workspace-sidebar-muted);
+  font-size: 10px;
+}
+
+/* Commands remain commands, while staying in the same visual language. */
+#app .app-main .community-nav .create-discussion {
+  border-color: #2469ad;
+  background: #2469ad;
+  color: #fff;
+}
+
+#app .app-main .community-nav .create-discussion:hover {
+  border-color: #1b578f;
+  background: #1b578f;
+  color: #fff;
+}
+
+#app .app-main .community-hub.sidebar-collapsed .community-nav,
+#app .app-main .learning-page.sidebar-collapsed .learning-sidebar,
+#app .app-main .teacher-workspace.sidebar-collapsed .workspace-sidebar,
+#app .app-main .library-shell.sidebar-collapsed .library-sidebar {
+  width: var(--workspace-sidebar-collapsed-width);
+  flex-basis: var(--workspace-sidebar-collapsed-width);
+}
+
+@media (max-width: 860px) {
+  #app .app-main .contest-sidebar,
+  #app .app-main .community-nav,
+  #app .app-main .library-sidebar,
+  #app .app-main .learning-sidebar,
+  #app .app-main .workspace-sidebar,
+  #app .app-main .community-hub.sidebar-collapsed .community-nav,
+  #app .app-main .learning-page.sidebar-collapsed .learning-sidebar,
+  #app .app-main .library-shell.sidebar-collapsed .library-sidebar {
+    position: static;
+    width: auto;
+    height: auto;
+    max-height: none;
+    padding: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  #app .app-main .messages-workspace,
+  #app .app-main .notification-workspace {
+    grid-template-columns: 1fr;
+  }
+}
