@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { useStorage } from '@vueuse/core';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ArrowLeft,
   Mail,
   MessageCircleMore,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   Send,
@@ -58,6 +61,7 @@ const conversationLoading = ref(false);
 const sending = ref(false);
 const error = ref('');
 const messagesEnd = ref<HTMLElement | null>(null);
+const sidebarCollapsed = useStorage('swufe-oj:messages-sidebar-collapsed-v1', true);
 let contactSearchTimer = 0;
 
 const selectedConversation = computed(() => conversations.value.find((item) => item.id === selectedConversationId.value) || null);
@@ -231,9 +235,9 @@ async function scrollToLatest() {
       </button>
     </header>
 
-    <div class="messages-workspace">
+    <div class="messages-workspace" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
       <aside class="messages-sidebar" aria-label="私信联系人">
-        <div class="sidebar-title"><Mail :size="18" /><strong>联系人</strong><span>{{ conversations.length }}</span></div>
+        <div class="sidebar-title"><Mail :size="18" /><strong>联系人</strong><span>{{ conversations.length }}</span><button class="sidebar-collapse-button" type="button" :title="sidebarCollapsed ? '展开私信侧栏' : '收起私信侧栏'" :aria-label="sidebarCollapsed ? '展开私信侧栏' : '收起私信侧栏'" :aria-expanded="!sidebarCollapsed" @click="sidebarCollapsed = !sidebarCollapsed"><PanelLeftOpen v-if="sidebarCollapsed" :size="18" /><PanelLeftClose v-else :size="18" /></button></div>
         <label class="contact-search">
           <Search :size="16" />
           <input v-model="contactSearch" type="search" placeholder="搜索用户名或昵称" aria-label="搜索联系人" />
@@ -255,6 +259,7 @@ async function scrollToLatest() {
             :key="conversation.id"
             type="button"
             :class="{ active: conversation.id === selectedConversationId }"
+            :title="sidebarCollapsed ? (conversation.counterpart.nickname || conversation.counterpart.username) : undefined"
             @click="selectConversation(conversation.id)"
           >
             <UserAvatar :name="conversation.counterpart.nickname || conversation.counterpart.username" :avatar="conversation.counterpart.avatar" :size="36" />
@@ -328,4 +333,6 @@ async function scrollToLatest() {
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) { .messages-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.messages-hero { min-height: 116px; padding: 20px; }.messages-hero h1 { font-size: 26px; }.refresh-button { align-self: flex-start; }.messages-workspace { min-height: calc(100vh - 214px); grid-template-columns: 1fr; }.messages-sidebar { border-right: 0; }.conversation-panel { display: none; }.messages-workspace:has(.conversation-header) .messages-sidebar { display: none; }.messages-workspace:has(.conversation-header) .conversation-panel { display: flex; }.mobile-back { display: inline-grid; width: 32px; height: 32px; place-items: center; border: 1px solid #d6e2ee; border-radius: 6px; background: #fff; color: #4d637a; }.message-stream { padding: 18px 14px; }.message-row { max-width: 88%; }.message-composer { padding: 12px; } }
 @media (max-width: 520px) { .messages-hero { align-items: flex-start; flex-direction: column; gap: 12px; }.refresh-button { width: 100%; justify-content: center; }.messages-workspace { min-height: calc(100vh - 264px); }.conversation-header { padding: 0 12px; } }
+.messages-page { width:min(1440px,calc(100% - 40px)); }.sidebar-collapse-button { display:grid; width:34px; height:34px; flex:0 0 34px; place-items:center; border:0; border-radius:10px; color:#637488; background:transparent; cursor:pointer; }.sidebar-collapse-button:hover { color:#1f5eff; background:#e7efff; }.messages-workspace.sidebar-collapsed { grid-template-columns:72px minmax(0,1fr); }.messages-workspace.sidebar-collapsed .messages-sidebar { padding:0 10px; }.messages-workspace.sidebar-collapsed .sidebar-title { justify-content:center; padding:0; }.messages-workspace.sidebar-collapsed .sidebar-title>svg,.messages-workspace.sidebar-collapsed .sidebar-title>strong,.messages-workspace.sidebar-collapsed .sidebar-title>span,.messages-workspace.sidebar-collapsed .contact-search,.messages-workspace.sidebar-collapsed .contact-results { display:none; }.messages-workspace.sidebar-collapsed .conversation-list { padding-right:0; padding-left:0; }.messages-workspace.sidebar-collapsed .conversation-list>p,.messages-workspace.sidebar-collapsed .conversation-copy { display:none; }.messages-workspace.sidebar-collapsed .conversation-list>button { justify-content:center; padding-right:0; padding-left:0; }.messages-workspace.sidebar-collapsed .no-conversation { display:none; }
+@media (max-width:760px) { .messages-page { width:min(100% - 28px,1440px); }.messages-workspace.sidebar-collapsed { grid-template-columns:1fr; }.messages-workspace.sidebar-collapsed .messages-sidebar { padding:0; }.messages-workspace.sidebar-collapsed .sidebar-title { justify-content:initial; padding:0 17px; }.messages-workspace.sidebar-collapsed .sidebar-title>svg,.messages-workspace.sidebar-collapsed .sidebar-title>strong,.messages-workspace.sidebar-collapsed .sidebar-title>span,.messages-workspace.sidebar-collapsed .contact-search { display:flex; }.messages-workspace.sidebar-collapsed .contact-results { display:block; }.messages-workspace.sidebar-collapsed .conversation-list { padding-right:10px; padding-left:10px; }.messages-workspace.sidebar-collapsed .conversation-list>p,.messages-workspace.sidebar-collapsed .conversation-copy { display:grid; }.messages-workspace.sidebar-collapsed .conversation-list>button { justify-content:initial; padding-right:7px; padding-left:7px; }.messages-workspace.sidebar-collapsed .no-conversation { display:grid; }.sidebar-collapse-button { display:none; } }
 </style>

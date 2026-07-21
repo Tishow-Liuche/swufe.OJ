@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useStorage } from '@vueuse/core';
 import {
   BarChart3, BookOpenCheck, Check, ChevronDown, ChevronRight, Clipboard, ClipboardList,
   Clock3, Download, FileSpreadsheet, KeyRound, LayoutDashboard, Plus,
-  RefreshCw, Search, Trash2, UploadCloud, UserCheck, UserPlus, UsersRound, X,
+  PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Trash2, UploadCloud, UserCheck, UserPlus, UsersRound, X,
 } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
@@ -86,6 +87,7 @@ const excelImporting = ref(false);
 const excelInput = ref<HTMLInputElement | null>(null);
 const classMenuOpen = ref(false);
 const classSwitcher = ref<HTMLElement | null>(null);
+const sidebarCollapsed = useStorage('swufe-oj:class-sidebar-collapsed-v1', true);
 
 const selectedClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value));
 const pendingMembers = computed(() => members.value.filter((member) => member.status === 'PENDING'));
@@ -345,12 +347,12 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 </script>
 
 <template>
-  <div class="teacher-workspace">
+  <div class="teacher-workspace" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <aside class="workspace-sidebar">
-      <div class="sidebar-brand"><span><UsersRound :size="20" /></span><div><strong>班级工作台</strong><small>教学与成员管理</small></div></div>
+      <div class="sidebar-brand"><span><UsersRound :size="20" /></span><div><strong>班级工作台</strong><small>教学与成员管理</small></div><button class="sidebar-collapse-button" type="button" :title="sidebarCollapsed ? '展开班级侧栏' : '收起班级侧栏'" :aria-label="sidebarCollapsed ? '展开班级侧栏' : '收起班级侧栏'" :aria-expanded="!sidebarCollapsed" @click="sidebarCollapsed = !sidebarCollapsed"><PanelLeftOpen v-if="sidebarCollapsed" :size="18" /><PanelLeftClose v-else :size="18" /></button></div>
       <p class="sidebar-label">功能</p>
       <nav class="workspace-nav">
-        <button v-for="item in panels" :key="item.id" :class="{ active: activePanel === item.id }" @click="openPanel(item.id)">
+        <button v-for="item in panels" :key="item.id" :class="{ active: activePanel === item.id }" :title="sidebarCollapsed ? item.label : undefined" :aria-label="sidebarCollapsed ? item.label : undefined" @click="openPanel(item.id)">
           <component :is="item.icon" :size="18" /><span><strong>{{ item.label }}</strong><small>{{ item.detail }}</small></span>
           <b v-if="item.id === 'access' && pendingMembers.length">{{ pendingMembers.length }}</b>
         </button>
@@ -490,6 +492,9 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
   background: #e7efff;
   color: #1f5eff;
 }
+.sidebar-collapse-button { display:grid; width:34px; height:34px; flex:0 0 34px; margin-left:auto; place-items:center; border:0; border-radius:10px; color:#637488; background:transparent; cursor:pointer; }.sidebar-collapse-button:hover { color:#1f5eff; background:#e7efff; }.sidebar-collapse-button:focus-visible { outline:2px solid #1f5eff; outline-offset:2px; }
+.teacher-workspace.sidebar-collapsed .workspace-sidebar { width:72px; flex-basis:72px; padding-right:10px; padding-left:10px; }.teacher-workspace.sidebar-collapsed .sidebar-brand { justify-content:center; padding-right:0; padding-left:0; }.teacher-workspace.sidebar-collapsed .sidebar-brand>span,.teacher-workspace.sidebar-collapsed .sidebar-brand>div,.teacher-workspace.sidebar-collapsed .sidebar-label,.teacher-workspace.sidebar-collapsed .sidebar-divider,.teacher-workspace.sidebar-collapsed .class-switcher,.teacher-workspace.sidebar-collapsed .sidebar-overview { display:none; }.teacher-workspace.sidebar-collapsed .sidebar-collapse-button { margin-left:0; }.teacher-workspace.sidebar-collapsed .workspace-nav button { grid-template-columns:1fr; justify-items:center; padding-right:0; padding-left:0; }.teacher-workspace.sidebar-collapsed .workspace-nav button>span,.teacher-workspace.sidebar-collapsed .workspace-nav button>b { display:none; }
+.workspace-hero,.workspace-main>section,.workspace-main>.message-bar,.workspace-main>.empty-state { width:min(1440px,100%); max-width:none; }.workspace-hero,.surface,.class-card,.access-grid>section,.excel-preview { border-radius:18px; }.primary-command,.secondary-command,.create-class button,.create-class input,.message-bar { border-radius:10px; }
 .workspace-nav button.active {
   background: #e7efff;
   color: #1f5eff;

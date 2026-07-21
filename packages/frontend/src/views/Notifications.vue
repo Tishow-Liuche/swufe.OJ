@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useStorage } from '@vueuse/core';
 import { useRouter } from 'vue-router';
 import {
   Activity,
@@ -10,6 +11,8 @@ import {
   CircleAlert,
   Mail,
   MessageCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
@@ -33,6 +36,7 @@ const unread = ref(0);
 const activeTab = ref<NotificationTab>('all');
 const loading = ref(false);
 const error = ref('');
+const sidebarCollapsed = useStorage('swufe-oj:notifications-sidebar-collapsed-v1', true);
 const browserPermission = ref<'default' | 'granted' | 'denied' | 'unsupported'>(
   typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'unsupported',
 );
@@ -145,10 +149,10 @@ function notifyHeader() {
       </div>
     </header>
 
-    <div class="notification-workspace">
+    <div class="notification-workspace" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
       <aside class="notification-nav" aria-label="通知分类">
-        <div class="nav-heading"><Bell :size="18" /><strong>通知</strong><span v-if="unread">{{ unread }}</span></div>
-        <button v-for="tab in tabs" :key="tab.id" type="button" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id">
+        <div class="nav-heading"><Bell :size="18" /><strong>通知</strong><span v-if="unread">{{ unread }}</span><button class="sidebar-collapse-button" type="button" :title="sidebarCollapsed ? '展开通知侧栏' : '收起通知侧栏'" :aria-label="sidebarCollapsed ? '展开通知侧栏' : '收起通知侧栏'" :aria-expanded="!sidebarCollapsed" @click="sidebarCollapsed = !sidebarCollapsed"><PanelLeftOpen v-if="sidebarCollapsed" :size="18" /><PanelLeftClose v-else :size="18" /></button></div>
+        <button v-for="tab in tabs" :key="tab.id" type="button" :class="{ active: activeTab === tab.id }" :title="sidebarCollapsed ? tab.label : undefined" @click="activeTab = tab.id">
           <component :is="tab.icon" :size="17" /><span>{{ tab.label }}</span>
           <i v-if="tab.id === 'all' && unread">{{ unread > 99 ? '99+' : unread }}</i>
         </button>
@@ -179,4 +183,6 @@ function notifyHeader() {
 .notification-list { min-width: 0; background: #fff; }.notification-list > header { display: flex; min-height: 60px; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid #e2e9f1; }.notification-list h2 { margin: 0; color: #2a3d53; font-size: 16px; }.notification-list header span { display: block; margin-top: 3px; color: #8593a3; font-size: 11px; }.notification-list > header button { display: inline-grid; width: 32px; height: 32px; place-items: center; border: 1px solid #d6e2ee; border-radius: 6px; background: #fff; color: #4d637a; cursor: pointer; }.notification-list > header button:hover { background: #f1f7ff; color: #2469ad; }
 .notification-item { position: relative; display: flex; width: 100%; align-items: flex-start; gap: 12px; padding: 16px 20px; border: 0; border-bottom: 1px solid #edf1f5; background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; }.notification-item:hover { background: #f8fbff; }.notification-item.unread { background: #f4f8ff; }.notification-icon { display: inline-grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 1px solid #d6e5f7; border-radius: 6px; background: #eaf3ff; color: #2469ad; }.notification-icon.reply { border-color: #c8e4d7; background: #edf9f4; color: #207653; }.notification-icon.system { border-color: #ead9bc; background: #fff7e8; color: #a46e13; }.notification-icon.activity { border-color: #dbd0f0; background: #f5f1ff; color: #7156ad; }.notification-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }.notification-copy > span { display: flex; min-width: 0; justify-content: space-between; gap: 12px; }.notification-copy b { overflow: hidden; color: #34495f; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }.notification-copy time { flex: 0 0 auto; color: #8b99a9; font-size: 11px; }.notification-copy p { display: -webkit-box; overflow: hidden; margin: 0; color: #6e7e90; font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }.notification-copy small { color: #8494a6; font-size: 10px; }.unread-indicator { width: 7px; height: 7px; flex: 0 0 7px; margin-top: 5px; border-radius: 50%; background: #e24a4a; }.notification-state { display: grid; min-height: 450px; place-items: center; padding: 24px; color: #8897a8; font-size: 13px; text-align: center; }.notification-state.empty { align-content: center; justify-items: center; gap: 9px; }.notification-state.empty svg { color: #9db9da; }.notification-state.empty b { color: #53687e; font-size: 15px; }.notification-state.empty span { color: #8996a5; font-size: 12px; }.notification-error { margin: 18px; padding: 10px 12px; border: 1px solid #f1c9ca; border-radius: 6px; background: #fff5f5; color: #bf3c42; font-size: 13px; }
 @media (max-width: 720px) { .notifications-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.notifications-hero { align-items: flex-start; flex-direction: column; padding: 20px; }.notifications-hero h1 { font-size: 26px; }.hero-actions { width: 100%; justify-content: stretch; }.hero-actions button { flex: 1; }.notification-workspace { min-height: calc(100vh - 250px); grid-template-columns: 1fr; }.notification-nav { flex-direction: row; overflow-x: auto; padding: 8px; border-right: 0; border-bottom: 1px solid #e2e9f1; }.nav-heading { display: none; }.notification-nav button { flex: 0 0 auto; }.notification-list > header { padding: 0 15px; }.notification-item { padding: 15px; }.notification-copy > span { align-items: flex-start; flex-direction: column; gap: 3px; }.notification-copy time { white-space: nowrap; } }
+.notifications-page { width:min(1440px,calc(100% - 40px)); }.nav-heading .sidebar-collapse-button { display:grid; width:34px; height:34px; flex:0 0 34px; place-items:center; margin-left:0; padding:0; border:0; border-radius:10px; color:#637488; background:transparent; cursor:pointer; }.nav-heading .sidebar-collapse-button:hover { color:#1f5eff; background:#e7efff; }.notification-workspace.sidebar-collapsed { grid-template-columns:72px minmax(0,1fr); }.notification-workspace.sidebar-collapsed .notification-nav { padding-right:10px; padding-left:10px; }.notification-workspace.sidebar-collapsed .nav-heading { justify-content:center; padding-right:0; padding-left:0; }.notification-workspace.sidebar-collapsed .nav-heading>svg,.notification-workspace.sidebar-collapsed .nav-heading>strong,.notification-workspace.sidebar-collapsed .nav-heading>span { display:none; }.notification-workspace.sidebar-collapsed .notification-nav>button { justify-content:center; padding-right:0; padding-left:0; }.notification-workspace.sidebar-collapsed .notification-nav>button>span,.notification-workspace.sidebar-collapsed .notification-nav>button>i { display:none; }
+@media (max-width:720px) { .notifications-page { width:min(100% - 28px,1440px); }.notification-workspace.sidebar-collapsed { grid-template-columns:1fr; }.notification-workspace.sidebar-collapsed .notification-nav { padding:8px; }.notification-workspace.sidebar-collapsed .notification-nav>button { justify-content:initial; padding-right:9px; padding-left:9px; }.notification-workspace.sidebar-collapsed .notification-nav>button>span { display:inline; }.notification-workspace.sidebar-collapsed .notification-nav>button>i { display:inline-grid; } }
 </style>

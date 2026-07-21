@@ -31,7 +31,7 @@ const scopedProblemTitle = computed(() => {
   const value = route.query.problemTitle;
   return Array.isArray(value) ? value[0] : value;
 });
-const communitySidebarCollapsed = useStorage('swufe-oj:community-sidebar-collapsed', false);
+const communitySidebarCollapsed = useStorage('swufe-oj:community-sidebar-collapsed-v2', true);
 const sort = ref<'LATEST' | 'HOT' | 'UNANSWERED'>('LATEST');
 const category = ref('');
 const keyword = ref('');

@@ -97,7 +97,7 @@ const sourceOptions = [
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
-const sidebarCollapsed = useStorage('swufe-oj:problem-sidebar-collapsed', false);
+const sidebarCollapsed = useStorage('swufe-oj:problem-sidebar-collapsed-v2', true);
 
 function queryValue(key: string) {
   const value = route.query[key];

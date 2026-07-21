@@ -212,6 +212,7 @@
   color: #fff;
 }
 
+#app .app-main .contest-shell.sidebar-collapsed .contest-sidebar,
 #app .app-main .community-hub.sidebar-collapsed .community-nav,
 #app .app-main .learning-page.sidebar-collapsed .learning-sidebar,
 #app .app-main .teacher-workspace.sidebar-collapsed .workspace-sidebar,
@@ -220,12 +221,18 @@
   flex-basis: var(--workspace-sidebar-collapsed-width);
 }
 
+#app .app-main .messages-workspace.sidebar-collapsed,
+#app .app-main .notification-workspace.sidebar-collapsed {
+  grid-template-columns: var(--workspace-sidebar-collapsed-width) minmax(0, 1fr);
+}
+
 @media (max-width: 860px) {
   #app .app-main .contest-sidebar,
   #app .app-main .community-nav,
   #app .app-main .library-sidebar,
   #app .app-main .learning-sidebar,
   #app .app-main .workspace-sidebar,
+  #app .app-main .contest-shell.sidebar-collapsed .contest-sidebar,
   #app .app-main .community-hub.sidebar-collapsed .community-nav,
   #app .app-main .learning-page.sidebar-collapsed .learning-sidebar,
   #app .app-main .library-shell.sidebar-collapsed .library-sidebar {
@@ -239,7 +246,9 @@
 
 @media (max-width: 760px) {
   #app .app-main .messages-workspace,
-  #app .app-main .notification-workspace {
+  #app .app-main .notification-workspace,
+  #app .app-main .messages-workspace.sidebar-collapsed,
+  #app .app-main .notification-workspace.sidebar-collapsed {
     grid-template-columns: 1fr;
   }
 }
