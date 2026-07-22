@@ -341,10 +341,14 @@ describe('UserService profile settings', () => {
         description: '基础练习',
         startTime: new Date('2026-07-21T00:00:00.000Z'),
         endTime: new Date('2026-07-30T00:00:00.000Z'),
+        allowLate: false,
+        latePenalty: 0,
+        passCondition: null,
+        countExternalAc: false,
         createdAt: new Date('2026-07-20T00:00:00.000Z'),
         problems: [
-          { order: 1, score: 100, problem: { id: 'problem-1', title: 'A+B', source: 'LOCAL', difficulty: '入门' } },
-          { order: 2, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: '简单' } },
+          { problemId: 'problem-1', order: 1, score: 100, problem: { id: 'problem-1', title: 'A+B', source: 'LOCAL', difficulty: '入门' } },
+          { problemId: 'problem-2', order: 2, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: '简单' } },
         ],
       },
       {
@@ -354,16 +358,58 @@ describe('UserService profile settings', () => {
         description: null,
         startTime: new Date('2026-07-21T00:00:00.000Z'),
         endTime: new Date('2026-07-23T00:00:00.000Z'),
+        allowLate: false,
+        latePenalty: 0,
+        passCondition: null,
+        countExternalAc: false,
         createdAt: new Date('2026-07-20T00:00:00.000Z'),
         problems: [
-          { order: 1, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: '简单' } },
+          { problemId: 'problem-2', order: 1, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: '简单' } },
         ],
       },
     ]);
-    prisma.submission.findMany.mockResolvedValue([
-      { problemId: 'problem-1', createdAt: new Date('2026-07-22T10:00:00.000Z') },
-      { problemId: 'problem-2', createdAt: new Date('2026-07-25T10:00:00.000Z') },
-    ]);
+    prisma.assignmentStudent = {
+      createMany: jest.fn().mockResolvedValue({ count: 2 }),
+      findUnique: jest.fn()
+        .mockResolvedValueOnce({ status: 'COMPLETED', score: 200, submittedAt: new Date('2026-07-22T10:00:00.000Z'), completedAt: new Date('2026-07-25T10:00:00.000Z') })
+        .mockResolvedValueOnce({ status: 'EXPIRED', score: 0, submittedAt: null, completedAt: null }),
+    };
+    const assignmentProgress = {
+      recomputeStudent: jest.fn().mockResolvedValue(null),
+      calculate: jest.fn()
+        .mockResolvedValueOnce({
+          status: 'COMPLETED',
+          solvedCount: 2,
+          totalProblems: 2,
+          requiredCount: 2,
+          completed: true,
+          late: false,
+          score: 200,
+          maxScore: 200,
+          submittedAt: new Date('2026-07-22T10:00:00.000Z'),
+          completedAt: new Date('2026-07-25T10:00:00.000Z'),
+          problems: [
+            { problemId: 'problem-1', solved: true, late: false, earnedScore: 100 },
+            { problemId: 'problem-2', solved: true, late: false, earnedScore: 100 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          status: 'EXPIRED',
+          solvedCount: 0,
+          totalProblems: 1,
+          requiredCount: 1,
+          completed: false,
+          late: false,
+          score: 0,
+          maxScore: 100,
+          submittedAt: null,
+          completedAt: null,
+          problems: [
+            { problemId: 'problem-2', solved: false, late: false, earnedScore: 0 },
+          ],
+        }),
+    };
+    service = new UserService(prisma, fileUpload, cfAcceptedSync, assignmentProgress as any);
 
     const result = await service.getClassAssignments('student-1', 'class-1');
 
@@ -375,11 +421,11 @@ describe('UserService profile settings', () => {
     expect(result.assignments).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'assignment-1',
-        progress: { solvedCount: 2, totalProblems: 2, completed: true },
+        progress: expect.objectContaining({ solvedCount: 2, totalProblems: 2, completed: true, status: 'COMPLETED' }),
       }),
       expect.objectContaining({
         id: 'assignment-2',
-        progress: { solvedCount: 0, totalProblems: 1, completed: false },
+        progress: expect.objectContaining({ solvedCount: 0, totalProblems: 1, completed: false, status: 'EXPIRED' }),
       }),
     ]));
   });

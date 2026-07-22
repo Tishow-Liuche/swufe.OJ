@@ -1,10 +1,14 @@
-﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FileUploadService } from '../common/file-upload.service';
 import { CfAcceptedSyncService } from '../codeforces/cf-accepted-sync.service';
-import { Optional } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { normalizePointDifficulty } from '../problem/point-difficulty';
+import {
+  assignmentLifecycleLabel,
+  statusLabelZh,
+} from '../teacher/assignment-progress';
+import { AssignmentProgressService } from '../teacher/assignment-progress.service';
 
 type ProfileUpdateInput = {
   nickname?: string | null;
@@ -40,6 +44,7 @@ export class UserService {
     private prisma: PrismaService,
     private readonly fileUpload: FileUploadService,
     @Optional() private cfAcceptedSync?: CfAcceptedSyncService,
+    @Optional() private assignmentProgress?: AssignmentProgressService,
   ) {}
 
   async getProfile(userId: string) {
@@ -494,57 +499,135 @@ export class UserService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const problemIds = [...new Set(assignments.flatMap((assignment) => assignment.problems.map((item) => item.problem.id)))];
-    const earliestStart = assignments.reduce<Date | null>(
-      (earliest, assignment) => !earliest || assignment.startTime < earliest ? assignment.startTime : earliest,
-      null,
-    );
-    const latestEnd = assignments.reduce<Date | null>(
-      (latest, assignment) => !latest || assignment.endTime > latest ? assignment.endTime : latest,
-      null,
-    );
-    const acceptedSubmissions = problemIds.length && earliestStart && latestEnd
-      ? await this.prisma.submission.findMany({
-          where: {
-            userId,
-            status: 'ACCEPTED',
-            problemId: { in: problemIds },
-            createdAt: { gte: earliestStart, lte: latestEnd },
-          },
-          select: { problemId: true, createdAt: true },
-        })
-      : [];
+    // Mid-join safety: ensure enrollment rows exist for this student.
+    if (assignments.length) {
+      await this.prisma.assignmentStudent.createMany({
+        data: assignments.map((assignment) => ({
+          assignmentId: assignment.id,
+          userId,
+          status: 'NOT_STARTED',
+          score: 0,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
-    return {
-      class: cls,
-      assignments: assignments.map((assignment) => {
-        const solvedIds = new Set(
-          acceptedSubmissions
-            .filter((submission) => submission.createdAt >= assignment.startTime && submission.createdAt <= assignment.endTime)
-            .map((submission) => submission.problemId),
-        );
-        const problems = assignment.problems.map((item) => ({
-          ...item.problem,
-          order: item.order,
-          score: item.score,
-        }));
-        const solvedCount = problems.filter((problem) => solvedIds.has(problem.id)).length;
-        return {
-          id: assignment.id,
-          title: assignment.title,
-          description: assignment.description,
-          startTime: assignment.startTime,
-          endTime: assignment.endTime,
-          createdAt: assignment.createdAt,
-          problems,
-          progress: {
-            solvedCount,
-            totalProblems: problems.length,
-            completed: problems.length > 0 && solvedCount === problems.length,
+    const now = new Date();
+    const results = [];
+    for (const assignment of assignments) {
+      const problems = assignment.problems.map((item) => ({
+        ...item.problem,
+        order: item.order,
+        score: item.score,
+      }));
+
+      let progress = {
+        solvedCount: 0,
+        totalProblems: problems.length,
+        requiredCount: problems.length,
+        completed: false,
+        late: false,
+        score: 0,
+        maxScore: problems.reduce((sum, item) => sum + item.score, 0),
+        status: 'NOT_STARTED' as string,
+        statusLabel: statusLabelZh('NOT_STARTED'),
+        submittedAt: null as Date | null,
+        completedAt: null as Date | null,
+        problems: problems.map((problem) => ({
+          problemId: problem.id,
+          solved: false,
+          late: false,
+          earnedScore: 0,
+        })),
+      };
+
+      if (this.assignmentProgress) {
+        // Persist authoritative status/score on each student view (idempotent).
+        await this.assignmentProgress.recomputeStudent(assignment.id, userId, now);
+        const computed = await this.assignmentProgress.calculate(
+          {
+            id: assignment.id,
+            startTime: assignment.startTime,
+            endTime: assignment.endTime,
+            allowLate: assignment.allowLate,
+            latePenalty: assignment.latePenalty,
+            passCondition: assignment.passCondition,
+            countExternalAc: assignment.countExternalAc,
+            problems: assignment.problems.map((item) => ({
+              problemId: item.problemId,
+              score: item.score,
+              order: item.order,
+            })),
           },
+          userId,
+          now,
+        );
+        const enrollment = await this.prisma.assignmentStudent.findUnique({
+          where: { assignmentId_userId: { assignmentId: assignment.id, userId } },
+        });
+        const status = enrollment?.status === 'SETTLED' ? 'SETTLED' : computed.status;
+        progress = {
+          solvedCount: computed.solvedCount,
+          totalProblems: computed.totalProblems,
+          requiredCount: computed.requiredCount,
+          completed: computed.completed || status === 'SETTLED',
+          late: computed.late,
+          score: enrollment?.status === 'SETTLED' ? enrollment.score : computed.score,
+          maxScore: computed.maxScore,
+          status,
+          statusLabel: statusLabelZh(status),
+          submittedAt: enrollment?.submittedAt ?? computed.submittedAt,
+          completedAt: enrollment?.completedAt ?? computed.completedAt,
+          problems: computed.problems.map((item) => ({
+            problemId: item.problemId,
+            solved: item.solved,
+            late: item.late,
+            earnedScore: item.earnedScore,
+          })),
         };
-      }),
-    };
+      }
+
+      const solvedMap = new Map(progress.problems.map((item) => [item.problemId, item]));
+      results.push({
+        id: assignment.id,
+        title: assignment.title,
+        description: assignment.description,
+        startTime: assignment.startTime,
+        endTime: assignment.endTime,
+        allowLate: assignment.allowLate,
+        latePenalty: assignment.latePenalty,
+        passCondition: assignment.passCondition,
+        countExternalAc: assignment.countExternalAc,
+        createdAt: assignment.createdAt,
+        lifecycle: assignmentLifecycleLabel(
+          assignment.startTime,
+          assignment.endTime,
+          now,
+          assignment.allowLate,
+        ),
+        problems: problems.map((problem) => ({
+          ...problem,
+          solved: solvedMap.get(problem.id)?.solved ?? false,
+          late: solvedMap.get(problem.id)?.late ?? false,
+          earnedScore: solvedMap.get(problem.id)?.earnedScore ?? 0,
+        })),
+        progress: {
+          solvedCount: progress.solvedCount,
+          totalProblems: progress.totalProblems,
+          requiredCount: progress.requiredCount,
+          completed: progress.completed,
+          late: progress.late,
+          score: progress.score,
+          maxScore: progress.maxScore,
+          status: progress.status,
+          statusLabel: progress.statusLabel,
+          submittedAt: progress.submittedAt,
+          completedAt: progress.completedAt,
+        },
+      });
+    }
+
+    return { class: cls, assignments: results };
   }
 
   async applyToClass(userId: string, joinCodeInput: string) {

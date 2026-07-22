@@ -5,6 +5,8 @@ import { TeacherService } from './teacher.service';
 describe('TeacherService', () => {
   let service: TeacherService;
   let prisma: any;
+  let assignmentProgress: any;
+  let notificationOutbox: any;
 
   beforeEach(() => {
     prisma = {
@@ -20,18 +22,22 @@ describe('TeacherService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        update: jest.fn(),
       },
       assignmentProblem: {
         createMany: jest.fn(),
+        deleteMany: jest.fn(),
       },
       assignmentStudent: {
         createMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn(),
       },
       notification: {
         createMany: jest.fn(),
       },
       submission: {
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       user: {
         findFirst: jest.fn(),
@@ -42,11 +48,38 @@ describe('TeacherService', () => {
       classMember: {
         create: jest.fn(),
         findUnique: jest.fn(),
+        findMany: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
     };
-    service = new TeacherService(prisma);
+    assignmentProgress = {
+      recomputeStudent: jest.fn().mockResolvedValue(null),
+      recomputeAssignment: jest.fn().mockResolvedValue({ updated: 0 }),
+      settleAssignment: jest.fn().mockResolvedValue({ settled: 0 }),
+      calculate: jest.fn().mockResolvedValue({
+        status: 'NOT_STARTED',
+        solvedCount: 0,
+        totalProblems: 2,
+        requiredCount: 2,
+        completed: false,
+        late: false,
+        score: 0,
+        maxScore: 200,
+        submittedAt: null,
+        completedAt: null,
+        problems: [
+          { problemId: 'problem-1', solved: false, acceptedAt: null, late: false, earnedScore: 0, maxScore: 100, source: null },
+          { problemId: 'problem-2', solved: false, acceptedAt: null, late: false, earnedScore: 0, maxScore: 100, source: null },
+        ],
+      }),
+    };
+    notificationOutbox = {
+      deliverMany: jest.fn().mockResolvedValue({ sent: 2, queued: 0, failed: 0 }),
+      retryPending: jest.fn().mockResolvedValue({ processed: 0, sent: 0, failed: 0 }),
+      getStats: jest.fn().mockResolvedValue({ pending: 0, failed: 0, sent: 0 }),
+    };
+    service = new TeacherService(prisma, assignmentProgress, notificationOutbox);
   });
 
   it('returns classes with a memberCount field from Prisma relation counts', async () => {
@@ -165,8 +198,8 @@ describe('TeacherService', () => {
     });
     expect(prisma.assignmentStudent.createMany).toHaveBeenCalledWith({
       data: [
-        { assignmentId: 'assignment-1', userId: 'student-1' },
-        { assignmentId: 'assignment-1', userId: 'student-2' },
+        { assignmentId: 'assignment-1', userId: 'student-1', status: 'NOT_STARTED', score: 0 },
+        { assignmentId: 'assignment-1', userId: 'student-2', status: 'NOT_STARTED', score: 0 },
       ],
       skipDuplicates: true,
     });
@@ -175,24 +208,24 @@ describe('TeacherService', () => {
       where: { classId: 'class-1', status: 'APPROVED' },
       select: { userId: true },
     });
-    expect(prisma.notification.createMany).toHaveBeenCalledWith({
-      data: [
-        expect.objectContaining({
-          userId: 'student-1',
-          type: 'ASSIGNMENT',
-          title: '算法训练一班 发布了作业',
-          content: expect.stringContaining('第一周作业'),
-          link: '/classes/class-1/assignments?assignment=assignment-1',
-        }),
-        expect.objectContaining({
-          userId: 'student-2',
-          type: 'ASSIGNMENT',
-          title: '算法训练一班 发布了作业',
-          content: expect.stringContaining('第一周作业'),
-          link: '/classes/class-1/assignments?assignment=assignment-1',
-        }),
-      ],
-    });
+    expect(notificationOutbox.deliverMany).toHaveBeenCalledWith([
+      expect.objectContaining({
+        userId: 'student-1',
+        type: 'ASSIGNMENT',
+        title: '算法训练一班 发布了作业',
+        content: expect.stringContaining('第一周作业'),
+        link: '/classes/class-1/assignments?assignment=assignment-1',
+        refType: 'ASSIGNMENT',
+        refId: 'assignment-1',
+      }),
+      expect.objectContaining({
+        userId: 'student-2',
+        type: 'ASSIGNMENT',
+        title: '算法训练一班 发布了作业',
+        content: expect.stringContaining('第一周作业'),
+        link: '/classes/class-1/assignments?assignment=assignment-1',
+      }),
+    ]);
   });
 
   it('imports a fixed-format student row without requiring college', async () => {
@@ -280,11 +313,12 @@ describe('TeacherService', () => {
 
     expect(prisma.assignmentStudent.createMany).toHaveBeenCalledWith({
       data: [
-        { assignmentId: 'assignment-1', userId: 'student-1' },
-        { assignmentId: 'assignment-2', userId: 'student-1' },
+        { assignmentId: 'assignment-1', userId: 'student-1', status: 'NOT_STARTED', score: 0 },
+        { assignmentId: 'assignment-2', userId: 'student-1', status: 'NOT_STARTED', score: 0 },
       ],
       skipDuplicates: true,
     });
+    expect(assignmentProgress.recomputeStudent).toHaveBeenCalledWith('assignment-1', 'student-1');
     expect(result.status).toBe('APPROVED');
   });
 
@@ -293,9 +327,15 @@ describe('TeacherService', () => {
       id: 'assignment-1',
       title: '第一周作业',
       classId: 'class-1',
+      startTime: new Date('2026-07-15T00:00:00.000Z'),
+      endTime: new Date('2026-07-20T00:00:00.000Z'),
+      allowLate: false,
+      latePenalty: 0,
+      passCondition: null,
+      countExternalAc: false,
       problems: [
-        { order: 1, problem: { id: 'problem-1', title: 'A+B' } },
-        { order: 2, problem: { id: 'problem-2', title: '排序' } },
+        { problemId: 'problem-1', score: 100, order: 1, problem: { id: 'problem-1', title: 'A+B' } },
+        { problemId: 'problem-2', score: 100, order: 2, problem: { id: 'problem-2', title: '排序' } },
       ],
     });
     prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1', name: '一班' });
@@ -325,11 +365,47 @@ describe('TeacherService', () => {
         createdAt: new Date('2026-07-15T02:00:00.000Z'),
       },
     ]);
+    assignmentProgress.calculate
+      .mockResolvedValueOnce({
+        status: 'IN_PROGRESS',
+        solvedCount: 1,
+        totalProblems: 2,
+        requiredCount: 2,
+        completed: false,
+        late: false,
+        score: 100,
+        maxScore: 200,
+        submittedAt: new Date('2026-07-15T02:00:00.000Z'),
+        completedAt: null,
+        problems: [
+          { problemId: 'problem-1', solved: true, acceptedAt: new Date('2026-07-15T02:00:00.000Z'), late: false, earnedScore: 100, maxScore: 100, source: 'LOCAL' },
+          { problemId: 'problem-2', solved: false, acceptedAt: null, late: false, earnedScore: 0, maxScore: 100, source: null },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 'NOT_STARTED',
+        solvedCount: 0,
+        totalProblems: 2,
+        requiredCount: 2,
+        completed: false,
+        late: false,
+        score: 0,
+        maxScore: 200,
+        submittedAt: null,
+        completedAt: null,
+        problems: [
+          { problemId: 'problem-1', solved: false, acceptedAt: null, late: false, earnedScore: 0, maxScore: 100, source: null },
+          { problemId: 'problem-2', solved: false, acceptedAt: null, late: false, earnedScore: 0, maxScore: 100, source: null },
+        ],
+      });
 
     const report = await service.getAssignmentReport('teacher-1', 'assignment-1');
 
-    expect(report.summary).toEqual({ studentCount: 2, problemCount: 2, completedStudents: 0 });
+    expect(report.summary.studentCount).toBe(2);
+    expect(report.summary.problemCount).toBe(2);
+    expect(report.summary.completedStudents).toBe(0);
     expect(report.students[0].solvedCount).toBe(1);
+    expect(report.students[0].status).toBe('IN_PROGRESS');
     expect(report.students[0].problems[0]).toMatchObject({
       problemId: 'problem-1',
       status: 'ACCEPTED',
@@ -338,8 +414,48 @@ describe('TeacherService', () => {
     });
     expect(report.students[1].problems[0]).toMatchObject({
       problemId: 'problem-1',
-      status: 'NOT_SUBMITTED',
       attempts: 0,
     });
+  });
+
+  it('exports assignment report as CSV', async () => {
+    prisma.assignment.findUnique.mockResolvedValue({
+      id: 'assignment-1',
+      title: '第一周作业',
+      classId: 'class-1',
+      startTime: new Date('2026-07-15T00:00:00.000Z'),
+      endTime: new Date('2026-07-20T00:00:00.000Z'),
+      allowLate: false,
+      latePenalty: 0,
+      passCondition: null,
+      countExternalAc: false,
+      problems: [
+        { problemId: 'problem-1', score: 100, order: 1, problem: { id: 'problem-1', title: 'A+B' } },
+      ],
+    });
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1', name: '一班' });
+    prisma.classMember.findMany = jest.fn().mockResolvedValue([
+      { user: { id: 'student-1', username: 'alice', nickname: 'Alice' } },
+    ]);
+    assignmentProgress.calculate.mockResolvedValue({
+      status: 'COMPLETED',
+      solvedCount: 1,
+      totalProblems: 1,
+      requiredCount: 1,
+      completed: true,
+      late: false,
+      score: 100,
+      maxScore: 100,
+      submittedAt: new Date('2026-07-16T00:00:00.000Z'),
+      completedAt: new Date('2026-07-16T00:00:00.000Z'),
+      problems: [
+        { problemId: 'problem-1', solved: true, acceptedAt: new Date('2026-07-16T00:00:00.000Z'), late: false, earnedScore: 100, maxScore: 100, source: 'LOCAL' },
+      ],
+    });
+
+    const file = await service.exportAssignmentReportCsv('teacher-1', 'assignment-1');
+    expect(file.filename).toContain('assignment-1');
+    expect(file.csv).toContain('alice');
+    expect(file.csv).toContain('已完成');
   });
 });

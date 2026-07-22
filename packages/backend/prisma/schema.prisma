@@ -622,19 +622,21 @@ model ClassMember {
 }
 
 model Assignment {
-  id            String              @id @default(cuid())
-  classId       String
-  title         String
-  description   String?
-  startTime     DateTime
-  endTime       DateTime
-  allowLate     Boolean             @default(false)
-  latePenalty   Float               @default(0)
-  passCondition String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  problems      AssignmentProblem[]
-  students      AssignmentStudent[]
+  id              String              @id @default(cuid())
+  classId         String
+  title           String
+  description     String?
+  startTime       DateTime
+  endTime         DateTime
+  allowLate       Boolean             @default(false)
+  latePenalty     Float               @default(0)
+  passCondition   String?
+  /// When true, external OJ AC records (e.g. Codeforces sync) count toward progress.
+  countExternalAc Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  problems        AssignmentProblem[]
+  students        AssignmentStudent[]
 }
 
 model AssignmentProblem {
@@ -653,7 +655,8 @@ model AssignmentStudent {
   id           String     @id @default(cuid())
   assignmentId String
   userId       String
-  status       String     @default("PENDING")
+  /// NOT_STARTED | IN_PROGRESS | COMPLETED | LATE | EXPIRED | SETTLED
+  status       String     @default("NOT_STARTED")
   score        Int        @default(0)
   submittedAt  DateTime?
   completedAt  DateTime?
@@ -661,6 +664,8 @@ model AssignmentStudent {
   user         User       @relation(fields: [userId], references: [id])
 
   @@unique([assignmentId, userId])
+  @@index([userId, status])
+  @@index([assignmentId, status])
 }
 
 // ===================== 用户偏好 =====================
@@ -816,6 +821,29 @@ model Notification {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
+}
+
+/// Durable outbox for assignment/class notifications that failed or need retry.
+model NotificationOutbox {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  content   String?
+  link      String?
+  /// PENDING | SENT | FAILED
+  status    String    @default("PENDING")
+  attempts  Int       @default(0)
+  lastError String?
+  refType   String?
+  refId     String?
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+  updatedAt DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([refType, refId])
+  @@index([userId, type])
 }
 
 model DirectConversation {

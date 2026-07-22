@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import type { Response } from 'express';
 import { TeacherService } from './teacher.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -68,9 +69,65 @@ export class TeacherController {
     return this.teacherService.createAssignment(req.user.id, data);
   }
 
+  @Patch('assignments/:id')
+  updateAssignment(@Param('id') id: string, @Req() req: any, @Body() data: any) {
+    return this.teacherService.updateAssignment(req.user.id, id, data);
+  }
+
   @Get('assignments/:id/report')
-  getAssignmentReport(@Param('id') id: string, @Req() req: any) {
-    return this.teacherService.getAssignmentReport(req.user.id, id);
+  getAssignmentReport(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Query('status') status?: string,
+    @Query('keyword') keyword?: string,
+    @Query('completion') completion?: 'all' | 'completed' | 'incomplete',
+    @Query('refresh') refresh?: string,
+  ) {
+    return this.teacherService.getAssignmentReport(req.user.id, id, {
+      status,
+      keyword,
+      completion,
+      refresh: refresh !== '0' && refresh !== 'false',
+    });
+  }
+
+  @Get('assignments/:id/report.csv')
+  async exportAssignmentReport(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Res() res: Response,
+    @Query('status') status?: string,
+    @Query('keyword') keyword?: string,
+    @Query('completion') completion?: 'all' | 'completed' | 'incomplete',
+  ) {
+    const file = await this.teacherService.exportAssignmentReportCsv(req.user.id, id, {
+      status,
+      keyword,
+      completion,
+    });
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.send(file.csv);
+  }
+
+  @Post('assignments/:id/refresh')
+  refreshAssignment(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.refreshAssignmentProgress(req.user.id, id);
+  }
+
+  @Post('assignments/:id/settle')
+  settleAssignment(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.settleAssignment(req.user.id, id);
+  }
+
+  @Get('notifications/outbox')
+  getNotificationOutbox(@Req() req: any) {
+    return this.teacherService.getNotificationOutboxStats(req.user.id);
+  }
+
+  @Post('notifications/outbox/retry')
+  retryNotificationOutbox(@Req() req: any, @Body() body: { limit?: number }) {
+    return this.teacherService.retryNotificationOutbox(req.user.id, body?.limit);
   }
 
   // === 比赛 ===

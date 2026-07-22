@@ -40,18 +40,29 @@ interface AssignmentItem {
   _count?: { students: number; problems: number };
 }
 interface AssignmentReport {
-  assignment: { id: string; title: string; startTime: string; endTime: string };
+  assignment: {
+    id: string; title: string; startTime: string; endTime: string;
+    allowLate?: boolean; latePenalty?: number; passCondition?: string | null;
+    countExternalAc?: boolean; lifecycle?: string;
+  };
   problems: ProblemItem[];
   students: Array<{
     user: { id: string; username: string; nickname?: string };
+    status?: string; statusLabel?: string;
     solvedCount: number; totalProblems: number; completed: boolean;
+    score?: number; late?: boolean;
     problems: Array<{
       problemId: string; title: string; status: string; attempts: number;
       bestSubmissionId?: string | null; score: number;
       timeUsed?: number | null; memoryUsed?: number | null; submittedAt?: string | null;
+      late?: boolean;
     }>;
   }>;
-  summary: { studentCount: number; problemCount: number; completedStudents: number };
+  summary: {
+    studentCount: number; problemCount: number; completedStudents: number;
+    filteredCount?: number; lateStudents?: number; expiredStudents?: number;
+    inProgressStudents?: number; notStartedStudents?: number;
+  };
 }
 interface ExcelStudentRow {
   studentId: string; name: string; phone: string; email: string;
@@ -89,6 +100,13 @@ const importText = ref('');
 const assignmentTitle = ref('');
 const assignmentDescription = ref('');
 const assignmentEndTime = ref('');
+const assignmentAllowLate = ref(false);
+const assignmentLatePenalty = ref(0);
+const assignmentPassCondition = ref('ALL');
+const assignmentCountExternalAc = ref(false);
+const reportKeyword = ref('');
+const reportStatus = ref('');
+const reportCompletion = ref<'all' | 'completed' | 'incomplete'>('all');
 const problemKeyword = ref('');
 const problemPage = ref(1);
 const problemPageSize = 10;
@@ -126,6 +144,33 @@ const problemSourceOptions = computed(() => [
 ]);
 const selectedProblemIds = computed(() => new Set(selectedProblems.value.map((item) => item.id)));
 const currentPageFullySelected = computed(() => isCurrentPageSelected(selectedProblems.value, problemResults.value));
+const passConditionOptions = [
+  { value: 'ALL', label: '全部题目通过' },
+  { value: 'COUNT:1', label: '至少通过 1 题' },
+  { value: 'PERCENT:50', label: '完成 50%' },
+  { value: 'PERCENT:80', label: '完成 80%' },
+];
+const reportStatusOptions = [
+  { value: '', label: '全部状态' },
+  { value: 'NOT_STARTED', label: '未开始' },
+  { value: 'IN_PROGRESS', label: '进行中' },
+  { value: 'COMPLETED', label: '已完成' },
+  { value: 'LATE', label: '已补交' },
+  { value: 'EXPIRED', label: '已截止' },
+  { value: 'SETTLED', label: '已结算' },
+];
+const reportCompletionOptions = [
+  { value: 'all', label: '完成度不限' },
+  { value: 'completed', label: '仅已完成' },
+  { value: 'incomplete', label: '仅未完成' },
+];
+const reportAssignmentOptions = computed(() => [
+  { value: '', label: '选择作业' },
+  ...assignments.value.map((item) => ({
+    value: item.id,
+    label: `${item.title}（${item._count?.problems || item.problems?.length || 0} 题 / ${item._count?.students || 0} 人）`,
+  })),
+]);
 let problemSearchRequest = 0;
 
 onMounted(() => {
@@ -150,16 +195,19 @@ async function selectClass(id: string) {
 }
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
-    ACCEPTED: '已通过', WRONG_ANSWER: '答案错误', TIME_LIMIT_EXCEEDED: '超时',
+    ACCEPTED: '已通过', LATE_ACCEPTED: '补交通过', WRONG_ANSWER: '答案错误', TIME_LIMIT_EXCEEDED: '超时',
     MEMORY_LIMIT_EXCEEDED: '超内存', COMPILE_ERROR: '编译错误', RUNTIME_ERROR: '运行错误',
     QUEUING: '排队中', JUDGING: '评测中', PENDING: '等待中', NOT_SUBMITTED: '未提交',
+    NOT_STARTED: '未开始', EXPIRED: '已截止', COMPLETED: '已完成', LATE: '已补交',
+    IN_PROGRESS: '进行中', SETTLED: '已结算',
   };
   return labels[status] || status;
 }
 function statusClass(status: string) {
-  if (status === 'ACCEPTED') return 'ok';
-  if (status === 'NOT_SUBMITTED') return 'muted';
-  if (['QUEUING', 'JUDGING', 'PENDING'].includes(status)) return 'pending';
+  if (status === 'ACCEPTED' || status === 'COMPLETED' || status === 'SETTLED') return 'ok';
+  if (status === 'LATE_ACCEPTED' || status === 'LATE') return 'pending';
+  if (status === 'NOT_SUBMITTED' || status === 'NOT_STARTED' || status === 'EXPIRED') return 'muted';
+  if (['QUEUING', 'JUDGING', 'PENDING', 'IN_PROGRESS'].includes(status)) return 'pending';
   return 'bad';
 }
 function formatImportMessage(data: { added: number; skipped: number; notFound?: string[]; alreadyInClass?: string[]; duplicatedInput?: string[] }) {
@@ -403,11 +451,24 @@ async function createAssignment() {
   if (!selectedProblems.value.length) return showMessage('请至少选择一道题目');
   try {
     await api.post('/api/teacher/assignments', {
-      classId: selectedClassId.value, title: assignmentTitle.value.trim(), description: assignmentDescription.value.trim(),
+      classId: selectedClassId.value,
+      title: assignmentTitle.value.trim(),
+      description: assignmentDescription.value.trim(),
       endTime: assignmentEndTime.value ? new Date(assignmentEndTime.value).toISOString() : undefined,
       problemIds: selectedProblems.value.map((item) => item.id),
+      allowLate: assignmentAllowLate.value,
+      latePenalty: Number(assignmentLatePenalty.value) || 0,
+      passCondition: assignmentPassCondition.value || 'ALL',
+      countExternalAc: assignmentCountExternalAc.value,
     });
-    assignmentTitle.value = ''; assignmentDescription.value = ''; assignmentEndTime.value = ''; selectedProblems.value = [];
+    assignmentTitle.value = '';
+    assignmentDescription.value = '';
+    assignmentEndTime.value = '';
+    assignmentAllowLate.value = false;
+    assignmentLatePenalty.value = 0;
+    assignmentPassCondition.value = 'ALL';
+    assignmentCountExternalAc.value = false;
+    selectedProblems.value = [];
     showMessage('作业已发布'); await loadAssignments();
   } catch (e: any) { showMessage('发布作业失败：' + (e.response?.data?.message || e.message)); }
 }
@@ -419,11 +480,63 @@ async function loadAssignments() {
   finally { assignmentsLoading.value = false; }
 }
 async function loadReport(assignmentId = selectedAssignmentId.value) {
-  if (!assignmentId) return;
-  selectedAssignmentId.value = assignmentId; reportLoading.value = true;
-  try { const { data } = await api.get(`/api/teacher/assignments/${assignmentId}/report`); report.value = data; }
+  if (!assignmentId) {
+    report.value = null;
+    return;
+  }
+  selectedAssignmentId.value = assignmentId;
+  reportLoading.value = true;
+  try {
+    const { data } = await api.get(`/api/teacher/assignments/${assignmentId}/report`, {
+      params: {
+        keyword: reportKeyword.value || undefined,
+        status: reportStatus.value || undefined,
+        completion: reportCompletion.value === 'all' ? undefined : reportCompletion.value,
+      },
+    });
+    report.value = data;
+  }
   catch (e: any) { showMessage('加载作业情况失败：' + (e.response?.data?.message || e.message)); }
   finally { reportLoading.value = false; }
+}
+function onReportAssignmentChange(value: string) {
+  selectedAssignmentId.value = value;
+  if (value) void loadReport(value);
+  else report.value = null;
+}
+async function exportReportCsv() {
+  if (!selectedAssignmentId.value) return showMessage('请先选择作业');
+  try {
+    const { data } = await api.get(`/api/teacher/assignments/${selectedAssignmentId.value}/report.csv`, {
+      params: {
+        keyword: reportKeyword.value || undefined,
+        status: reportStatus.value || undefined,
+        completion: reportCompletion.value === 'all' ? undefined : reportCompletion.value,
+      },
+      responseType: 'blob',
+    });
+    const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `assignment-${selectedAssignmentId.value}-report.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showMessage('CSV 已开始下载');
+  } catch (e: any) {
+    showMessage('导出失败：' + (e.response?.data?.message || e.message));
+  }
+}
+async function settleCurrentAssignment() {
+  if (!selectedAssignmentId.value) return;
+  if (!window.confirm('确认结算该作业？结算后自动进度更新将锁定。')) return;
+  try {
+    await api.post(`/api/teacher/assignments/${selectedAssignmentId.value}/settle`);
+    showMessage('作业已结算');
+    await loadReport();
+  } catch (e: any) {
+    showMessage('结算失败：' + (e.response?.data?.message || e.message));
+  }
 }
 </script>
 
@@ -540,6 +653,49 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
               <label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label>
               <label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label>
             </div>
+            <div class="assignment-rules-panel" aria-label="作业规则">
+              <div class="rules-heading">
+                <strong>完成规则</strong>
+                <span>与题库筛选组件同一套交互，发布后可再修改</span>
+              </div>
+              <div class="assignment-rules-grid">
+                <label class="rule-field">
+                  <span>通过条件</span>
+                  <FilterSelect v-model="assignmentPassCondition" :options="passConditionOptions" label="通过条件" />
+                </label>
+                <label class="rule-field">
+                  <span>迟交扣分 (%)</span>
+                  <input
+                    v-model.number="assignmentLatePenalty"
+                    type="number"
+                    min="0"
+                    max="100"
+                    :disabled="!assignmentAllowLate"
+                    placeholder="0"
+                  >
+                </label>
+              </div>
+              <div class="rule-toggles" role="group" aria-label="作业开关">
+                <button
+                  type="button"
+                  class="rule-toggle"
+                  :class="{ active: assignmentAllowLate }"
+                  :aria-pressed="assignmentAllowLate"
+                  @click="assignmentAllowLate = !assignmentAllowLate"
+                >
+                  允许补交
+                </button>
+                <button
+                  type="button"
+                  class="rule-toggle"
+                  :class="{ active: assignmentCountExternalAc }"
+                  :aria-pressed="assignmentCountExternalAc"
+                  @click="assignmentCountExternalAc = !assignmentCountExternalAc"
+                >
+                  外部 OJ AC 计入
+                </button>
+              </div>
+            </div>
             <label>作业说明<textarea v-model="assignmentDescription" rows="3" placeholder="可选"></textarea></label>
 
             <div class="assignment-workspace">
@@ -609,9 +765,83 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
         </section>
 
         <section v-else class="content-view">
-          <div class="view-heading"><div><p>ASSIGNMENT REPORT</p><h2>作业报告</h2><span>按学生与题目查看完成情况。</span></div></div>
-          <div class="report-toolbar"><select v-model="selectedAssignmentId"><option value="">选择作业</option><option v-for="item in assignments" :key="item.id" :value="item.id">{{ item.title }}（{{ item._count?.problems || item.problems?.length || 0 }} 题 / {{ item._count?.students || 0 }} 人）</option></select><button class="primary-command" :disabled="!selectedAssignmentId || reportLoading" @click="loadReport()"><BarChart3 :size="16" />生成报告</button></div>
-          <section v-if="report" class="surface report-surface"><div class="report-summary"><div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div><div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div><div><strong>{{ report.assignment.title }}</strong><span>当前作业</span></div></div><div class="report-table"><table><thead><tr><th>学生</th><th>完成</th><th v-for="problem in report.problems" :key="problem.id">{{ problem.title }}</th></tr></thead><tbody><tr v-for="student in report.students" :key="student.user.id"><td>{{ student.user.nickname || student.user.username }}</td><td>{{ student.solvedCount }}/{{ student.totalProblems }}</td><td v-for="problem in student.problems" :key="problem.problemId"><span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span><small v-if="problem.attempts">{{ problem.attempts }} 次</small></td></tr></tbody></table></div></section><div v-else class="empty-state">选择一个作业查看完成情况</div>
+          <div class="view-heading">
+            <div>
+              <p>ASSIGNMENT REPORT</p>
+              <h2>作业报告</h2>
+              <span>按学生与题目查看完成情况，支持筛选与导出。</span>
+            </div>
+            <div class="report-actions">
+              <button class="secondary-command" :disabled="!selectedAssignmentId" @click="exportReportCsv"><Download :size="16" />导出 CSV</button>
+              <button class="secondary-command" :disabled="!selectedAssignmentId" @click="settleCurrentAssignment">结算作业</button>
+              <button class="primary-command" :disabled="!selectedAssignmentId || reportLoading" @click="loadReport()"><BarChart3 :size="16" />{{ reportLoading ? '生成中' : '生成报告' }}</button>
+            </div>
+          </div>
+
+          <section class="surface report-filter-surface">
+            <div class="report-filter-row">
+              <label class="rule-field report-assignment-field">
+                <span>作业</span>
+                <FilterSelect
+                  :model-value="selectedAssignmentId"
+                  :options="reportAssignmentOptions"
+                  label="选择作业"
+                  @update:model-value="onReportAssignmentChange"
+                />
+              </label>
+              <label class="problem-keyword report-search">
+                <Search :size="16" />
+                <input v-model="reportKeyword" placeholder="搜索学生用户名或昵称" @keyup.enter="loadReport()">
+              </label>
+              <FilterSelect v-model="reportStatus" :options="reportStatusOptions" label="按状态筛选" />
+              <FilterSelect
+                v-model="reportCompletion"
+                :options="reportCompletionOptions"
+                label="按完成度筛选"
+              />
+            </div>
+          </section>
+
+          <section v-if="report" class="surface report-surface">
+            <div class="report-summary">
+              <div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div>
+              <div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div>
+              <div><strong>{{ report.summary.filteredCount ?? report.students.length }}</strong><span>当前筛选</span></div>
+              <div><strong>{{ report.assignment.title }}</strong><span>当前作业</span></div>
+            </div>
+            <div v-if="!report.students.length" class="surface-empty">没有符合筛选条件的学生</div>
+            <div v-else class="report-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>学生</th>
+                    <th>状态</th>
+                    <th>完成</th>
+                    <th>得分</th>
+                    <th v-for="problem in report.problems" :key="problem.id">{{ problem.title }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="student in report.students" :key="student.user.id">
+                    <td>
+                      <span class="member-name">
+                        <i>{{ (student.user.nickname || student.user.username).slice(0, 1).toUpperCase() }}</i>
+                        {{ student.user.nickname || student.user.username }}
+                      </span>
+                    </td>
+                    <td><span class="judge-state" :class="statusClass(student.status || '')">{{ student.statusLabel || statusLabel(student.status || '') }}</span></td>
+                    <td>{{ student.solvedCount }}/{{ student.totalProblems }}</td>
+                    <td>{{ student.score ?? 0 }}</td>
+                    <td v-for="problem in student.problems" :key="problem.problemId">
+                      <span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span>
+                      <small v-if="problem.attempts">{{ problem.attempts }} 次</small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <div v-else class="empty-state">选择一个作业查看完成情况</div>
         </section>
       </template>
     </main>
@@ -626,12 +856,46 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 .workspace-main { min-width:0; flex:1; padding:26px 30px 64px; }.workspace-hero,.workspace-main>section,.workspace-main>.message-bar,.workspace-main>.empty-state { width:min(1160px,100%); margin-right:auto; margin-left:auto; }.workspace-hero { display:flex; min-height:158px; align-items:center; justify-content:space-between; gap:24px; padding:28px 34px; border-radius:8px; color:#fff; background:var(--navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }.workspace-hero p,.view-heading p { margin:0 0 6px; color:#8fc2ec; font-size:10px; font-weight:900; }.workspace-hero h1 { margin:0; font-size:34px; letter-spacing:0; }.workspace-hero>div>span { display:block; margin-top:9px; color:#d8e7f5; font-size:13px; }.hero-facts { display:flex; border:1px solid rgba(255,255,255,.18); border-radius:8px; }.hero-facts div { display:grid; min-width:90px; gap:3px; padding:13px 16px; text-align:center; }.hero-facts div+div { border-left:1px solid rgba(255,255,255,.16); }.hero-facts strong { font-size:23px; }.hero-facts small { color:#bcd0e5; font-size:10px; }
 .message-bar { position:relative; display:flex; align-items:center; justify-content:space-between; margin-top:15px; padding:10px 12px; border:1px solid #bad5ed; border-radius:6px; color:#245b8b; background:#edf7ff; font-size:13px; }.message-bar button { display:grid; width:26px; height:26px; place-items:center; border:0; color:inherit; background:transparent; cursor:pointer; }.overview-view,.content-view { margin-top:22px; }.view-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin-bottom:16px; }.view-heading h2 { margin:0; font-size:25px; letter-spacing:0; }.view-heading>div>span { color:var(--muted); font-size:12px; }.create-class { display:flex; gap:8px; }.create-class input { width:250px; height:40px; padding:0 11px; border:1px solid #cad6e2; border-radius:6px; }.create-class button,.primary-command,.secondary-command,.danger-command { display:inline-flex; min-height:38px; align-items:center; justify-content:center; gap:7px; padding:0 13px; border-radius:6px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }.create-class button,.primary-command { border:0; color:#fff; background:var(--blue); }.secondary-command { border:1px solid #cbd9e6; color:#315c84; background:#fff; }.danger-command { width:38px; padding:0; border:1px solid #e8c4c0; color:#a13f37; background:#fff; }.primary-command:disabled,.secondary-command:disabled { opacity:.5; cursor:default; }
 .class-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }.class-card { display:flex; min-height:222px; flex-direction:column; padding:18px; border:1px solid var(--line); border-radius:8px; color:var(--ink); text-align:left; background:#fff; cursor:pointer; transition:transform .18s,border-color .18s,box-shadow .18s; }.class-card:hover,.class-card.selected { border-color:#8eb8da; transform:translateY(-3px); box-shadow:0 12px 24px rgba(23,59,102,.09); }.class-card-top { display:flex; align-items:center; justify-content:space-between; }.class-initial { display:grid; width:42px; height:42px; place-items:center; border-radius:8px; color:#1c5e96; background:#dcecf9; font-size:18px; font-weight:900; }.class-state { padding:4px 7px; border-radius:5px; font-size:10px; font-weight:900; }.class-state.approved { color:#197050; background:#e4f5ec; }.class-state.pending { color:#916100; background:#fff2c8; }.class-state.rejected { color:#a34841; background:#fdecea; }.class-card h3 { margin:16px 0 5px; font-size:17px; }.class-card>p { margin:0; color:var(--muted); font-size:12px; }.class-meta { display:grid; gap:7px; margin-top:17px; color:#6d7c8e; font-size:11px; }.class-meta span { display:flex; align-items:center; gap:6px; }.class-card footer { display:flex; align-items:center; justify-content:space-between; margin-top:auto; padding-top:16px; color:#24669f; border-top:1px solid #edf1f5; font-size:12px; font-weight:900; }
-.access-grid { display:grid; grid-template-columns:.8fr 1.2fr; gap:16px; }.surface { padding:19px; border:1px solid var(--line); border-radius:8px; background:#fff; box-shadow:0 7px 20px rgba(23,59,102,.04); }.surface-title { display:flex; align-items:center; gap:10px; }.surface-title>span { display:grid; width:36px; height:36px; place-items:center; border-radius:7px; color:#215d91; background:#e4f0fb; }.surface-title h3 { margin:0; font-size:15px; }.surface-title p { margin:3px 0 0; color:var(--muted); font-size:11px; }.code-value { margin:24px 0 8px; color:#174f84; font-family:Consolas,monospace; font-size:31px; font-weight:900; letter-spacing:3px; }.code-value.inactive { color:#8a97a6; font-family:inherit; font-size:24px; letter-spacing:0; }.code-expiry { display:flex; align-items:center; gap:6px; margin:0 0 19px; color:#738196; font-size:11px; }.code-surface label,.assignment-builder label { display:grid; gap:6px; color:#57687b; font-size:11px; font-weight:850; }.code-surface input,.assignment-builder input,.assignment-builder textarea,.import-surface textarea,.report-toolbar select { width:100%; padding:9px 10px; border:1px solid #ced9e4; border-radius:6px; color:#293d54; background:#fff; font:inherit; }.button-row { display:flex; gap:8px; margin-top:13px; }.application-list { display:grid; gap:8px; margin-top:17px; }.application-list article { display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px; border:1px solid #e5ebf1; border-radius:7px; background:#fbfdff; }.student-avatar { display:grid; width:40px; height:40px; place-items:center; border-radius:50%; color:#235d92; background:#e3eef9; font-weight:900; }.application-list article>div { display:grid; gap:3px; min-width:0; }.application-list strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }.application-list small { color:#8491a1; font-size:10px; }.application-list footer { display:flex; gap:6px; }.application-list footer button { display:inline-flex; align-items:center; gap:4px; padding:6px 8px; border-radius:5px; background:#fff; font-size:11px; font-weight:850; cursor:pointer; }.approve { border:1px solid #b9ddca; color:#177245; }.reject { border:1px solid #ecc7c4; color:#a63b34; }
+.access-grid { display:grid; grid-template-columns:.8fr 1.2fr; gap:16px; }.surface { padding:19px; border:1px solid var(--line); border-radius:8px; background:#fff; box-shadow:0 7px 20px rgba(23,59,102,.04); }.surface-title { display:flex; align-items:center; gap:10px; }.surface-title>span { display:grid; width:36px; height:36px; place-items:center; border-radius:7px; color:#215d91; background:#e4f0fb; }.surface-title h3 { margin:0; font-size:15px; }.surface-title p { margin:3px 0 0; color:var(--muted); font-size:11px; }.code-value { margin:24px 0 8px; color:#174f84; font-family:Consolas,monospace; font-size:31px; font-weight:900; letter-spacing:3px; }.code-value.inactive { color:#8a97a6; font-family:inherit; font-size:24px; letter-spacing:0; }.code-expiry { display:flex; align-items:center; gap:6px; margin:0 0 19px; color:#738196; font-size:11px; }.code-surface label,.assignment-builder > label,.assignment-builder .form-grid > label { display:grid; gap:6px; color:#57687b; font-size:11px; font-weight:850; }.code-surface input,.assignment-builder .form-grid input,.assignment-builder > label > input,.assignment-builder > label > textarea,.import-surface textarea { width:100%; padding:9px 10px; border:1px solid #ced9e4; border-radius:8px; color:#293d54; background:#fff; font:inherit; }.button-row { display:flex; gap:8px; margin-top:13px; }.application-list { display:grid; gap:8px; margin-top:17px; }.application-list article { display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px; border:1px solid #e5ebf1; border-radius:7px; background:#fbfdff; }.student-avatar { display:grid; width:40px; height:40px; place-items:center; border-radius:50%; color:#235d92; background:#e3eef9; font-weight:900; }.application-list article>div { display:grid; gap:3px; min-width:0; }.application-list strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }.application-list small { color:#8491a1; font-size:10px; }.application-list footer { display:flex; gap:6px; }.application-list footer button { display:inline-flex; align-items:center; gap:4px; padding:6px 8px; border-radius:5px; background:#fff; font-size:11px; font-weight:850; cursor:pointer; }.approve { border:1px solid #b9ddca; color:#177245; }.reject { border:1px solid #ecc7c4; color:#a63b34; }
 .surface-empty,.empty-state { display:grid; min-height:130px; place-items:center; align-content:center; gap:7px; color:#8794a3; text-align:center; font-size:12px; }.empty-state { min-height:260px; }.surface-empty.compact { min-height:50px; }.table-surface { padding:0; overflow:hidden; }.table-surface table,.report-table table { width:100%; border-collapse:collapse; }.table-surface th,.table-surface td,.report-table th,.report-table td { padding:12px 15px; text-align:left; border-bottom:1px solid #edf1f5; font-size:12px; }.table-surface th,.report-table th { color:#6f7d8d; background:#f7f9fb; font-size:10px; }.member-name { display:flex; align-items:center; gap:9px; font-weight:800; }.member-name i { display:grid; width:31px; height:31px; place-items:center; border-radius:50%; color:#245f94; background:#e5f0fb; font-style:normal; }.table-action { display:grid; width:32px; height:32px; place-items:center; margin-left:auto; border:0; border-radius:6px; color:#a3433b; background:#fff1ef; cursor:pointer; }.narrow-view { max-width:820px; margin-right:auto!important; margin-left:auto!important; }.import-mode { display:inline-grid; grid-template-columns:1fr 1fr; gap:3px; margin-bottom:10px; padding:3px; border:1px solid #d7e1eb; border-radius:7px; background:#e9eef3; }.import-mode button { display:inline-flex; min-width:130px; height:36px; align-items:center; justify-content:center; gap:7px; border:0; border-radius:5px; color:#66778b; background:transparent; font:inherit; font-size:11px; font-weight:850; cursor:pointer; }.import-mode button.active { color:#184f82; background:#fff; box-shadow:0 2px 6px rgba(23,59,102,.1); }.import-surface textarea { min-height:220px; margin-top:20px; resize:vertical; }.import-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; }.template-command { flex:0 0 auto; }.format-strip { display:grid; grid-template-columns:repeat(4,1fr); margin-top:18px; border:1px solid #dce6ef; border-radius:7px; overflow:hidden; }.format-strip span { display:grid; gap:2px; padding:9px 11px; color:#738195; background:#f8fbfd; font-size:9px; }.format-strip span+span { border-left:1px solid #dce6ef; }.format-strip b { color:#365a7d; font-size:11px; }.file-input { position:absolute; width:1px; height:1px; overflow:hidden; opacity:0; pointer-events:none; }.excel-dropzone { display:grid; width:100%; min-height:158px; place-items:center; align-content:center; gap:7px; margin-top:14px; border:1px dashed #91b5d5; border-radius:7px; color:#52708d; background:#f4f9fd; font:inherit; cursor:pointer; transition:border-color .15s,background .15s,transform .15s; }.excel-dropzone:hover,.excel-dropzone.dragging { border-color:#2469ad; background:#e9f4fc; transform:translateY(-1px); }.excel-dropzone>span { display:grid; width:45px; height:45px; place-items:center; border-radius:50%; color:#fff; background:#2469ad; }.excel-dropzone strong { color:#294b6c; font-size:13px; }.excel-dropzone small { color:#8090a1; font-size:10px; }.excel-preview { margin-top:15px; border:1px solid #dce5ed; border-radius:7px; overflow:hidden; }.preview-summary { display:flex; align-items:center; gap:10px; padding:10px 12px; color:#68788b; background:#f7f9fb; font-size:10px; }.preview-summary strong { margin-right:auto; color:#304a64; font-size:12px; }.preview-summary span { padding:3px 6px; border-radius:4px; background:#e9eef3; }.preview-summary .preview-valid { color:#17704e; background:#e4f5ec; }.preview-summary .preview-error { color:#a43d36; background:#fdecea; }.preview-table-wrap { overflow-x:auto; }.preview-table-wrap table { width:100%; min-width:700px; border-collapse:collapse; }.preview-table-wrap th,.preview-table-wrap td { padding:9px 10px; border-top:1px solid #edf1f5; text-align:left; white-space:nowrap; font-size:10px; }.preview-table-wrap th { color:#718093; background:#fbfcfd; font-size:9px; }.preview-table-wrap tr.invalid td { background:#fff8f7; }.row-valid { color:#17704e; }.row-error { color:#a43d36; font-weight:750; }.preview-more { margin:0; padding:8px 12px; border-top:1px solid #edf1f5; color:#778698; background:#fbfcfd; font-size:10px; }.import-footer,.builder-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; color:#7b8999; font-size:11px; }
 .selection-count { padding:5px 9px; border-radius:5px; color:#225f96; background:#e5f1fc; font-size:11px; font-weight:900; }.form-grid { display:grid; grid-template-columns:1fr 260px; gap:12px; }.assignment-builder>label { margin-top:13px; }.assignment-builder textarea { resize:vertical; }.problem-search { display:grid; grid-template-columns:20px minmax(0,1fr) auto; align-items:center; gap:7px; margin-top:16px; padding:7px 7px 7px 10px; border:1px solid #cfdbe6; border-radius:7px; color:#7c8998; }.problem-search input { border:0; outline:0; }.problem-search button { height:32px; padding:0 12px; border:0; border-radius:5px; color:#fff; background:var(--navy); font-weight:800; cursor:pointer; }.problem-results { max-height:220px; margin-top:8px; overflow:auto; border:1px solid #d8e5f0; }.problem-results button { display:flex; width:100%; justify-content:space-between; gap:12px; padding:9px 11px; border:0; border-bottom:1px solid #eaf0f5; color:#314a63; text-align:left; background:#f8fbfe; cursor:pointer; }.problem-results small { color:#24669f; }.selected-problems { margin-top:17px; }.selected-problems>p { color:#586b7f; font-size:11px; font-weight:900; }.selected-problems>div { display:flex; flex-wrap:wrap; gap:7px; }.selected-problems span { display:inline-flex; align-items:center; gap:6px; padding:6px 8px; border:1px solid #cfe0ef; border-radius:6px; color:#315b81; background:#f3f8fd; font-size:11px; }.selected-problems span button { display:grid; place-items:center; border:0; color:#8b4a43; background:transparent; cursor:pointer; }
-.report-toolbar { display:flex; gap:9px; margin-bottom:14px; }.report-toolbar select { flex:1; max-width:620px; }.report-surface { padding:0; overflow:hidden; }.report-summary { display:grid; grid-template-columns:180px 130px minmax(0,1fr); gap:1px; background:#dce5ed; }.report-summary div { display:grid; gap:3px; padding:15px 17px; background:#f8fbfe; }.report-summary strong { color:#214f79; font-size:16px; }.report-summary span { color:#7e8b9a; font-size:10px; }.report-table { overflow:auto; }.report-table table { min-width:900px; }.judge-state { display:inline-block; padding:3px 6px; border-radius:5px; font-size:10px; }.judge-state.ok { color:#17704e; background:#e5f5ec; }.judge-state.bad { color:#a43d36; background:#fdecea; }.judge-state.pending { color:#8a6200; background:#fff2c9; }.judge-state.muted { color:#748293; background:#edf1f5; }.report-table td small { display:block; margin-top:3px; color:#8995a3; font-size:9px; }
-@media(max-width:980px){.teacher-workspace{display:block}.workspace-sidebar{position:static;width:auto;height:auto;padding:12px}.sidebar-brand,.sidebar-label,.sidebar-divider,.class-switcher,.sidebar-overview{display:none}.workspace-nav{grid-template-columns:repeat(3,1fr)}.workspace-nav button{grid-template-columns:20px 1fr}.workspace-nav button small,.workspace-nav button b{display:none}.workspace-main{padding:18px 16px 48px}.class-grid{grid-template-columns:repeat(2,1fr)}.access-grid{grid-template-columns:1fr}}
-@media(max-width:620px){.workspace-nav{grid-template-columns:repeat(2,1fr)}.workspace-hero{align-items:flex-start;flex-direction:column;padding:22px}.workspace-hero h1{font-size:28px}.hero-facts{width:100%}.hero-facts div{min-width:0;flex:1}.view-heading,.create-class,.report-toolbar,.import-footer,.builder-footer,.import-heading{align-items:stretch;flex-direction:column}.create-class input{width:100%}.class-grid{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.application-list article{grid-template-columns:40px 1fr}.application-list footer{grid-column:1/-1}.report-summary{grid-template-columns:1fr}.import-mode{display:grid}.import-mode button{min-width:0}.format-strip{grid-template-columns:1fr 1fr}.format-strip span:nth-child(3){border-left:0;border-top:1px solid #dce6ef}.format-strip span:nth-child(4){border-top:1px solid #dce6ef}.excel-dropzone{min-height:140px;padding:18px}.preview-summary{align-items:flex-start;flex-wrap:wrap}.preview-summary strong{width:100%;margin:0}.preview-table-wrap table{min-width:0;table-layout:fixed}.preview-table-wrap th,.preview-table-wrap td{padding:8px 5px;white-space:normal;overflow-wrap:anywhere}.preview-table-wrap th:nth-child(1){width:26px}.preview-table-wrap th:nth-child(2){width:70px}.preview-table-wrap th:nth-child(3){width:52px}.preview-table-wrap th:nth-child(4),.preview-table-wrap td:nth-child(4),.preview-table-wrap th:nth-child(5),.preview-table-wrap td:nth-child(5){display:none}}
+.report-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+.report-filter-surface { margin-bottom:14px; padding:16px 18px; }
+.report-filter-row { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(180px,1fr) minmax(130px,.7fr) minmax(130px,.7fr); gap:10px; align-items:end; }
+.report-search { width:100%; height:44px; }
+.report-assignment-field { min-width:0; }
+.report-filter-row :deep(.filter-select),
+.rule-field :deep(.filter-select) { width:100%; }
+.report-filter-row :deep(.filter-select__trigger),
+.rule-field :deep(.filter-select__trigger) { width:100%; min-height:44px; }
+.report-surface { padding:0; overflow:hidden; }
+.report-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:#dce5ed; }
+.report-summary div { display:grid; gap:3px; padding:15px 17px; background:#f8fbfe; }
+.report-summary strong { color:#214f79; font-size:16px; }
+.report-summary span { color:#7e8b9a; font-size:10px; }
+.report-table { overflow:auto; }
+.report-table table { min-width:900px; }
+.judge-state { display:inline-block; padding:3px 6px; border-radius:5px; font-size:10px; font-weight:800; }
+.judge-state.ok { color:#17704e; background:#e5f5ec; }
+.judge-state.bad { color:#a43d36; background:#fdecea; }
+.judge-state.pending { color:#8a6200; background:#fff2c9; }
+.judge-state.muted { color:#748293; background:#edf1f5; }
+.report-table td small { display:block; margin-top:3px; color:#8995a3; font-size:9px; }
+.assignment-rules-panel { margin-top:14px; padding:14px 15px; border:1px solid #dce5ed; border-radius:10px; background:#f8fbfd; }
+.rules-heading { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.rules-heading strong { color:#29475f; font-size:12px; }
+.rules-heading span { color:#7c8998; font-size:10px; }
+.assignment-rules-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+.rule-field { display:grid !important; gap:6px; min-width:0; color:#57687b; font-size:11px; font-weight:850; }
+.rule-field > span { color:#57687b; }
+.rule-field input { width:100%; height:44px; padding:0 10px; border:1px solid #ced9e4; border-radius:8px; color:#293d54; background:#fff; font:inherit; }
+.rule-field input:disabled { color:#9aa7b6; background:#f3f6f9; }
+.rule-field input:focus { border-color:#81a9d0; outline:0; box-shadow:0 0 0 3px rgba(36,105,173,.09); }
+.rule-toggles { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.rule-toggle { min-height:34px; padding:0 12px; border:1px solid #d7e1eb; border-radius:7px; color:#62768b; background:#fff; font:inherit; font-size:11px; font-weight:800; cursor:pointer; }
+.rule-toggle:hover,.rule-toggle.active { border-color:#a9c7e2; color:#1f5eff; background:#e7efff; }
+@media(max-width:980px){.teacher-workspace{display:block}.workspace-sidebar{position:static;width:auto;height:auto;padding:12px}.sidebar-brand,.sidebar-label,.sidebar-divider,.class-switcher,.sidebar-overview{display:none}.workspace-nav{grid-template-columns:repeat(3,1fr)}.workspace-nav button{grid-template-columns:20px 1fr}.workspace-nav button small,.workspace-nav button b{display:none}.workspace-main{padding:18px 16px 48px}.class-grid{grid-template-columns:repeat(2,1fr)}.access-grid{grid-template-columns:1fr}.report-filter-row{grid-template-columns:1fr 1fr}.report-assignment-field,.report-search{grid-column:1/-1}}
+@media(max-width:620px){.workspace-nav{grid-template-columns:repeat(2,1fr)}.workspace-hero{align-items:flex-start;flex-direction:column;padding:22px}.workspace-hero h1{font-size:28px}.hero-facts{width:100%}.hero-facts div{min-width:0;flex:1}.view-heading,.create-class,.report-actions,.import-footer,.builder-footer,.import-heading{align-items:stretch;flex-direction:column}.report-actions .primary-command,.report-actions .secondary-command{width:100%}.create-class input{width:100%}.class-grid{grid-template-columns:1fr}.form-grid,.assignment-rules-grid,.report-filter-row{grid-template-columns:1fr}.application-list article{grid-template-columns:40px 1fr}.application-list footer{grid-column:1/-1}.report-summary{grid-template-columns:1fr}.import-mode{display:grid}.import-mode button{min-width:0}.format-strip{grid-template-columns:1fr 1fr}.format-strip span:nth-child(3){border-left:0;border-top:1px solid #dce6ef}.format-strip span:nth-child(4){border-top:1px solid #dce6ef}.excel-dropzone{min-height:140px;padding:18px}.preview-summary{align-items:flex-start;flex-wrap:wrap}.preview-summary strong{width:100%;margin:0}.preview-table-wrap table{min-width:0;table-layout:fixed}.preview-table-wrap th,.preview-table-wrap td{padding:8px 5px;white-space:normal;overflow-wrap:anywhere}.preview-table-wrap th:nth-child(1){width:26px}.preview-table-wrap th:nth-child(2){width:70px}.preview-table-wrap th:nth-child(3){width:52px}.preview-table-wrap th:nth-child(4),.preview-table-wrap td:nth-child(4),.preview-table-wrap th:nth-child(5),.preview-table-wrap td:nth-child(5){display:none}}
 /* Teacher tools use the same white hero and pale-blue selected state as the problem library. */
 .sidebar-brand > span {
   background: #e7efff;
