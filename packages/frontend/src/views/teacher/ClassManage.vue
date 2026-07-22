@@ -564,8 +564,8 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
                     <table class="assignment-table">
                       <thead><tr><th><input type="checkbox" :checked="currentPageFullySelected" :aria-label="currentPageFullySelected ? '取消选择当前页' : '选择当前页'" @change="toggleCurrentProblemPage"></th><th>题目</th><th>来源</th><th>难度</th><th>标签</th></tr></thead>
                       <tbody>
-                        <tr v-for="problem in problemResults" :key="problem.id" :class="{ selected: selectedProblemIds.has(problem.id) }">
-                          <td><input type="checkbox" :checked="selectedProblemIds.has(problem.id)" :aria-label="`选择题目 ${problem.title}`" @change="toggleAssignmentProblem(problem)"></td>
+                        <tr v-for="problem in problemResults" :key="problem.id" class="assignment-selectable-row" :class="{ selected: selectedProblemIds.has(problem.id) }" tabindex="0" :aria-label="`选择题目 ${problem.title}`" @click="toggleAssignmentProblem(problem)" @keydown.enter.prevent="toggleAssignmentProblem(problem)" @keydown.space.prevent="toggleAssignmentProblem(problem)">
+                          <td><input type="checkbox" :checked="selectedProblemIds.has(problem.id)" :aria-label="`选择题目 ${problem.title}`" @click.stop @change="toggleAssignmentProblem(problem)"></td>
                           <td><strong>{{ problem.title }}</strong><small v-if="problem.sourceInfo?.remoteProblemId">{{ problem.sourceInfo.remoteProblemId }}</small></td>
                           <td>{{ problemSourceLabel(problem) }}</td>
                           <td><span class="problem-difficulty">{{ problemDifficultyLabel(problem) }}</span></td>
@@ -739,8 +739,10 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 .assignment-table th { color: #718094; background: #f8fafc; font-size: 10px; }
 .assignment-table th:first-child,.assignment-table td:first-child { width: 32px; text-align: center; }
 .assignment-table tbody tr { transition: background .14s; }
+.assignment-selectable-row { cursor: pointer; }
 .assignment-table tbody tr:hover { background: #f7fbff; }
 .assignment-table tbody tr.selected { background: #eef5ff; }
+.assignment-selectable-row:focus-visible { position: relative; outline: 2px solid #1f5eff; outline-offset: -2px; }
 .assignment-table td strong { display: block; color: #304a64; font-size: 12px; overflow-wrap: anywhere; }
 .assignment-table td small { display: block; margin-top: 3px; color: #8794a2; font-size: 9px; }
 .problem-difficulty { display: inline-flex; padding: 3px 5px; border-radius: 5px; color: #365d85; background: #edf4fa; font-size: 9px; white-space: nowrap; }
@@ -760,7 +762,7 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 .problem-set-empty { display: grid; min-height: 144px; place-items: center; margin-top: 13px; border: 1px dashed #d1dce6; color: #8a97a5; text-align: center; font-size: 11px; }
 .assignment-problem-set .builder-footer { align-items: stretch; flex-direction: column; margin-top: 14px; }
 .assignment-problem-set .builder-footer .primary-command { width: 100%; }
-.assignment-mobile-list,.assignment-mobile-page-toggle { display: none; }
+.assignment-mobile-list,.assignment-builder .assignment-mobile-page-toggle { display: none; }
 
 .teacher-workspace.sidebar-collapsed .class-list-section { display: block; margin: 0; }
 .teacher-workspace.sidebar-collapsed .class-list-section .class-switcher-label { display: none; }
@@ -790,7 +792,7 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
   .problem-filter-row { grid-template-columns: 1fr; }
   .difficulty-filter button { min-width: 38px; min-height: 36px; }
   .assignment-table-wrap { display: none; }
-  .assignment-mobile-page-toggle { display: inline-flex; min-height: 38px; align-items: center; gap: 8px; margin-top: 12px; padding: 0 10px; border: 1px solid #d5e2ed; border-radius: 8px; color: #315f88; background: #f7fbff; font-size: 11px; font-weight: 800; }
+  .assignment-builder .assignment-mobile-page-toggle { display: inline-flex; width: fit-content; min-height: 38px; align-items: center; gap: 8px; margin-top: 12px; padding: 0 10px; border: 1px solid #d5e2ed; border-radius: 8px; color: #315f88; background: #f7fbff; font-size: 11px; font-weight: 800; }
   .assignment-mobile-list { display: grid; gap: 7px; margin-top: 12px; }
   .assignment-mobile-item { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 9px; padding: 11px; border: 1px solid #dce5ed; border-radius: 10px; background: #fff; }
   .assignment-mobile-item.selected { border-color: #a9c7e2; background: #eef5ff; }
