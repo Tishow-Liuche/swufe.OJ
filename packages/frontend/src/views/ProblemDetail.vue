@@ -459,10 +459,14 @@ async function submitFeedback() {
     <div v-if="errorMsg && !problem" class="error-msg">{{ errorMsg }}</div>
 
     <template v-if="problem">
+      <div v-if="isAuthorPreview" class="preview-banner" role="status">
+        <strong>比赛预备题验题模式</strong>
+        <span>当前题目不会出现在公开题库中；这里的提交用于命题人测试数据和判题正确性。</span>
+      </div>
       <header class="problem-header">
         <div class="problem-title-row">
           <div class="problem-title-block">
-            <p class="problem-kicker">{{ problem.source === 'LOCAL' ? '原创题目' : (problem.source || '题目') }}</p>
+            <p class="problem-kicker">{{ isAuthorPreview ? '比赛预备题 · 验题' : (problem.source === 'LOCAL' ? '原创题目' : (problem.source || '题目')) }}</p>
             <h1>{{ problem.title }}</h1>
             <ProblemStateBadges v-if="problemState" class="detail-state" :state="problemState" />
           </div>
@@ -691,6 +695,30 @@ async function submitFeedback() {
   margin: 0 auto;
   padding: 18px 20px 40px;
   color: var(--ink);
+}
+.preview-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border: 1px solid #c7d2fe;
+  border-radius: 14px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.preview-banner strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 850;
+}
+.preview-banner span {
+  min-width: 0;
+  flex: 1 1 240px;
+  color: #4338ca;
 }
 .problem-header {
   margin-bottom: 16px;
