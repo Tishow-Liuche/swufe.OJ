@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import {
   BookOpenCheck,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   DoorOpen,
   ExternalLink,
@@ -67,6 +68,7 @@ const sidebarCollapsed = useStorage('swufe-oj:student-class-sidebar-collapsed-v1
 const selectedClassId = ref('');
 const activeView = ref<'assignments' | 'info'>('assignments');
 const assignmentFilter = ref<'all' | 'active' | 'not_started' | 'ended' | 'requirement_met' | 'fully_completed'>('all');
+const expandedAssignmentIds = ref<string[]>([]);
 
 const approvedCount = computed(() => memberships.value.filter((item) => item.status === 'APPROVED').length);
 const pendingCount = computed(() => memberships.value.filter((item) => item.status === 'PENDING').length);
@@ -205,8 +207,21 @@ async function loadAssignments() {
 function selectClass(classId: string) {
   selectedClassId.value = classId;
   assignmentFilter.value = 'all';
+  expandedAssignmentIds.value = [];
   const membership = memberships.value.find((item) => item.class.id === classId);
   if (!canViewClassAssignments(membership?.status)) activeView.value = 'info';
+}
+
+function isAssignmentExpanded(assignmentId: string) {
+  return expandedAssignmentIds.value.includes(assignmentId);
+}
+
+function toggleAssignmentProblems(assignmentId: string) {
+  if (isAssignmentExpanded(assignmentId)) {
+    expandedAssignmentIds.value = expandedAssignmentIds.value.filter((id) => id !== assignmentId);
+    return;
+  }
+  expandedAssignmentIds.value = [...expandedAssignmentIds.value, assignmentId];
 }
 
 function openAssignments() {
@@ -320,7 +335,19 @@ function openAssignments() {
               <span v-if="assignment.progress.requiredCount != null && assignment.progress.requiredCount < assignment.progress.total">完成要求：通过 {{ assignment.progress.requiredCount }} 题</span>
             </div>
             <div class="progress-track"><i :style="{ width: `${assignment.progress.total ? Math.round((assignment.progress.solved / assignment.progress.total) * 100) : 0}%` }"></i></div>
-            <div class="problem-list">
+            <button
+              class="problem-toggle"
+              type="button"
+              :aria-expanded="isAssignmentExpanded(assignment.id)"
+              @click="toggleAssignmentProblems(assignment.id)"
+            >
+              <span>题目列表 · {{ assignment.problems?.length || assignment.progress.total || 0 }} 题</span>
+              <span class="problem-toggle-meta">
+                {{ isAssignmentExpanded(assignment.id) ? '收起' : '展开' }}
+                <ChevronDown :size="16" :class="{ rotated: isAssignmentExpanded(assignment.id) }" />
+              </span>
+            </button>
+            <div v-if="isAssignmentExpanded(assignment.id)" class="problem-list">
               <router-link v-for="problem in assignment.problems" :key="problem.id" class="problem-row" :to="`/problems/${problem.id}`">
                 <span class="problem-title">{{ problem.order }}. {{ problem.title }}</span>
                 <span class="problem-actions"><i class="problem-status" :class="problemStatusClass(problem.status)">{{ problemStatusText(problem.status) }}</i><small v-if="problem.attempts">{{ problem.attempts }} 次</small><strong>{{ problem.status === 'ACCEPTED' ? '查看' : '去完成' }} <ExternalLink :size="13" /></strong></span>
@@ -531,10 +558,48 @@ h1 { font-size: 42px; letter-spacing: -.05em; line-height: 1.1; }
   border-radius: inherit;
   background: linear-gradient(90deg, #2b78d0, #1fa36b);
 }
+.problem-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 0 12px;
+  border: 1px solid #e1eaf3;
+  border-radius: 10px;
+  color: #3d5873;
+  background: #f7fafd;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.problem-toggle:hover {
+  border-color: #9fc3e8;
+  color: #1f5eff;
+  background: #edf5fc;
+}
+.problem-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6d8298;
+  font-size: 12px;
+  font-weight: 750;
+}
+.problem-toggle:hover .problem-toggle-meta { color: #1f5eff; }
+.problem-toggle-meta svg {
+  transition: transform .16s ease;
+}
+.problem-toggle-meta svg.rotated {
+  transform: rotate(180deg);
+}
 .problem-list {
   display: grid;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 .problem-row {
   display: flex;

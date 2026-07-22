@@ -118,12 +118,25 @@ async function applyToClass() {
     <main class="join-main">
       <section class="join-shell">
         <header>
-          <span class="join-icon"><DoorOpen :size="24" /></span>
-          <div><p><ShieldCheck :size="15" />CLASS ENROLLMENT</p><h1>申请加入班级</h1><span>输入老师提供的班级码，提交后等待任课老师审核。</span></div>
+          <span class="join-icon" aria-hidden="true"><DoorOpen :size="24" /></span>
+          <div>
+            <p><ShieldCheck :size="15" />CLASS ENROLLMENT</p>
+            <h1>申请加入班级</h1>
+            <p class="join-desc">输入老师提供的班级码，提交后等待任课老师审核。</p>
+          </div>
         </header>
         <form @submit.prevent="applyToClass">
           <label for="join-code">班级码</label>
-          <input id="join-code" v-model="joinCode" maxlength="8" autocomplete="off" placeholder="输入 8 位班级码" @input="joinCode = joinCode.toUpperCase().replace(/[^A-Z2-9]/g, '')">
+          <input
+            id="join-code"
+            v-model="joinCode"
+            maxlength="8"
+            autocomplete="off"
+            spellcheck="false"
+            inputmode="text"
+            placeholder="请输入 8 位班级码"
+            @input="joinCode = joinCode.toUpperCase().replace(/[^A-Z2-9]/g, '')"
+          >
           <button type="submit" :disabled="submitting || joinCode.length !== 8">{{ submitting ? '正在提交' : '提交申请' }}</button>
         </form>
         <p v-if="message" class="feedback success">{{ message }}</p>
@@ -138,7 +151,116 @@ async function applyToClass() {
 .sidebar-join-link { display: grid; grid-template-columns: 20px minmax(0, 1fr); min-height: 42px; align-items: center; gap: 9px; margin: 0 0 13px; padding: 7px 10px; border: 1px solid #c9dcf0; border-radius: 10px; color: #1f5eff; background: #edf4ff; font-size: 12px; font-weight: 850; text-decoration: none; }.sidebar-join-link:hover { border-color: #8fb8ef; background: #e4efff; }
 .class-join-page.sidebar-collapsed .class-sidebar { width: 72px; flex-basis: 72px; padding-right: 10px; padding-left: 10px; }.class-join-page.sidebar-collapsed .sidebar-title { justify-content: center; padding-right: 0; padding-left: 0; }.class-join-page.sidebar-collapsed .sidebar-title-icon,.class-join-page.sidebar-collapsed .sidebar-title-copy,.class-join-page.sidebar-collapsed .sidebar-label,.class-join-page.sidebar-collapsed .sidebar-class-copy,.class-join-page.sidebar-collapsed .sidebar-class-status,.class-join-page.sidebar-collapsed .sidebar-state,.class-join-page.sidebar-collapsed .sidebar-divider { display: none; }.class-join-page.sidebar-collapsed .sidebar-collapse-button { margin-left: 0; }.class-join-page.sidebar-collapsed .sidebar-class-list { gap: 6px; overflow-y: auto; }.class-join-page.sidebar-collapsed .sidebar-class-list > button { grid-template-columns: 1fr; justify-items: center; min-height: 46px; padding: 6px 0; }.class-join-page.sidebar-collapsed .sidebar-navigation a { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.class-join-page.sidebar-collapsed .sidebar-navigation a span { display: none; }
 .class-join-page.sidebar-collapsed .sidebar-join-link { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.class-join-page.sidebar-collapsed .sidebar-join-link span { display: none; }
-.join-main { display: grid; min-width: 0; flex: 1; place-items: start center; padding: 56px 30px; }.join-shell { width: min(620px, 100%); padding: 30px; border: 1px solid #dce5ef; border-radius: 8px; background: #fff; box-shadow: 0 14px 30px rgba(31, 66, 104, .08); }.join-shell header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }.join-icon { display: grid; width: 50px; height: 50px; flex: 0 0 50px; place-items: center; border-radius: 10px; color: #1f5eff; background: #e7efff; }.join-shell header p { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 5px; color: #3977aa; font-size: 10px; font-weight: 900; }.join-shell h1 { margin: 0; color: #263b51; font-size: 25px; }.join-shell header span { display: block; margin-top: 6px; color: #6d7d90; font-size: 13px; }.join-shell form { display: grid; gap: 8px; }.join-shell label { color: #57687b; font-size: 12px; font-weight: 850; }.join-shell input { height: 48px; padding: 0 14px; border: 1px solid #bfcde0; border-radius: 8px; color: #18365f; background: #fff; font: 800 19px Consolas, monospace; letter-spacing: 3px; text-transform: uppercase; }.join-shell input:focus { border-color: #2f72ca; outline: 3px solid rgba(47, 114, 202, .13); }.join-shell button[type='submit'] { min-height: 44px; margin-top: 8px; border: 0; border-radius: 8px; color: #fff; background: #2469ad; font: inherit; font-size: 13px; font-weight: 850; cursor: pointer; }.join-shell button[type='submit']:disabled { opacity: .5; cursor: default; }.feedback { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 13px; }.feedback.success { color: #176b42; background: #eaf7ef; }.feedback.error { color: #a33c35; background: #fff0ef; }
+.join-main { display: grid; min-width: 0; flex: 1; place-items: start center; padding: 56px 30px; }
+.join-shell {
+  width: min(620px, 100%);
+  padding: 30px;
+  border: 1px solid #dce5ef;
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(31, 66, 104, .08);
+}
+.join-shell header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 24px; }
+.join-shell header > .join-icon {
+  display: inline-flex !important;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  align-items: center;
+  justify-content: center;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  color: #1f5eff;
+  background: #e7efff;
+  line-height: 0;
+  vertical-align: top;
+  overflow: hidden;
+}
+.join-shell header > .join-icon :deep(svg) {
+  display: block !important;
+  width: 24px !important;
+  height: 24px !important;
+  margin: 0;
+  flex: none;
+  stroke-width: 2;
+}
+.join-shell header > div { min-width: 0; flex: 1; }
+.join-shell header > div > p:not(.join-desc) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+  color: #3977aa;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+.join-shell h1 { margin: 0; color: #1f2a37; font-size: 28px; line-height: 1.2; letter-spacing: -.02em; }
+.join-shell .join-desc {
+  display: block;
+  margin: 8px 0 0;
+  color: #66778a;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.6;
+}
+.join-shell form { display: grid; gap: 10px; }
+.join-shell label { color: #57687b; font-size: 12px; font-weight: 850; }
+.join-shell input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid #bfcde0;
+  border-radius: 12px;
+  color: #18365f;
+  background: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 48px;
+  text-transform: uppercase;
+}
+.join-shell input:not(:placeholder-shown) {
+  font-family: Consolas, 'Cascadia Code', monospace;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: .28em;
+  text-align: center;
+}
+.join-shell input::placeholder {
+  color: #8a97a6;
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: normal;
+}
+.join-shell input:focus {
+  border-color: #2f72ca;
+  outline: 3px solid rgba(47, 114, 202, .13);
+}
+.join-shell button[type='submit'] {
+  min-height: 46px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: #2469ad;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.join-shell button[type='submit']:disabled { opacity: .5; cursor: default; }
+.feedback { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
+.feedback.success { color: #176b42; background: #eaf7ef; }
+.feedback.error { color: #a33c35; background: #fff0ef; }
 @media (max-width: 860px) { .class-join-page { display: block; }.class-sidebar,.class-join-page.sidebar-collapsed .class-sidebar { position: static; display: grid; width: auto; height: auto; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 12px; border: 0; border-bottom: 1px solid var(--class-line); border-radius: 0; box-shadow: none; }.sidebar-title,.class-join-page.sidebar-collapsed .sidebar-title { grid-column: 1 / -1; justify-content: flex-start; padding: 0 5px 4px; }.sidebar-title-icon,.sidebar-title-copy,.class-join-page.sidebar-collapsed .sidebar-title-icon,.class-join-page.sidebar-collapsed .sidebar-title-copy { display: grid; }.sidebar-collapse-button { display: none; }.sidebar-label,.class-join-page.sidebar-collapsed .sidebar-label { display: none; }.sidebar-join-link,.class-join-page.sidebar-collapsed .sidebar-join-link { grid-column: 1 / -1; grid-template-columns: 20px minmax(0, 1fr); justify-items: initial; margin-bottom: 0; padding: 7px 10px; }.sidebar-join-link span,.class-join-page.sidebar-collapsed .sidebar-join-link span { display: inline; }.sidebar-class-list,.class-join-page.sidebar-collapsed .sidebar-class-list { display: flex; grid-column: 1 / -1; gap: 7px; overflow-x: auto; overflow-y: hidden; padding: 0 2px 2px; }.sidebar-class-list > button,.class-join-page.sidebar-collapsed .sidebar-class-list > button { grid-template-columns: 34px minmax(110px, 1fr); justify-items: stretch; min-width: 190px; min-height: 52px; padding: 7px 8px; }.sidebar-class-copy,.class-join-page.sidebar-collapsed .sidebar-class-copy { display: grid; }.sidebar-class-status,.class-join-page.sidebar-collapsed .sidebar-class-status { display: none; }.sidebar-state,.class-join-page.sidebar-collapsed .sidebar-state { display: block; grid-column: 1 / -1; }.sidebar-divider,.class-join-page.sidebar-collapsed .sidebar-divider { display: none; }.sidebar-navigation,.class-join-page.sidebar-collapsed .sidebar-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; grid-column: 1 / -1; }.sidebar-navigation a,.class-join-page.sidebar-collapsed .sidebar-navigation a { grid-template-columns: 20px minmax(0, 1fr); justify-items: initial; min-height: 42px; padding: 7px 10px; }.sidebar-navigation a span,.class-join-page.sidebar-collapsed .sidebar-navigation a span { display: inline; }.join-main { padding: 30px 16px 48px; } }
 @media (max-width: 560px) { .sidebar-navigation,.class-join-page.sidebar-collapsed .sidebar-navigation { grid-template-columns: 1fr; }.join-main { padding: 24px 14px; }.join-shell { padding: 22px; }.join-shell header { align-items: flex-start; }.join-shell h1 { font-size: 22px; } }
 </style>
