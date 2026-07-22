@@ -54,7 +54,7 @@ interface Assignment {
   enrollmentStatus: string;
   class: { id: string; name: string; course?: { name: string } | null };
   teacher?: { username: string; nickname?: string | null } | null;
-  progress: { total: number; solved: number; completed: boolean };
+  progress: { total: number; solved: number; requiredCount?: number; completed: boolean };
   problems: AssignmentProblem[];
 }
 
@@ -88,7 +88,11 @@ function statusMeta(status: Membership['status']) {
 }
 
 function assignmentStateText(item: Assignment) {
-  if (item.progress.completed) return '已完成';
+  if (item.progress.completed) {
+    return item.progress.requiredCount != null && item.progress.requiredCount < item.progress.total
+      ? '已达要求'
+      : '已完成';
+  }
   if (item.lifecycle === 'NOT_STARTED') return '未开始';
   if (item.lifecycle === 'ENDED') return '已截止';
   return '进行中';
@@ -171,6 +175,7 @@ function openAssignments() {
         </button>
       </div>
 
+      <router-link to="/classes/join" class="sidebar-join-link"><DoorOpen :size="18" /><span>申请加入新班级</span></router-link>
       <p class="sidebar-label">选择班级</p>
       <div v-if="loading" class="sidebar-state">正在加载...</div>
       <div v-else-if="memberships.length" class="sidebar-class-list">
@@ -197,7 +202,6 @@ function openAssignments() {
         <button type="button" :class="{ active: activeView === 'info' }" :disabled="!selectedMembership" @click="activeView = 'info'">
           <Info :size="18" /><span>基本信息</span>
         </button>
-        <router-link to="/classes/join"><DoorOpen :size="18" /><span>申请加入班级</span></router-link>
       </nav>
     </aside>
 
@@ -247,6 +251,7 @@ function openAssignments() {
               <span>开始：{{ formatDate(assignment.startTime) }}</span>
               <span>截止：{{ formatDate(assignment.endTime) }}</span>
               <span>进度：{{ assignment.progress.solved }}/{{ assignment.progress.total }}</span>
+              <span v-if="assignment.progress.requiredCount != null && assignment.progress.requiredCount < assignment.progress.total">完成要求：通过 {{ assignment.progress.requiredCount }} 题</span>
             </div>
             <div class="progress-track"><i :style="{ width: `${assignment.progress.total ? Math.round((assignment.progress.solved / assignment.progress.total) * 100) : 0}%` }"></i></div>
             <div class="problem-list">
@@ -294,11 +299,13 @@ function openAssignments() {
 .class-sidebar { position: sticky; top: 56px; display: flex; width: 282px; height: calc(100vh - 56px); flex: 0 0 282px; flex-direction: column; padding: 20px 14px; overflow: hidden; border-right: 1px solid var(--class-line); border-radius: 0 18px 18px 0; background: #f8fbfe; box-shadow: 8px 0 22px rgba(23, 59, 102, .035); transition: width .22s ease, flex-basis .22s ease, padding .22s ease; }
 .sidebar-title { display: flex; align-items: center; gap: 9px; padding: 0 5px 16px; }.sidebar-title-icon { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border-radius: 10px; color: #1f5eff; background: #e7efff; }.sidebar-title-copy { display: grid; min-width: 0; gap: 2px; }.sidebar-title-copy strong { color: #293f56; font-size: 13px; }.sidebar-title-copy small { color: #8190a1; font-size: 10px; }
 .sidebar-collapse-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; margin-left: auto; border: 0; border-radius: 10px; color: #637488; background: transparent; cursor: pointer; }.sidebar-collapse-button:hover { color: #1f5eff; background: #e7efff; }.sidebar-collapse-button:focus-visible { outline: 2px solid #1f5eff; outline-offset: 2px; }.sidebar-label { margin: 3px 7px 8px; color: #8493a5; font-size: 10px; font-weight: 900; }
+.sidebar-join-link { display: grid; grid-template-columns: 20px minmax(0, 1fr); min-height: 42px; align-items: center; gap: 9px; margin: 0 0 13px; padding: 7px 10px; border: 1px solid #c9dcf0; border-radius: 10px; color: #1f5eff; background: #edf4ff; font-size: 12px; font-weight: 850; text-decoration: none; }.sidebar-join-link:hover { border-color: #8fb8ef; background: #e4efff; }
 .sidebar-class-list { display: grid; min-height: 0; gap: 5px; overflow-y: auto; padding: 0 2px 4px; }.sidebar-class-list > button { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; min-height: 54px; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid transparent; border-radius: 11px; color: #314a63; background: transparent; font: inherit; text-align: left; cursor: pointer; }.sidebar-class-list > button:hover { background: #edf5fc; }.sidebar-class-list > button.selected { border-color: #c9dcf0; color: #1f5eff; background: #e7efff; }.sidebar-class-list .class-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; color: #245f94; background: #dcecf9; font-size: 13px; font-weight: 900; }.sidebar-class-list > button.selected .class-mark { color: #fff; background: #1f5eff; }
 .sidebar-class-copy { display: grid; min-width: 0; gap: 3px; }.sidebar-class-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }.sidebar-class-copy small { overflow: hidden; color: #8492a2; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }.sidebar-class-status { max-width: 46px; overflow: hidden; color: #7c8997; font-size: 9px; font-style: normal; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }.sidebar-class-status.approved { color: #197149; }.sidebar-class-status.pending { color: #a06f08; }.sidebar-class-status.rejected { color: #a13d36; }.sidebar-state { margin: 0; padding: 12px 7px; color: #8493a5; font-size: 11px; text-align: center; }.sidebar-divider { height: 1px; flex: 0 0 1px; margin: 14px 4px; background: #dce5ee; }
 .sidebar-navigation { display: grid; gap: 4px; }.sidebar-navigation button,.sidebar-navigation a { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; min-height: 44px; align-items: center; gap: 9px; padding: 7px 10px; border: 0; border-radius: 10px; color: #607187; background: transparent; font: inherit; font-size: 12px; font-weight: 800; text-align: left; text-decoration: none; cursor: pointer; }.sidebar-navigation button:hover:not(:disabled),.sidebar-navigation a:hover { color: #1f5eff; background: #edf5fc; }.sidebar-navigation button.active { color: #1f5eff; background: #e7efff; }.sidebar-navigation button:disabled { color: #a6b1bd; cursor: not-allowed; }.sidebar-navigation button small { display: grid; min-width: 19px; height: 19px; place-items: center; border-radius: 6px; color: #63819f; background: #edf1f5; font-size: 10px; }.sidebar-navigation button.active small { color: #1f5eff; background: #fff; }
 .class-main { min-width: 0; flex: 1; padding: 26px 30px 64px; }.class-main > .page-heading,.class-main > section { width: min(1440px, 100%); margin-right: auto; margin-left: auto; }
 .classes-page.sidebar-collapsed .class-sidebar { width: 72px; flex-basis: 72px; padding-right: 10px; padding-left: 10px; }.classes-page.sidebar-collapsed .sidebar-title { justify-content: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-title-icon,.classes-page.sidebar-collapsed .sidebar-title-copy,.classes-page.sidebar-collapsed .sidebar-label,.classes-page.sidebar-collapsed .sidebar-class-copy,.classes-page.sidebar-collapsed .sidebar-class-status,.classes-page.sidebar-collapsed .sidebar-state,.classes-page.sidebar-collapsed .sidebar-divider { display: none; }.classes-page.sidebar-collapsed .sidebar-collapse-button { margin-left: 0; }.classes-page.sidebar-collapsed .sidebar-class-list { gap: 6px; overflow-y: auto; }.classes-page.sidebar-collapsed .sidebar-class-list > button { grid-template-columns: 1fr; justify-items: center; min-height: 46px; padding: 6px 0; }.classes-page.sidebar-collapsed .sidebar-navigation button,.classes-page.sidebar-collapsed .sidebar-navigation a { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-navigation button span,.classes-page.sidebar-collapsed .sidebar-navigation button small,.classes-page.sidebar-collapsed .sidebar-navigation a span { display: none; }
+.classes-page.sidebar-collapsed .sidebar-join-link { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-join-link span { display: none; }
 .page-heading {
   display: flex;
   min-height: 158px;
@@ -595,6 +602,7 @@ h1 { font-size: 34px; }
   .sidebar-title-icon,.sidebar-title-copy,.classes-page.sidebar-collapsed .sidebar-title-icon,.classes-page.sidebar-collapsed .sidebar-title-copy { display: grid; }
   .sidebar-collapse-button { display: none; }
   .sidebar-label,.classes-page.sidebar-collapsed .sidebar-label { display: none; }
+  .sidebar-join-link,.classes-page.sidebar-collapsed .sidebar-join-link { grid-column: 1 / -1; grid-template-columns: 20px minmax(0, 1fr); justify-items: initial; margin-bottom: 0; padding: 7px 10px; }.sidebar-join-link span,.classes-page.sidebar-collapsed .sidebar-join-link span { display: inline; }
   .sidebar-class-list,.classes-page.sidebar-collapsed .sidebar-class-list { display: flex; grid-column: 1 / -1; gap: 7px; overflow-x: auto; overflow-y: hidden; padding: 0 2px 2px; }
   .sidebar-class-list > button,.classes-page.sidebar-collapsed .sidebar-class-list > button { grid-template-columns: 34px minmax(110px, 1fr); justify-items: stretch; min-width: 190px; min-height: 52px; padding: 7px 8px; }
   .sidebar-class-copy,.classes-page.sidebar-collapsed .sidebar-class-copy { display: grid; }

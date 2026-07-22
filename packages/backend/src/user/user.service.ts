@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { normalizePointDifficulty } from '../problem/point-difficulty';
 import {
   assignmentLifecycleLabel,
+  requiredSolveCount,
   statusLabelZh,
 } from '../teacher/assignment-progress';
 import { AssignmentProgressService } from '../teacher/assignment-progress.service';
@@ -807,8 +808,9 @@ export class UserService {
       const cls = classById.get(assignment.classId);
       const enrollment = enrollmentByAssignment.get(assignment.id);
       const total = problems.length;
+      const requiredCount = requiredSolveCount(total, assignment.passCondition);
       const completed = ['COMPLETED', 'LATE', 'SETTLED'].includes(enrollment?.status || '')
-        || (total > 0 && solved === total);
+        || (requiredCount > 0 && solved >= requiredCount);
       const lifecycle = now < assignment.startTime
         ? 'NOT_STARTED'
         : now > assignment.endTime
@@ -832,7 +834,7 @@ export class UserService {
           course: cls.course,
         } : { id: assignment.classId, name: '未知班级', status: 'UNKNOWN', course: null },
         teacher: cls ? teacherById.get(cls.teacherId) || null : null,
-        progress: { total, solved, completed },
+        progress: { total, solved, requiredCount, completed },
         problems,
       };
     });

@@ -462,7 +462,7 @@ describe('UserService profile settings', () => {
     ]));
   });
 
-  it('lists assignments across the current student approved classes with problem progress', async () => {
+  it('uses the configured solved-count requirement when listing current student assignments', async () => {
     prisma.classMember.findMany.mockResolvedValue([{
       classId: 'class-1',
       status: 'APPROVED',
@@ -477,6 +477,7 @@ describe('UserService profile settings', () => {
       description: '基础题训练',
       startTime: new Date('2026-07-20T00:00:00.000Z'),
       endTime: new Date('2026-07-30T00:00:00.000Z'),
+      passCondition: 'COUNT:1',
       createdAt: new Date('2026-07-19T00:00:00.000Z'),
       problems: [
         { order: 1, score: 100, problem: { id: 'problem-1', title: 'A+B', source: 'LOCAL', difficulty: 'POINT_0', sourceInfo: null } },
@@ -484,7 +485,7 @@ describe('UserService profile settings', () => {
       ],
     }]);
     prisma.assignmentStudent.findMany.mockResolvedValue([{
-      assignmentId: 'assignment-1', status: 'COMPLETED', score: 100, submittedAt: null, completedAt: null,
+      assignmentId: 'assignment-1', status: 'IN_PROGRESS', score: 100, submittedAt: null, completedAt: null,
     }]);
     prisma.user.findMany.mockResolvedValue([{ id: 'teacher-1', username: 'teacher', nickname: '王老师' }]);
     prisma.submission.findMany.mockResolvedValue([{
@@ -502,7 +503,7 @@ describe('UserService profile settings', () => {
       id: 'assignment-1',
       class: { id: 'class-1', name: '算法训练一班' },
       teacher: { id: 'teacher-1', username: 'teacher', nickname: '王老师' },
-      progress: { total: 2, solved: 1, completed: true },
+      progress: { total: 2, solved: 1, requiredCount: 1, completed: true },
       enrollmentStatus: 'COMPLETED',
     });
     expect(result.items[0].problems[0]).toMatchObject({
