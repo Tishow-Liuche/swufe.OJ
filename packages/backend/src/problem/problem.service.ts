@@ -177,10 +177,10 @@ export class ProblemService {
       ];
     }
     if (source) {
-      if (source === 'LUOGU' || source === 'CODEFORCES' || source === 'QOJ') {
-        where.sourceInfo = { platform: source };
-      } else {
+      if (source === 'LOCAL' || source === 'REMOTE' || source === 'EXTERNAL') {
         where.source = source;
+      } else {
+        where.sourceInfo = { platform: source };
       }
     }
     if (difficulty) where.difficulty = normalizePointDifficulty(difficulty);

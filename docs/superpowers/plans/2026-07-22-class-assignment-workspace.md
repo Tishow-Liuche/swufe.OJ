@@ -15,7 +15,7 @@
 - Create: packages/frontend/src/views/teacher/assignment-selection.ts - immutable operations for one problem, a current result page, and selected problem IDs.
 - Create: packages/frontend/src/views/teacher/assignment-selection.spec.ts - Vitest coverage for additions, removals, current-page selection, and cross-page retention.
 - Modify: packages/frontend/src/views/teacher/ClassManage.vue - direct class list, filter/query state, problem-bank table, problem set, and responsive styles.
-- No backend file changes: /api/problems, /api/problems/metadata, and POST /api/teacher/assignments already satisfy the UI contract.
+- Modify: packages/backend/src/problem/problem.service.ts and problem.service.spec.ts - map source metadata platform values such as ATCODER to sourceInfo.platform while retaining legacy source filters.
 
 ### Task 1: Cross-page Assignment Selection Helper
 
@@ -212,7 +212,7 @@ Use @keyup.enter="resetProblemPage" on the keyword input. Use @update:model-valu
 
 Run: Set-Location packages/frontend; npm run build; npm test -- --run src/views/teacher/assignment-selection.spec.ts; Set-Location ../backend; npm test -- --runInBand
 
-Expected: frontend build, focused selection coverage, and the backend regression suite pass without backend changes.
+Expected: frontend build, focused selection coverage, and the backend regression suite pass with source-platform filtering compatibility.
 
 - [ ] **Step 6: Commit the problem-bank integration**
 
@@ -376,3 +376,9 @@ git push origin 42411109
 ~~~
 
 Do not merge or push any commit to main.
+
+## Execution Record
+
+- Completed: direct desktop/mobile class list, filterable paginated assignment problem bank, persistent cross-page problem set, mobile current-page batch selection, and assignment publication through the existing API.
+- Completed: source metadata platform filtering now supports ATCODER and future platform values without regressing LOCAL, REMOTE, or EXTERNAL source filters.
+- Verified: frontend Vitest 5 suites / 11 tests, frontend production build, backend Jest 31 suites / 201 tests, live API pagination/metadata response shape, and an independent code-review follow-up.

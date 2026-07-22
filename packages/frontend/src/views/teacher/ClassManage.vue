@@ -145,8 +145,7 @@ function classStatus(status: string) {
   return status === 'APPROVED' ? '已启用' : status === 'PENDING' ? '待管理员审核' : '未启用';
 }
 async function selectClass(id: string) {
-  if (id === selectedClassId.value) return;
-  selectedClassId.value = id;
+  if (id !== selectedClassId.value) selectedClassId.value = id;
   await loadClassData();
 }
 function statusLabel(status: string) {
@@ -575,6 +574,10 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
                       </tbody>
                     </table>
                   </div>
+                  <label v-if="problemResults.length" class="assignment-mobile-page-toggle">
+                    <input type="checkbox" :checked="currentPageFullySelected" :aria-label="currentPageFullySelected ? '取消选择当前页' : '选择当前页'" @change="toggleCurrentProblemPage">
+                    <span>{{ currentPageFullySelected ? '取消选择当前页' : '选择当前页全部题目' }}</span>
+                  </label>
                   <div v-if="problemResults.length" class="assignment-mobile-list">
                     <label v-for="problem in problemResults" :key="problem.id" class="assignment-mobile-item" :class="{ selected: selectedProblemIds.has(problem.id) }">
                       <input type="checkbox" :checked="selectedProblemIds.has(problem.id)" :aria-label="`选择题目 ${problem.title}`" @change="toggleAssignmentProblem(problem)">
@@ -757,7 +760,7 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 .problem-set-empty { display: grid; min-height: 144px; place-items: center; margin-top: 13px; border: 1px dashed #d1dce6; color: #8a97a5; text-align: center; font-size: 11px; }
 .assignment-problem-set .builder-footer { align-items: stretch; flex-direction: column; margin-top: 14px; }
 .assignment-problem-set .builder-footer .primary-command { width: 100%; }
-.assignment-mobile-list { display: none; }
+.assignment-mobile-list,.assignment-mobile-page-toggle { display: none; }
 
 .teacher-workspace.sidebar-collapsed .class-list-section { display: block; margin: 0; }
 .teacher-workspace.sidebar-collapsed .class-list-section .class-switcher-label { display: none; }
@@ -787,6 +790,7 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
   .problem-filter-row { grid-template-columns: 1fr; }
   .difficulty-filter button { min-width: 38px; min-height: 36px; }
   .assignment-table-wrap { display: none; }
+  .assignment-mobile-page-toggle { display: inline-flex; min-height: 38px; align-items: center; gap: 8px; margin-top: 12px; padding: 0 10px; border: 1px solid #d5e2ed; border-radius: 8px; color: #315f88; background: #f7fbff; font-size: 11px; font-weight: 800; }
   .assignment-mobile-list { display: grid; gap: 7px; margin-top: 12px; }
   .assignment-mobile-item { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 9px; padding: 11px; border: 1px solid #dce5ed; border-radius: 10px; background: #fff; }
   .assignment-mobile-item.selected { border-color: #a9c7e2; background: #eef5ff; }
