@@ -84,6 +84,6 @@ export class TeacherController {
     freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
     penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
   }) {
-    return this.teacherService.createContest(req.user.id, data);
+    return this.teacherService.createContest(req.user, data);
   }
 }

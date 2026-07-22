@@ -22,6 +22,8 @@ const auth = useAuthStore();
 const contests = ref<Contest[]>([]);
 const selected = ref<Contest | null>(null);
 const standings = ref<any[]>([]);
+const standingsProblems = ref<any[]>([]);
+const contestSubmissions = ref<any[]>([]);
 const filter = ref('ALL');
 const loading = ref(true);
 const actionLoading = ref(false);
@@ -34,6 +36,16 @@ const sidebarCollapsed = useStorage('swufe-oj:contest-sidebar-collapsed', false)
 
 const isTeacher = computed(() => auth.isTeacher());
 const filtered = computed(() => filter.value === 'ALL' ? contests.value : contests.value.filter((item) => item.state === filter.value));
+const boardStats = computed(() => {
+  const cells = standings.value.flatMap((row: any) => row.problems || []);
+  return {
+    participants: standings.value.length,
+    accepted: cells.filter((cell: any) => cell.status === 'ACCEPTED').length,
+    tried: cells.filter((cell: any) => cell.status !== 'UNTRIED').length,
+    firstBlood: cells.filter((cell: any) => cell.firstBlood).length,
+    submissions: contestSubmissions.value.length,
+  };
+});
 const labels: Record<string, string> = { ALL: '全部赛事', UPCOMING: '即将开始', RUNNING: '进行中', ENDED: '已结束' };
 const filterIcons: Record<string, any> = { ALL: ListFilter, UPCOMING: CalendarClock, RUNNING: PlayCircle, ENDED: Flag };
 
@@ -66,20 +78,66 @@ async function load() {
   } finally { loading.value = false; }
 }
 async function selectContest(contest: Contest) {
-  selected.value = contest; standings.value = [];
-  await refreshStandings();
+  selected.value = contest; standings.value = []; standingsProblems.value = []; contestSubmissions.value = [];
+  await refreshLiveBoard();
 }
 function showOverview(nextFilter: string) {
   filter.value = nextFilter;
   selected.value = null;
   standings.value = [];
+  standingsProblems.value = [];
+  contestSubmissions.value = [];
 }
 async function refreshStandings() {
   if (!selected.value) return;
   try {
     const { data } = await api.get('/api/contests/' + selected.value.id + '/standings');
     standings.value = data.rows || [];
+    standingsProblems.value = data.problems || [];
   } catch { standings.value = []; }
+}
+async function refreshContestSubmissions() {
+  if (!selected.value || !auth.token) return;
+  try {
+    const { data } = await api.get('/api/contests/' + selected.value.id + '/submissions');
+    contestSubmissions.value = data.items || [];
+  } catch { contestSubmissions.value = []; }
+}
+async function refreshLiveBoard() {
+  await Promise.all([refreshStandings(), refreshContestSubmissions()]);
+}
+function cellClass(cell: any) {
+  return {
+    accepted: cell?.status === 'ACCEPTED',
+    wrong: cell?.status === 'WRONG_ANSWER',
+    pending: cell?.status === 'PENDING',
+    untouched: !cell || cell.status === 'UNTRIED',
+    'first-blood': Boolean(cell?.firstBlood),
+  };
+}
+function cellText(cell: any) {
+  if (!cell || cell.status === 'UNTRIED') return '—';
+  if (cell.status === 'ACCEPTED') return cell.wrongAttempts ? `+${cell.wrongAttempts}` : '+';
+  if (cell.status === 'PENDING') return `${cell.attempts || 1}?`;
+  return `-${cell.wrongAttempts || cell.attempts || 1}`;
+}
+function statusText(status: string) {
+  return ({
+    ACCEPTED: 'AC',
+    WRONG_ANSWER: 'WA',
+    TIME_LIMIT_EXCEEDED: 'TLE',
+    MEMORY_LIMIT_EXCEEDED: 'MLE',
+    RUNTIME_ERROR: 'RE',
+    COMPILE_ERROR: 'CE',
+    PENDING: '等待',
+    QUEUING: '排队',
+    JUDGING: '评测',
+    RUNNING: '运行',
+    SYSTEM_ERROR: '错误',
+  } as Record<string, string>)[status] || status;
+}
+function timeText(value?: string | null) {
+  return value ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value)) : '—';
 }
 async function register() {
   if (!selected.value) return;
@@ -109,7 +167,7 @@ async function openCreator() {
   showCreator.value = true;
   if (problems.value.length) return;
   try {
-    const { data } = await api.get('/api/problems', { params: { page: 1, pageSize: 100 } });
+    const { data } = await api.get('/api/problems/mine/created', { params: { status: 'CONTEST_RESERVED', page: 1, pageSize: 100 } });
     problems.value = data.items || data || [];
   } catch { error.value = '题库加载失败，暂不能创建比赛'; }
 }
@@ -131,7 +189,7 @@ async function createContest() {
 }
 onMounted(async () => {
   await load();
-  standingTimer = setInterval(refreshStandings, 15000);
+  standingTimer = setInterval(refreshLiveBoard, 15000);
 });
 onUnmounted(() => {
   if (standingTimer) clearInterval(standingTimer);
@@ -241,6 +299,67 @@ onUnmounted(() => {
             <button class="rank-button" @click="router.push('/leaderboard?contestId=' + selected?.id)">完整排行榜 →</button>
           </div>
         </div>
+        <div class="panel live-standings">
+          <div class="board-toolbar">
+            <div>
+              <p class="eyebrow">ICPC STYLE SCOREBOARD</p>
+              <h3>实时排名</h3>
+            </div>
+            <div class="rank-legend" aria-label="排名颜色说明">
+              <span class="legend accepted">AC</span>
+              <span class="legend wrong">WA</span>
+              <span class="legend pending">Pending</span>
+              <span class="legend first-blood">First Blood</span>
+            </div>
+          </div>
+          <div class="board-summary" aria-label="实时排名统计">
+            <span><b>{{ boardStats.participants }}</b><small>参赛选手</small></span>
+            <span><b>{{ boardStats.accepted }}</b><small>通过格</small></span>
+            <span><b>{{ boardStats.tried }}</b><small>已尝试</small></span>
+            <span><b>{{ boardStats.firstBlood }}</b><small>首杀</small></span>
+            <span><b>{{ boardStats.submissions }}</b><small>近期提交</small></span>
+          </div>
+          <div v-if="!standings.length" class="tip">还没有可展示的排名数据</div>
+          <div v-else class="contest-standings-table">
+            <div class="standings-head" :style="{ '--problem-count': Math.max(standingsProblems.length, 1) }">
+              <span>#</span><span>选手</span><span>{{ selected.mode === 'IOI' ? '得分' : '过题' }}</span><span>{{ selected.mode === 'IOI' ? '最后提交' : '罚时' }}</span>
+              <b v-for="problem in standingsProblems" :key="problem.problemId" :title="problem.title">{{ problem.label }}</b>
+            </div>
+            <div v-for="row in standings" :key="row.userId" class="standings-row" :style="{ '--problem-count': Math.max(standingsProblems.length, 1) }">
+              <span class="standing-rank" :class="{ podium: row.rank <= 3 }">{{ row.rank }}</span>
+              <span class="standing-user"><strong>{{ row.user.nickname || row.user.username }}</strong><small>@{{ row.user.username }}</small></span>
+              <strong>{{ selected.mode === 'IOI' ? row.score : row.solvedCount }}</strong>
+              <span>{{ selected.mode === 'IOI' ? timeText(row.lastActive) : row.penalty + ' min' }}</span>
+              <button
+                v-for="cell in row.problems"
+                :key="cell.problemId"
+                class="score-cell"
+                :class="cellClass(cell)"
+                :title="`${cell.label} ${cell.title || ''} · ${cell.status} · ${cell.attempts || 0} 次提交`"
+                type="button"
+              >
+                <span>{{ cellText(cell) }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="panel submission-feed">
+          <div class="panel-title">实时提交记录 <small>{{ contestSubmissions.length }} SUBMISSIONS</small></div>
+          <div v-if="!contestSubmissions.length" class="tip">暂无提交记录</div>
+          <div v-else class="submission-list">
+            <div class="submission-head" aria-hidden="true">
+              <span>时间</span><span>选手</span><span>题目</span><span>语言</span><span>结果</span><span>耗时 / 内存</span>
+            </div>
+            <div v-for="submission in contestSubmissions" :key="submission.id" class="submission-row">
+              <span class="submission-time">{{ timeText(submission.createdAt) }}</span>
+              <span class="submission-user">{{ submission.user.nickname || submission.user.username }}</span>
+              <span class="submission-problem"><b>{{ submission.problem.label }}</b>{{ submission.problem.title }}</span>
+              <span class="submission-lang">{{ submission.language }}</span>
+              <strong class="submission-status" :class="submission.status.toLowerCase()">{{ statusText(submission.status) }}</strong>
+              <span class="submission-cost">{{ submission.timeUsed ?? '—' }} ms / {{ submission.memoryUsed ?? '—' }} KB</span>
+            </div>
+          </div>
+        </div>
       </section>
       <section v-else class="contest-overview">
         <header class="overview-head">
@@ -279,7 +398,7 @@ onUnmounted(() => {
           <label>封榜时间<input v-model="form.freezeTime" type="datetime-local" /></label><label class="check"><input v-model="form.allowUpsolve" type="checkbox" /> 允许赛后虚拟比赛</label>
           <label class="check"><input v-model="form.teamMode" type="checkbox" /> 团队公开赛</label><label class="check"><input v-model="form.isRated" type="checkbox" /> Rated（计入评级标识）</label>
         </div>
-        <div class="picker"><b>选择比赛题目</b><small>可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problem.title }} <em>{{ pointDifficultyShortLabel(problem.difficulty) }}</em></label><p v-if="!problems.length">暂无已发布题目，请先在题库中发布题目。</p></div>
+        <div class="picker"><b>选择比赛题目</b><small>仅从比赛预备题库选择，可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problem.title }} <em>{{ pointDifficultyShortLabel(problem.difficulty) }}</em></label><p v-if="!problems.length">暂无比赛预备题。请先在录题或历史录题中将题目状态设为“比赛预备”。</p></div>
         <footer><button type="button" class="cancel" @click="showCreator = false">取消</button><button class="gold" :disabled="actionLoading">创建比赛</button></footer>
       </form>
     </div>
@@ -295,7 +414,7 @@ onUnmounted(() => {
 .contest-page { max-width:none; min-height:calc(100vh - 56px); margin:0; padding:0; background:#f3f5f7; }.contest-shell { display:flex; min-height:calc(100vh - 56px); }.contest-main { min-width:0; flex:1 1 auto; padding:26px 28px 64px; }.contest-main .hero,.contest-main .notice,.contest-main .workspace { max-width:1180px; margin-right:auto; margin-left:auto; }.contest-sidebar { top:56px; width:300px; height:calc(100vh - 56px); max-height:calc(100vh - 56px); flex:0 0 300px; padding-top:22px; border-top:0; border-bottom:0; border-left:0; border-radius:0 18px 18px 0; transition:width 240ms cubic-bezier(.2,0,0,1),flex-basis 240ms cubic-bezier(.2,0,0,1),padding 240ms cubic-bezier(.2,0,0,1); will-change:width,flex-basis; }.workspace { display:block; margin-top:22px; }.page-loading { min-height:calc(100vh - 56px); border:0; border-radius:0; background:#f3f5f7; }.contest-shell.sidebar-collapsed .contest-sidebar { width:72px; flex-basis:72px; }.contest-shell.sidebar-collapsed .sidebar-title-icon,.contest-shell.sidebar-collapsed .sidebar-title-copy,.contest-shell.sidebar-collapsed .sidebar-label,.contest-shell.sidebar-collapsed .sidebar-divider,.contest-shell.sidebar-collapsed .contest-list { display:none; }.contest-shell.sidebar-collapsed .sidebar-title { justify-content:center; padding-right:0; padding-left:0; }.contest-shell.sidebar-collapsed .sidebar-collapse-button { margin-left:0; }.contest-shell.sidebar-collapsed .filters button { justify-content:center; padding-right:0; padding-left:0; }.contest-shell.sidebar-collapsed .filters button span,.contest-shell.sidebar-collapsed .filters button small { display:none; }
 .detail { min-width:0; padding:28px; border:1px solid var(--line); border-radius:21px; background:#fffdf8; box-shadow:0 10px 30px rgba(22,42,70,.05); }.detail-head { display:flex; justify-content:space-between; gap:20px; }.badges { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }.contest-kind,.rated { padding:3px 7px; border-radius:5px; font-size:10px; font-weight:900; letter-spacing:.03em; }.contest-kind { color:#247457; background:#e3f4ea; }.rated { color:#fff; background:#43b925; }.virtual { color:#6a4c9d; font-size:11px; font-weight:900; }.detail h2 { margin:11px 0 7px; font-size:27px; letter-spacing:-.03em; }.detail-head p { margin:0; color:var(--muted); line-height:1.65; }.joined { color:#13806b; font-weight:900; white-space:nowrap; }.rules { display:flex; flex-wrap:wrap; gap:14px; margin:22px 0; padding:12px 0; color:#53677d; border-top:1px solid var(--line); border-bottom:1px solid var(--line); font-size:12px; font-weight:700; }.contest-facts { display:grid; grid-template-columns:.7fr 1fr 1.8fr; gap:1px; margin:0 0 20px; overflow:hidden; border:1px solid #e0e8ef; border-radius:12px; background:#e0e8ef; }.contest-facts>div { display:grid; gap:5px; padding:13px 15px; background:#fff; }.contest-facts small { color:#8492a1; font-size:10px; font-weight:900; letter-spacing:.08em; }.contest-facts strong { color:#344f69; font-size:14px; }.contest-facts>div>span { display:flex; flex-wrap:wrap; gap:6px; }.contest-facts b { padding:3px 6px; color:#285d8e; border-radius:4px; background:#e4f0fb; font-size:10px; }.contest-facts b.rated { color:#fff; background:#43b925; }.boards { display:grid; grid-template-columns:1.25fr .85fr; gap:17px; }.panel { padding:17px; border:1px solid #e9edf1; border-radius:15px; background:#fff; }.panel-title { display:flex; justify-content:space-between; margin-bottom:11px; font-weight:900; }.panel-title small { color:#9da8b6; font-size:10px; letter-spacing:.1em; }.problem { display:grid; grid-template-columns:30px 1fr auto; align-items:center; width:100%; gap:9px; padding:11px 0; color:var(--ink); text-align:left; border:0; border-top:1px solid #f0f2f5; background:transparent; cursor:pointer; }.problem:disabled { cursor:not-allowed; }.problem:not(:disabled):hover span { color:#1764a7; }.problem strong { display:grid; place-items:center; width:25px; height:25px; color:#fff; border-radius:6px; background:var(--navy); font-size:12px; }.problem small,.tip { color:#91a0af; font-size:11px; }.rank-row { display:grid; grid-template-columns:29px 1fr auto 52px; align-items:center; gap:7px; padding:10px 0; border-top:1px solid #f0f2f5; font-size:13px; }.rank-row>b { color:#92a0af; }.rank-row>b.podium { color:#ce8814; }.rank-row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.rank-row strong { color:#1b4f83; }.rank-row small { color:#8b98a7; text-align:right; }.rank-button { width:100%; margin-top:12px; padding:9px; color:#245b8e; border:1px solid #c9ddec; border-radius:9px; background:#f3f9ff; font-weight:900; cursor:pointer; }.blank { min-height:390px; display:grid; place-items:center; align-content:center; text-align:center; color:var(--muted); }.blank span { font-size:42px; }
 .contest-overview { min-width:0; padding:28px; border:1px solid var(--line); border-radius:21px; background:#fffdf8; box-shadow:0 10px 30px rgba(22,42,70,.05); }.overview-head { display:flex; align-items:end; justify-content:space-between; gap:24px; padding-bottom:22px; border-bottom:1px solid var(--line); }.overview-head .eyebrow { color:#4e87b6; }.overview-head h2 { margin:0 0 7px; font-size:29px; letter-spacing:-.04em; }.overview-head p:not(.eyebrow) { max-width:620px; margin:0; color:var(--muted); line-height:1.65; }.overview-head>strong { color:#1d5789; font-size:30px; line-height:1; white-space:nowrap; }.overview-head>strong small { color:#8d9bab; font-size:12px; }.overview-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px; margin-top:22px; }.overview-card { display:flex; min-height:205px; flex-direction:column; align-items:stretch; padding:19px; color:var(--ink); text-align:left; border:1px solid #e2eaf1; border-radius:16px; background:#fff; cursor:pointer; transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease; }.overview-card:hover { border-color:#82b1d7; transform:translateY(-3px); box-shadow:0 12px 25px rgba(23,59,102,.1); }.overview-card-top { display:flex; align-items:center; justify-content:space-between; }.overview-card h3 { margin:15px 0 6px; font-size:17px; line-height:1.4; }.overview-card>p { display:-webkit-box; margin:0; overflow:hidden; color:var(--muted); -webkit-box-orient:vertical; -webkit-line-clamp:2; font-size:12px; line-height:1.6; }.overview-meta { display:flex; flex-wrap:wrap; gap:7px 13px; margin-top:auto; padding-top:18px; color:#718095; font-size:11px; font-weight:700; }.overview-meta span { display:flex; align-items:center; gap:4px; }.overview-enter { margin-top:15px; color:#24649b; font-size:12px; font-weight:900; }.overview-enter span { display:inline-block; margin-left:3px; transition:transform .18s ease; }.overview-card:hover .overview-enter span { transform:translateX(4px); }.overview-empty { display:grid; min-height:310px; place-items:center; align-content:center; text-align:center; color:var(--muted); }.overview-empty span { font-size:40px; }.overview-empty h3 { margin:10px 0 4px; color:#506277; font-size:17px; }.overview-empty p { margin:0; font-size:12px; }
-.backdrop { position:fixed; z-index:20; inset:0; display:grid; place-items:center; padding:20px; overflow:auto; background:rgba(14,29,49,.45); backdrop-filter:blur(4px); }.creator { width:min(750px,100%); max-height:calc(100vh - 40px); overflow:auto; padding:26px; border-radius:20px; background:#fffdf8; box-shadow:0 24px 70px rgba(0,0,0,.28); }.creator header { display:flex; justify-content:space-between; align-items:start; }.creator h2 { margin:0; }.creator header button { border:0; color:#7e8a98; background:transparent; font-size:28px; cursor:pointer; }.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px; margin:22px 0; }.form-grid label { display:grid; gap:6px; color:#5c6b7d; font-size:12px; font-weight:900; }.form-grid .wide { grid-column:1/-1; }.form-grid input,.form-grid select,.form-grid textarea { box-sizing:border-box; width:100%; padding:10px; color:var(--ink); border:1px solid #dce3ea; border-radius:9px; background:#fff; font:inherit; font-size:13px; }.form-grid .check { display:flex; align-items:center; gap:8px; }.form-grid .check input { width:auto; }.picker { padding:14px; border:1px solid #e5ebf0; border-radius:12px; }.picker>small { margin-left:7px; color:#96a2b0; font-size:11px; }.picker label { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #f0f2f4; font-size:13px; }.picker em { margin-left:auto; color:#8492a3; font-style:normal; font-size:11px; }.creator footer { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }.cancel { color:#667687; background:#edf1f5; }
+.backdrop { position:fixed; z-index:20; inset:0; display:grid; place-items:start center; padding:76px 20px 28px; overflow:auto; background:rgba(14,29,49,.45); backdrop-filter:blur(4px); }.creator { width:min(750px,100%); max-height:calc(100vh - 104px); overflow:auto; padding:26px; border-radius:20px; background:#fffdf8; box-shadow:0 24px 70px rgba(0,0,0,.28); }.creator header { display:flex; justify-content:space-between; align-items:start; }.creator h2 { margin:0; }.creator header button { border:0; color:#7e8a98; background:transparent; font-size:28px; cursor:pointer; }.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px; margin:22px 0; }.form-grid label { display:grid; gap:6px; color:#5c6b7d; font-size:12px; font-weight:900; }.form-grid .wide { grid-column:1/-1; }.form-grid input,.form-grid select,.form-grid textarea { box-sizing:border-box; width:100%; padding:10px; color:var(--ink); border:1px solid #dce3ea; border-radius:9px; background:#fff; font:inherit; font-size:13px; }.form-grid .check { display:flex; align-items:center; gap:8px; }.form-grid .check input { width:auto; }.picker { padding:14px; border:1px solid #e5ebf0; border-radius:12px; }.picker>small { margin-left:7px; color:#96a2b0; font-size:11px; }.picker label { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #f0f2f4; font-size:13px; }.picker em { margin-left:auto; color:#8492a3; font-style:normal; font-size:11px; }.creator footer { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }.cancel { color:#667687; background:#edf1f5; }
 @media(max-width:860px){.contest-shell{display:block}.contest-main{padding:18px 16px 46px}.hero,.detail-head,.overview-head{flex-direction:column;align-items:start}.hero-actions{flex-direction:row}.workspace,.workspace.sidebar-collapsed,.boards{grid-template-columns:1fr}.contest-facts{grid-template-columns:1fr}.contest-sidebar,.contest-shell.sidebar-collapsed .contest-sidebar{position:static;width:auto;height:auto;max-height:none;padding:13px;border:1px solid var(--line);border-radius:18px}.contest-shell.sidebar-collapsed .sidebar-title-icon,.contest-shell.sidebar-collapsed .sidebar-title-copy,.contest-shell.sidebar-collapsed .sidebar-label,.contest-shell.sidebar-collapsed .sidebar-divider,.contest-shell.sidebar-collapsed .contest-list{display:initial}.contest-shell.sidebar-collapsed .sidebar-title{justify-content:initial;padding:1px 5px 15px}.contest-shell.sidebar-collapsed .sidebar-collapse-button{margin-left:auto}.sidebar-collapse-button{display:none}.filters{display:grid;grid-template-columns:repeat(4,1fr)}.filters button,.contest-shell.sidebar-collapsed .filters button{display:grid;justify-items:center;padding:9px 6px;font-size:12px}.filters button span,.contest-shell.sidebar-collapsed .filters button span{display:block;min-width:auto;text-align:center}.filters button small,.contest-shell.sidebar-collapsed .filters button small{display:none}.contest-list{max-height:none}.contest-card:hover,.contest-card.selected{transform:none}}@media(max-width:560px){.contest-main{padding:15px 12px 42px}.hero{padding:26px 23px;border-radius:20px}.hero h1{font-size:35px}.hero-actions button{flex:1}.detail,.contest-overview{padding:20px}.overview-grid{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.filters{grid-template-columns:repeat(2,1fr)}}
 /* Light workspace treatment for the contest hero and selected navigation. */
 .hero {
@@ -320,4 +439,316 @@ onUnmounted(() => {
 }
 .filters .active small { background: #dce9ff; color: #1f5eff; }
 .problem strong { background: #e7efff; color: #1f5eff; }
+.live-standings,
+.submission-feed {
+  margin-top: 17px;
+}
+.board-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+.board-toolbar .eyebrow {
+  margin-bottom: 5px;
+  color: #3977aa;
+}
+.board-toolbar h3 {
+  margin: 0;
+  color: #1f2a37;
+  font-size: 22px;
+  letter-spacing: -.03em;
+}
+.rank-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.legend {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 950;
+}
+.legend.accepted {
+  color: #15803d;
+  background: #dcfce7;
+}
+.legend.wrong {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+.legend.pending {
+  color: #a16207;
+  background: #fef3c7;
+}
+.legend.first-blood {
+  color: #fff;
+  background: linear-gradient(135deg, #047857, #16a34a);
+  box-shadow: 0 7px 14px rgba(22, 163, 74, .18);
+}
+.board-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.board-summary span {
+  display: grid;
+  gap: 2px;
+  padding: 12px 13px;
+  border: 1px solid #e4ebf2;
+  border-radius: 13px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+.board-summary b {
+  color: #1f5eff;
+  font-size: 21px;
+  line-height: 1;
+}
+.board-summary small {
+  color: #7a8797;
+  font-size: 11px;
+  font-weight: 850;
+}
+.contest-standings-table {
+  overflow-x: auto;
+  border: 1px solid #e3e9ef;
+  border-radius: 12px;
+  background: #f7fafc;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
+}
+.standings-head,
+.standings-row {
+  display: grid;
+  grid-template-columns: 46px minmax(150px, 1.4fr) 62px 86px repeat(var(--problem-count), 54px);
+  align-items: center;
+  min-width: max-content;
+}
+.standings-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  color: #5d6d7e;
+  background: #eef4fa;
+  font-size: 11px;
+  font-weight: 900;
+}
+.standings-head span,
+.standings-head b,
+.standings-row > span,
+.standings-row > strong {
+  padding: 9px 8px;
+  border-right: 1px solid #dde6ef;
+}
+.standings-head b {
+  text-align: center;
+  color: #244c77;
+}
+.standings-row {
+  background: #fff;
+  border-top: 1px solid #e7edf3;
+  font-size: 12px;
+  transition: background .15s ease;
+}
+.standings-row:nth-child(odd) {
+  background: #fbfdff;
+}
+.standings-row:hover {
+  background: #f2f8ff;
+}
+.standings-head span:nth-child(1),
+.standings-head span:nth-child(2),
+.standings-row .standing-rank,
+.standings-row .standing-user {
+  position: sticky;
+  z-index: 3;
+}
+.standings-head span:nth-child(1),
+.standings-row .standing-rank {
+  left: 0;
+  background: inherit;
+}
+.standings-head span:nth-child(2),
+.standings-row .standing-user {
+  left: 46px;
+  background: inherit;
+  box-shadow: 8px 0 14px rgba(31, 66, 104, .06);
+}
+.standings-head span:nth-child(1),
+.standings-head span:nth-child(2) {
+  z-index: 5;
+  background: #eef4fa;
+}
+.standing-rank {
+  font-weight: 900;
+  color: #78889a;
+  text-align: center;
+}
+.standing-rank.podium {
+  color: #c78618;
+}
+.standing-user {
+  display: grid;
+  gap: 2px;
+}
+.standing-user strong {
+  color: #1d344e;
+}
+.standing-user small {
+  color: #91a0af;
+}
+.score-cell {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 42px;
+  height: 32px;
+  margin: 5px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: #edf2f7;
+  color: #8a98a7;
+  font-weight: 950;
+  cursor: default;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.score-cell:hover {
+  transform: translateY(-1px);
+}
+.score-cell.accepted {
+  background: #dff6e8;
+  color: #168246;
+}
+.score-cell.first-blood {
+  background: #139447;
+  color: #fff;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .12);
+}
+.score-cell.first-blood::after {
+  content: "FB";
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  padding: 1px 4px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .75);
+  border-radius: 999px;
+  background: #064e3b;
+  font-size: 8px;
+  line-height: 1.2;
+  letter-spacing: .02em;
+}
+.score-cell.wrong {
+  background: #ffe2e2;
+  color: #be3333;
+}
+.score-cell.pending {
+  background: #fff3d6;
+  color: #a66b00;
+}
+.submission-list {
+  overflow: hidden;
+  border: 1px solid #e3e9ef;
+  border-radius: 12px;
+}
+.submission-head,
+.submission-row {
+  display: grid;
+  grid-template-columns: 86px 1fr 1.6fr 70px 72px 130px;
+  gap: 10px;
+  align-items: center;
+}
+.submission-head {
+  padding: 9px 12px;
+  color: #6b7b8c;
+  background: #eef4fa;
+  font-size: 11px;
+  font-weight: 950;
+}
+.submission-row {
+  padding: 10px 12px;
+  background: #fff;
+  border-top: 1px solid #edf1f5;
+  font-size: 12px;
+  transition: background .15s ease;
+}
+.submission-row:hover {
+  background: #f8fbff;
+}
+.submission-time,
+.submission-lang,
+.submission-cost {
+  color: #7d8b9a;
+}
+.submission-user {
+  font-weight: 850;
+  color: #263b52;
+}
+.submission-problem {
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.submission-problem b {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  border-radius: 6px;
+  background: #e7efff;
+  color: #1f5eff;
+}
+.submission-status {
+  width: max-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #64748b;
+  font-size: 11px;
+}
+.submission-status.accepted {
+  background: #dcfce7;
+  color: #15803d;
+}
+.submission-status.wrong_answer,
+.submission-status.time_limit_exceeded,
+.submission-status.memory_limit_exceeded,
+.submission-status.runtime_error,
+.submission-status.compile_error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.submission-status.pending,
+.submission-status.queuing,
+.submission-status.judging,
+.submission-status.running {
+  background: #fef3c7;
+  color: #a16207;
+}
+.submission-status.system_error {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
+@media(max-width:860px){
+  .board-toolbar{flex-direction:column}
+  .rank-legend{justify-content:flex-start}
+  .board-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .submission-row{grid-template-columns:72px 1fr 1.4fr 60px 60px;}
+  .submission-head{display:none;}
+  .submission-cost{display:none;}
+}
+@media(max-width:560px){
+  .board-summary{grid-template-columns:1fr}
+}
 </style>

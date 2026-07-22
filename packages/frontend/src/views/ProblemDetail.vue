@@ -21,6 +21,8 @@ import { useAuthStore } from '../stores/auth';
 
 const route = useRoute();
 const auth = useAuthStore();
+const contestId = computed(() => String(route.query.contestId || ''));
+const isAuthorPreview = computed(() => String(route.query.preview || '') === '1');
 const problem = ref<any>(null);
 const problemState = ref<any>(null);
 const code = ref('');
@@ -96,9 +98,14 @@ function formatMemoryKb(value: unknown) {
 
 onMounted(async () => {
   try {
-    const { data } = await api.get(`/api/problems/${route.params.id}`);
+    const problemUrl = contestId.value
+      ? `/api/contests/${contestId.value}/problems/${route.params.id}`
+      : isAuthorPreview.value
+        ? `/api/problems/mine/created/${route.params.id}`
+      : `/api/problems/${route.params.id}`;
+    const { data } = await api.get(problemUrl);
     problem.value = data;
-    if (auth.token) {
+    if (auth.token && !contestId.value && !isAuthorPreview.value) {
       problemState.value = (await api.get(`/api/learning/problem-states/${route.params.id}`)).data;
       if (problemState.value?.draft?.language) language.value = problemState.value.draft.language;
       if (problemState.value?.status === 'PASSED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
@@ -178,7 +185,7 @@ function isTemplateCode(value: string) {
 }
 
 function scheduleDraftSave() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   if (draftSaveTimer) clearTimeout(draftSaveTimer);
   draftSaveTimer = setTimeout(() => {
     draftSaveTimer = null;
@@ -187,7 +194,7 @@ function scheduleDraftSave() {
 }
 
 async function persistDraft() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   try {
     if (!code.value.trim() || isTemplateCode(code.value)) {
       if (problemState.value?.hasDraft) {
@@ -205,7 +212,7 @@ async function persistDraft() {
 }
 
 async function refreshProblemState() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   problemState.value = (await api.get(`/api/learning/problem-states/${problem.value.id}`)).data;
 }
 
@@ -270,7 +277,10 @@ async function submitCode() {
   isExternal.value = false;
   try {
     await persistDraft();
-    const { data } = await api.post('/api/submissions', {
+    const submitUrl = contestId.value
+      ? `/api/contests/${contestId.value}/submit`
+      : (isAuthorPreview.value ? '/api/submissions/preview' : '/api/submissions');
+    const { data } = await api.post(submitUrl, {
       problemId: problem.value.id,
       language: language.value,
       sourceCode: code.value,
@@ -412,6 +422,10 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
     <div v-if="errorMsg && !problem" class="error-msg">{{ errorMsg }}</div>
 
     <template v-if="problem">
+      <div v-if="isAuthorPreview" class="preview-banner">
+        <strong>比赛预备题验题模式</strong>
+        <span>当前题目不会出现在公开题库中；这里的提交用于命题人测试数据和判题正确性。</span>
+      </div>
       <div class="problem-header">
         <div class="problem-title-row">
           <h2>{{ problem.title }}</h2>
@@ -574,6 +588,25 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 
 <style scoped>
 .problem-page { max-width: 100%; margin: 0; padding: 20px 24px; }
+.preview-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 13px;
+}
+.preview-banner strong {
+  font-size: 14px;
+}
+.preview-banner span {
+  color: #4f5a93;
+}
 .problem-header { margin-bottom: 20px; }
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
 .problem-community-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }

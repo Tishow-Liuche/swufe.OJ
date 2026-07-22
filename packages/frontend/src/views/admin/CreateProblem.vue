@@ -12,7 +12,7 @@ const router = useRouter();
 const form = reactive({
   title: '',
   description: `## 题目描述\n\n\n## 输入格式\n\n\n## 输出格式\n\n\n## 样例\n### 输入 #1\n\`\`\`\n\n\`\`\`\n### 输出 #1\n\`\`\`\n\n\`\`\`\n\n## 数据范围\n\n\n## 提示\n`,
-  difficulty: 'POINT_1',
+  difficulty: null as string | null,
   timeLimit: 1000,
   memoryLimit: 256,
   tags: '',
@@ -35,7 +35,16 @@ const uploadResult = ref<any>(null);
 const error = ref('');
 const preview = ref(false);
 
-const difficulties = pointDifficultyOptions;
+const difficulties = [
+  { value: null, label: '未评定 / 不显示难度（比赛预备推荐）' },
+  ...pointDifficultyOptions,
+];
+
+const samplePairs = reactive([
+  { input: '', output: '' },
+  { input: '', output: '' },
+  { input: '', output: '' },
+]);
 
 const languages = [
   { value: 'python', label: 'Python 3' },
@@ -61,6 +70,13 @@ function onZipSelected(e: Event) {
   testDataFile.value = input.files?.[0] || null;
 }
 
+function buildSampleText(kind: 'input' | 'output') {
+  return samplePairs
+    .map((sample) => sample[kind].replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\n+|\n+$/g, ''))
+    .filter((text) => text.trim())
+    .join('\n---\n');
+}
+
 async function createProblem() {
   error.value = validationError.value;
   if (error.value) return;
@@ -76,6 +92,8 @@ async function createProblem() {
       tags,
       inputFormat: form.inputFormat || extractSection(form.description, '输入格式'),
       outputFormat: form.outputFormat || extractSection(form.description, '输出格式'),
+      sampleInput: buildSampleText('input'),
+      sampleOutput: buildSampleText('output'),
     };
     const { data: created } = await api.post('/api/problems', payload);
     result.value = created;
@@ -109,6 +127,10 @@ async function publishProblem() {
   await api.patch(`/api/problems/${result.value.id}/status`, { status: 'PUBLISHED' });
   result.value.status = 'PUBLISHED';
   router.push(`/problems/${result.value.id}`);
+}
+
+function previewProblem(id: string) {
+  router.push({ path: `/problems/${id}`, query: { preview: '1' } });
 }
 
 function renderMd(text: string): string {
@@ -152,7 +174,7 @@ function renderMd(text: string): string {
         <div class="form-group">
           <label>难度</label>
           <select v-model="form.difficulty">
-            <option v-for="d in difficulties" :key="d.value" :value="d.value">{{ d.label }}</option>
+            <option v-for="d in difficulties" :key="d.value || 'UNRATED'" :value="d.value">{{ d.label }}</option>
           </select>
         </div>
         <div class="form-group">
@@ -226,14 +248,18 @@ function renderMd(text: string): string {
 
     <div class="card">
       <h3>样例</h3>
-      <div class="form-grid">
-        <div class="form-group full">
-          <label>样例输入</label>
-          <textarea v-model="form.sampleInput" rows="4" placeholder="1 2"></textarea>
-        </div>
-        <div class="form-group full">
-          <label>样例输出</label>
-          <textarea v-model="form.sampleOutput" rows="4" placeholder="3"></textarea>
+      <p class="hint">默认提供 3 组样例。只会保存已填写的样例；留空的样例不会显示到题目详情页。</p>
+      <div v-for="(sample, index) in samplePairs" :key="index" class="sample-editor">
+        <div class="sample-editor-title">样例 #{{ index + 1 }}</div>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>样例输入 #{{ index + 1 }}</label>
+            <textarea v-model="sample.input" rows="4" :placeholder="index === 0 ? '1 2' : '可留空'"></textarea>
+          </div>
+          <div class="form-group full">
+            <label>样例输出 #{{ index + 1 }}</label>
+            <textarea v-model="sample.output" rows="4" :placeholder="index === 0 ? '3' : '可留空'"></textarea>
+          </div>
         </div>
       </div>
     </div>
@@ -252,6 +278,7 @@ function renderMd(text: string): string {
       <p v-if="uploadResult"><b>测试点：</b>{{ uploadResult.testCount }} 组（{{ uploadResult.judgeMode }}）</p>
       <div class="publish-section" v-if="result.status !== 'PUBLISHED'">
         <button class="btn-publish" @click="publishProblem">发布题目</button>
+        <button v-if="result.status === 'CONTEST_RESERVED'" class="btn-preview" @click="previewProblem(result.id)">进入验题</button>
       </div>
       <div v-else>
         <button class="btn-publish" @click="router.push(`/problems/${result.id}`)">查看题目</button>
@@ -300,13 +327,17 @@ function renderMd(text: string): string {
 .preview-area :deep(.math-fallback) { color: #c62828; font-family: 'Cascadia Code', 'Fira Code', monospace; }
 .hint { font-size: 13px; color: #888; margin: 0 0 12px; line-height: 1.6; }
 .hint.danger { color: #d93025; text-align: center; margin-top: 10px; }
+.sample-editor { padding: 14px 0 16px; border-top: 1px solid #edf1f5; }
+.sample-editor:first-of-type { border-top: 0; padding-top: 0; }
+.sample-editor-title { margin-bottom: 10px; color: #34536f; font-size: 13px; font-weight: 850; }
 .format-box { border: 1px dashed #9cc7ff; background: #f7fbff; border-radius: 10px; padding: 14px; margin-bottom: 14px; color: #3a4a5f; }
 .format-box.spj { border-color: #c7a4ff; background: #fbf8ff; }
 .file-name { margin-top: 10px; color: #2e7d32; font-size: 13px; }
 .actions { text-align: center; margin: 24px 0; }
-.btn-primary, .btn-publish { padding: 12px 24px; background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%); color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
+.btn-primary, .btn-publish, .btn-preview { padding: 12px 24px; background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%); color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn-publish { margin-top: 12px; }
+.btn-preview { margin-top: 12px; margin-left: 10px; background: #4f46e5; }
 .result-card { background: #f1fff5; border: 1px solid #b7ebc6; }
 .error-card { background: #fff1f0; color: #d93025; border: 1px solid #ffd6d2; }
 .required { color: #d93025; }

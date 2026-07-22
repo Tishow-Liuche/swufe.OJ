@@ -53,10 +53,22 @@ export class ContestController {
     return this.contests.submit(id, req.user, dto);
   }
 
+  @Get(':id/problems/:problemId')
+  @UseGuards(AuthGuard('jwt'))
+  problem(@Param('id') id: string, @Param('problemId') problemId: string, @Req() req: any) {
+    return this.contests.getContestProblem(id, problemId, req.user);
+  }
+
   @Get(':id/standings')
   @UseGuards(AuthGuard('jwt'))
   standings(@Param('id') id: string, @Req() req: any) {
     return this.contests.standings(id, req.user);
+  }
+
+  @Get(':id/submissions')
+  @UseGuards(AuthGuard('jwt'))
+  submissions(@Param('id') id: string, @Req() req: any) {
+    return this.contests.contestSubmissions(id, req.user);
   }
 
   @Post(':id/snapshot')
