@@ -17,6 +17,7 @@
     "db:status": "prisma migrate status",
     "db:sync": "prisma migrate deploy && prisma generate",
     "backfill:point-difficulty": "node scripts/backfill-point-difficulty.js",
+    "export:problem-bank": "node scripts/export-problem-bank.js",
     "seed": "npx ts-node -r tsconfig-paths/register prisma/seed.ts",
     "test:preflight": "node --test scripts/dev-preflight.test.js",
     "test": "jest",

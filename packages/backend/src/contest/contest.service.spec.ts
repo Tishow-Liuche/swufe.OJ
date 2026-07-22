@@ -37,7 +37,7 @@ describe('ContestService practice leaderboard', () => {
     }));
   });
 
-  it('computes overall score from accepted original local problems only', async () => {
+  it('computes overall score from accepted problems submitted on this OJ only', async () => {
     const prisma: any = {
       user: {
         findMany: jest.fn().mockResolvedValue([
@@ -49,11 +49,11 @@ describe('ContestService practice leaderboard', () => {
         findMany: jest.fn().mockResolvedValue([
           { userId: 'u1', problemId: 'p0', problem: { difficulty: 'POINT_0' } },
           { userId: 'u1', problemId: 'p0', problem: { difficulty: 'POINT_0' } },
-          { userId: 'u1', problemId: 'p1', problem: { difficulty: 'POINT_1' } },
-          { userId: 'u1', problemId: 'p2', problem: { difficulty: 'POINT_2' } },
-          { userId: 'u1', problemId: 'p3', problem: { difficulty: 'POINT_3' } },
-          { userId: 'u1', problemId: 'p4', problem: { difficulty: 'POINT_4' } },
-          { userId: 'u1', problemId: 'p5', problem: { difficulty: 'POINT_5' } },
+          { userId: 'u1', problemId: 'cf-p1', problem: { difficulty: 'POINT_1' } },
+          { userId: 'u1', problemId: 'luogu-p2', problem: { difficulty: 'POINT_2' } },
+          { userId: 'u1', problemId: 'qoj-p3', problem: { difficulty: 'POINT_3' } },
+          { userId: 'u1', problemId: 'local-p4', problem: { difficulty: 'POINT_4' } },
+          { userId: 'u1', problemId: 'local-p5', problem: { difficulty: 'POINT_5' } },
           { userId: 'u2', problemId: 'unknown', problem: { difficulty: null } },
         ]),
       },
@@ -68,7 +68,7 @@ describe('ContestService practice leaderboard', () => {
     expect(prisma.submission.findMany).toHaveBeenCalledWith({
       where: {
         status: 'ACCEPTED',
-        problem: { source: 'LOCAL', status: 'PUBLISHED' },
+        problem: { status: 'PUBLISHED' },
       },
       select: {
         userId: true,
