@@ -135,11 +135,12 @@ function statusClass(status: string) {
   if (['QUEUING', 'JUDGING', 'PENDING'].includes(status)) return 'pending';
   return 'bad';
 }
-function formatImportMessage(data: { added: number; skipped: number; notFound?: string[]; alreadyInClass?: string[]; duplicatedInput?: string[] }) {
+function formatImportMessage(data: { added: number; skipped: number; notFound?: string[]; alreadyInClass?: string[]; duplicatedInput?: string[]; invalidRole?: string[] }) {
   const parts = [`导入完成：成功 ${data.added} 人，跳过 ${data.skipped} 人`];
   if (data.notFound?.length) parts.push(`未找到：${data.notFound.join('、')}`);
   if (data.alreadyInClass?.length) parts.push(`已在班级：${data.alreadyInClass.join('、')}`);
   if (data.duplicatedInput?.length) parts.push(`重复输入：${data.duplicatedInput.join('、')}`);
+  if (data.invalidRole?.length) parts.push(`非学生账号：${data.invalidRole.join('、')}`);
   return parts.join('；');
 }
 

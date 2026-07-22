@@ -85,8 +85,8 @@ describe('TeacherService', () => {
   it('imports students by username or email and reports skipped identifiers', async () => {
     prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
     prisma.user.findFirst
-      .mockResolvedValueOnce({ id: 'student-1', username: 'alice', email: 'alice@example.com' })
-      .mockResolvedValueOnce({ id: 'student-2', username: 'bob', email: 'bob@example.com' })
+      .mockResolvedValueOnce({ id: 'student-1', username: 'alice', email: 'alice@example.com', role: 'STUDENT' })
+      .mockResolvedValueOnce({ id: 'student-2', username: 'bob', email: 'bob@example.com', role: 'STUDENT' })
       .mockResolvedValueOnce(null);
     prisma.classMember.findUnique
       .mockResolvedValueOnce(null)
@@ -106,7 +106,7 @@ describe('TeacherService', () => {
           { email: { equals: 'alice', mode: 'insensitive' } },
         ],
       },
-      select: { id: true, username: true, email: true },
+      select: { id: true, username: true, email: true, role: true },
     });
     expect(prisma.classMember.create).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
@@ -115,6 +115,49 @@ describe('TeacherService', () => {
       notFound: ['missing_user'],
       alreadyInClass: ['bob@example.com'],
       duplicatedInput: ['alice'],
+      invalidRole: [],
+    });
+  });
+
+  it('skips non-student accounts when importing by username or email', async () => {
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'teacher-user',
+      username: 'teacher-user',
+      email: 'teacher@example.com',
+      role: 'TEACHER',
+    });
+
+    const result = await service.importStudents('class-1', 'teacher-1', ['teacher-user']);
+
+    expect(prisma.classMember.create).not.toHaveBeenCalled();
+    expect(prisma.classMember.update).not.toHaveBeenCalled();
+    expect(prisma.assignmentStudent.createMany).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      added: 0,
+      skipped: 1,
+      notFound: [],
+      alreadyInClass: [],
+      duplicatedInput: [],
+      invalidRole: ['teacher-user'],
+    });
+  });
+
+  it('enrolls newly imported approved students into existing assignments', async () => {
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.user.findFirst.mockResolvedValue({ id: 'student-1', username: 'alice', email: 'alice@example.com', role: 'STUDENT' });
+    prisma.classMember.findUnique.mockResolvedValue(null);
+    prisma.assignment.findMany.mockResolvedValue([{ id: 'assignment-1' }, { id: 'assignment-2' }]);
+
+    const result = await service.importStudents('class-1', 'teacher-1', ['alice']);
+
+    expect(result.added).toBe(1);
+    expect(prisma.assignmentStudent.createMany).toHaveBeenCalledWith({
+      data: [
+        { assignmentId: 'assignment-1', userId: 'student-1' },
+        { assignmentId: 'assignment-2', userId: 'student-1' },
+      ],
+      skipDuplicates: true,
     });
   });
 
