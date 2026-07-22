@@ -21,7 +21,7 @@ const existingTestCount = ref(0);
 const form = reactive({
   title: '',
   description: '',
-  difficulty: 'POINT_1',
+  difficulty: null as string | null,
   timeLimit: 1000,
   memoryLimit: 256,
   outputLimit: 64,
@@ -38,7 +38,10 @@ const form = reactive({
   spjSourceCode: '',
 });
 
-const difficulties = pointDifficultyOptions;
+const difficulties = [
+  { value: null, label: '未评定 / 不显示难度（比赛预备推荐）' },
+  ...pointDifficultyOptions,
+];
 
 const languages = [
   { value: 'python', label: 'Python 3' },
@@ -76,7 +79,7 @@ async function loadProblem() {
     const checker = version.checker || {};
     form.title = data.title || '';
     form.description = version.description || '';
-    form.difficulty = data.difficulty || 'POINT_1';
+    form.difficulty = data.difficulty || null;
     form.timeLimit = data.timeLimit || 1000;
     form.memoryLimit = data.memoryLimit || 256;
     form.outputLimit = data.outputLimit || 64;
@@ -151,6 +154,12 @@ async function saveProblem() {
   }
 }
 
+function openAnswerPreview() {
+  const path = `/problems/${problemId.value}`;
+  if (form.status === 'PUBLISHED') router.push(path);
+  else router.push({ path, query: { preview: '1' } });
+}
+
 onMounted(loadProblem);
 </script>
 
@@ -185,7 +194,7 @@ onMounted(loadProblem);
           </label>
           <label>难度
             <select v-model="form.difficulty">
-              <option v-for="d in difficulties" :key="d.value" :value="d.value">{{ d.label }}</option>
+              <option v-for="d in difficulties" :key="d.value || 'UNRATED'" :value="d.value">{{ d.label }}</option>
             </select>
           </label>
           <label>标签<input v-model="form.tags" placeholder="动态规划, 图论" /></label>
@@ -243,7 +252,7 @@ onMounted(loadProblem);
         <button class="btn-primary" :disabled="saving || Boolean(validationError)" @click="saveProblem">
           {{ saving ? '保存中...' : '保存修改' }}
         </button>
-        <button class="btn-secondary" @click="router.push(`/problems/${problemId}`)">查看题目</button>
+        <button class="btn-secondary" @click="openAnswerPreview">{{ form.status === 'PUBLISHED' ? '查看题目' : '进入验题' }}</button>
       </div>
       <p v-if="validationError" class="hint danger">{{ validationError }}</p>
       <div v-if="message" class="card success">{{ message }}</div>

@@ -47,10 +47,17 @@ describe('TeacherService', () => {
       },
       classMember: {
         create: jest.fn(),
+        findMany: jest.fn(),
         findUnique: jest.fn(),
         findMany: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+      },
+      contest: {
+        create: jest.fn(),
+      },
+      contestProblem: {
+        createMany: jest.fn(),
       },
     };
     assignmentProgress = {

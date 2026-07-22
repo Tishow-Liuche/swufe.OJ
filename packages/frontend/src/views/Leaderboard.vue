@@ -72,7 +72,8 @@ const displayBoardColumns = computed(() => (
 async function loadContests() {
   try {
     const { data } = await api.get('/api/contests');
-    contests.value = Array.isArray(data) ? data : data.items || [];
+    contests.value = (Array.isArray(data) ? data : data.items || [])
+      .filter((item: any) => item.state === 'ENDED');
   } catch {
     contests.value = [];
   }

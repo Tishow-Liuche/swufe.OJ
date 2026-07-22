@@ -9,6 +9,8 @@ const {
   parsePreflightOptions,
   selectKillablePortProcesses,
 } = require('./dev-preflight');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
 
 test('assertAuthSchemaRows throws a clear error when refreshTokenHash is missing', () => {
   assert.throws(
@@ -73,4 +75,12 @@ test('parsePreflightOptions keeps auth schema checks enabled when only db sync i
     skipDbSync: true,
     skipAuthSchemaCheck: false,
   });
+});
+
+test('default development startup uses a stable one-shot backend process on Windows', () => {
+  const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8'));
+  assert.match(pkg.scripts['start:dev'], /npm run build/);
+  assert.match(pkg.scripts['start:dev'], /node dist\/src\/main/);
+  assert.doesNotMatch(pkg.scripts['start:dev'], /--watch/);
+  assert.match(pkg.scripts['start:watch'], /--watch/);
 });

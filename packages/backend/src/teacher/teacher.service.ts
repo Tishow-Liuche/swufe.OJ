@@ -812,16 +812,35 @@ export class TeacherService {
     });
   }
 
-  async createContest(teacherId: string, data: {
+  async createContest(actor: string | { id: string; role?: string }, data: {
     title: string; description?: string; mode?: string;
     startTime: string; endTime: string; problemIds?: string[];
     visibility?: string; registerStart?: string; registerEnd?: string;
     freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
-    penaltyTime?: number; password?: string;
+    penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
   }) {
+    const teacherId = typeof actor === 'string' ? actor : actor.id;
+    const isAdmin = typeof actor !== 'string' && actor.role === 'ADMIN';
     if (new Date(data.endTime) <= new Date(data.startTime)) {
       throw new ForbiddenException('比赛结束时间必须晚于开始时间');
     }
+    const problemIds = [...new Set((data.problemIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    if (problemIds.length) {
+      const reservedProblemWhere: any = {
+        id: { in: problemIds },
+        source: 'LOCAL',
+        status: 'CONTEST_RESERVED',
+      };
+      if (!isAdmin) reservedProblemWhere.createdById = teacherId;
+      const reservedProblems = await this.prisma.problem.findMany({
+        where: reservedProblemWhere,
+        select: { id: true },
+      });
+      if (reservedProblems.length !== problemIds.length) {
+        throw new BadRequestException('比赛只能选择自己录入的比赛预备题库题目');
+      }
+    }
+
     const contest = await this.prisma.contest.create({
       data: {
         title: data.title,
@@ -837,13 +856,15 @@ export class TeacherService {
         allowUpsolve: data.allowUpsolve ?? true,
         maxSubmissions: data.maxSubmissions || null,
         penaltyTime: data.penaltyTime || 20,
+        teamMode: data.teamMode ?? false,
+        isRated: data.isRated ?? false,
         createdBy: teacherId,
       },
     });
 
-    if (data.problemIds?.length) {
+    if (problemIds.length) {
       await this.prisma.contestProblem.createMany({
-        data: data.problemIds.map((pid, i) => ({
+        data: problemIds.map((pid, i) => ({
           contestId: contest.id, problemId: pid, order: i + 1, score: 100,
         })),
       });

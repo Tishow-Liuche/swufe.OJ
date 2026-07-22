@@ -10,9 +10,13 @@
     "test:cf-helper": "node scripts/check-cf-helper.mjs",
     "test:luogu-helper": "node scripts/check-luogu-helper.mjs",
     "test:leaderboard": "node scripts/check-leaderboard-frame.mjs",
+    "test:contest-creator": "node scripts/check-contest-creator.mjs",
+    "test:contest-live-board": "node scripts/check-contest-live-board.mjs",
+    "test:contest-reserved-preview": "node scripts/check-contest-reserved-preview.mjs",
     "test:profile-ui": "node scripts/check-profile-ui.mjs",
     "test:header-utilities": "node scripts/check-header-utilities.mjs",
     "test:point-difficulty": "node scripts/check-point-difficulty.mjs",
+    "test:problem-authoring": "node scripts/check-problem-authoring-samples.mjs",
     "preview": "vite preview",
     "test": "vitest"
   },

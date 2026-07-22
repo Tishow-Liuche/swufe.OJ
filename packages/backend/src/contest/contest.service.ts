@@ -64,6 +64,25 @@ export class ContestService {
     if (!isParticipant && !canManage) throw new ForbiddenException('无权查看该私有比赛的排名');
   }
 
+  private problemLabel(index: number) {
+    let current = index;
+    let label = '';
+    do {
+      label = String.fromCharCode(65 + (current % 26)) + label;
+      current = Math.floor(current / 26) - 1;
+    } while (current >= 0);
+    return label;
+  }
+
+  private contestCellStatus(attempts: any[], accepted?: any) {
+    if (accepted) return 'ACCEPTED';
+    if (!attempts.length) return 'UNTRIED';
+    const runningStatuses = new Set(['PENDING', 'QUEUING', 'JUDGING', 'SUBMITTING', 'COMPILING', 'RUNNING']);
+    return attempts.some((submission: any) => !runningStatuses.has(submission.status))
+      ? 'WRONG_ANSWER'
+      : 'PENDING';
+  }
+
   async listPublic() {
     const contests = await this.prisma.contest.findMany({
       where: { visibility: 'PUBLIC' },
@@ -202,7 +221,7 @@ export class ContestService {
     });
     if (!contestProblem) throw new ForbiddenException('该题目不属于本场比赛');
 
-    const submitted: any = await this.submissions.submit(viewer.id, dto);
+    const submitted: any = await this.submissions.submit(viewer.id, dto, { allowContestReserved: true });
     if (!submitted?.id) {
       throw new BadRequestException('当前比赛仅支持可追踪的本地评测提交');
     }
@@ -212,6 +231,69 @@ export class ContestService {
     return { ...submitted, contestId: id };
   }
 
+  async getContestProblem(id: string, problemId: string, viewer: Viewer) {
+    const contest = await this.prisma.contest.findUnique({
+      where: { id },
+      include: {
+        participants: { where: { userId: viewer.id }, take: 1 },
+        problems: {
+          where: { problemId },
+          take: 1,
+          include: {
+            problem: {
+              select: {
+                id: true,
+                title: true,
+                source: true,
+                status: true,
+                difficulty: true,
+                timeLimit: true,
+                memoryLimit: true,
+                outputLimit: true,
+                allowLanguages: true,
+                createdAt: true,
+                updatedAt: true,
+                versions: {
+                  where: { isCurrent: true },
+                  take: 1,
+                  select: {
+                    id: true,
+                    version: true,
+                    description: true,
+                    inputFormat: true,
+                    outputFormat: true,
+                    sampleInput: true,
+                    sampleOutput: true,
+                    hint: true,
+                    dataRange: true,
+                    createdAt: true,
+                  },
+                },
+                tags: { select: { name: true, type: true } },
+                sourceInfo: {
+                  select: {
+                    platform: true,
+                    remoteProblemId: true,
+                    remoteContestId: true,
+                    remoteProblemIndex: true,
+                    remoteUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!contest) throw new NotFoundException('比赛不存在');
+    const contestProblem = (contest as any).problems?.[0];
+    if (!contestProblem) throw new ForbiddenException('该题目不属于本场比赛');
+    const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
+    const participant = (contest as any).participants?.[0];
+    if (!canManage && !participant) throw new ForbiddenException('请先报名或开始虚拟比赛');
+    return contestProblem.problem;
+  }
+
   async standings(id: string, viewer: Viewer) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
@@ -219,11 +301,14 @@ export class ContestService {
         participants: {
           include: { user: { select: { id: true, username: true, nickname: true, avatar: true } } },
         },
-        problems: { orderBy: { order: 'asc' } },
+        problems: {
+          orderBy: { order: 'asc' },
+          include: { problem: { select: { id: true, title: true } } },
+        },
         submissions: {
           include: {
             submission: {
-              select: { userId: true, problemId: true, status: true, score: true, createdAt: true },
+              select: { id: true, userId: true, problemId: true, status: true, score: true, createdAt: true },
             },
           },
         },
@@ -238,6 +323,39 @@ export class ContestService {
       && now < contest.endTime
       && !canManage;
 
+    const problemHeaders = contest.problems.map((problem: any, index: number) => ({
+      problemId: problem.problemId,
+      order: problem.order,
+      label: this.problemLabel(index),
+      title: problem.problem?.title || `Problem ${this.problemLabel(index)}`,
+      score: problem.score,
+    }));
+    const firstAcceptedByProblem = new Map<string, { submissionId: string; userId: string; acceptedAt: Date }>();
+    for (const participant of contest.participants) {
+      const start = participant.isVirtual && participant.virtualStart ? participant.virtualStart : contest.startTime;
+      const end = participant.isVirtual && participant.virtualEnd ? participant.virtualEnd : contest.endTime;
+      const cutoff = frozen && !participant.isVirtual ? contest.freezeTime! : end;
+      const acceptedSubmissions = contest.submissions
+        .map((item: any) => item.submission)
+        .filter((submission: any) =>
+          submission.userId === participant.userId
+          && submission.status === 'ACCEPTED'
+          && submission.createdAt >= start
+          && submission.createdAt <= cutoff,
+        )
+        .sort((a: any, b: any) => a.createdAt.getTime() - b.createdAt.getTime());
+      for (const submission of acceptedSubmissions) {
+        const current = firstAcceptedByProblem.get(submission.problemId);
+        if (!current || submission.createdAt < current.acceptedAt) {
+          firstAcceptedByProblem.set(submission.problemId, {
+            submissionId: submission.id,
+            userId: submission.userId,
+            acceptedAt: submission.createdAt,
+          });
+        }
+      }
+    }
+
     const rows = contest.participants.map((participant: any) => {
       const start = participant.isVirtual && participant.virtualStart ? participant.virtualStart : contest.startTime;
       const end = participant.isVirtual && participant.virtualEnd ? participant.virtualEnd : contest.endTime;
@@ -251,20 +369,25 @@ export class ContestService {
         )
         .sort((a: any, b: any) => a.createdAt.getTime() - b.createdAt.getTime());
 
-      const problems = contest.problems.map((problem: any) => {
+      const problems = contest.problems.map((problem: any, index: number) => {
         const attempts = submissions.filter((submission: any) => submission.problemId === problem.problemId);
         const accepted = attempts.find((submission: any) => submission.status === 'ACCEPTED');
         const wrongAttempts = accepted
           ? attempts.filter((submission: any) => submission.createdAt < accepted.createdAt && submission.status !== 'ACCEPTED').length
           : attempts.filter((submission: any) => submission.status !== 'PENDING' && submission.status !== 'QUEUING').length;
         const bestScore = attempts.reduce((best: number, submission: any) => Math.max(best, submission.score || 0), 0);
+        const label = this.problemLabel(index);
         return {
           problemId: problem.problemId,
+          label,
+          title: problem.problem?.title || `Problem ${label}`,
+          status: this.contestCellStatus(attempts, accepted),
           accepted: !!accepted,
           attempts: attempts.length,
           wrongAttempts,
           score: bestScore,
           acceptedAt: accepted?.createdAt || null,
+          firstBlood: !!accepted && firstAcceptedByProblem.get(problem.problemId)?.submissionId === accepted.id,
         };
       });
 
@@ -307,6 +430,7 @@ export class ContestService {
     let previous: any;
     return {
       contest: { id: contest.id, title: contest.title, mode: contest.mode, frozen },
+      problems: problemHeaders,
       rows: rows.map((row: any, index: number) => {
         const tied = previous && (contest.mode === 'IOI'
           ? previous.score === row.score && previous.lastActive?.getTime() === row.lastActive?.getTime()
@@ -314,6 +438,63 @@ export class ContestService {
         const rank = tied ? previous.rank : index + 1;
         previous = { ...row, rank };
         return { rank, ...row };
+      }),
+    };
+  }
+
+  async contestSubmissions(id: string, viewer: Viewer) {
+    const contest = await this.prisma.contest.findUnique({
+      where: { id },
+      include: {
+        participants: { select: { userId: true } },
+        problems: {
+          orderBy: { order: 'asc' },
+          include: { problem: { select: { id: true, title: true } } },
+        },
+      },
+    });
+    if (!contest) throw new NotFoundException('比赛不存在');
+    this.assertCanViewStandings(contest, viewer);
+    const labels = new Map(contest.problems.map((problem: any, index: number) => [
+      problem.problemId,
+      {
+        label: this.problemLabel(index),
+        title: problem.problem?.title || `Problem ${this.problemLabel(index)}`,
+      },
+    ]));
+    const items = await this.prisma.contestSubmission.findMany({
+      where: { contestId: id },
+      take: 80,
+      orderBy: { submission: { createdAt: 'desc' } },
+      include: {
+        submission: {
+          include: {
+            user: { select: { id: true, username: true, nickname: true, avatar: true } },
+            problem: { select: { id: true, title: true } },
+          },
+        },
+      },
+    });
+    return {
+      contest: { id: contest.id, title: contest.title },
+      items: items.map((item: any) => {
+        const submission = item.submission;
+        const meta = labels.get(submission.problemId);
+        return {
+          id: submission.id,
+          status: submission.status,
+          language: submission.language,
+          score: submission.score,
+          timeUsed: submission.timeUsed,
+          memoryUsed: submission.memoryUsed,
+          createdAt: submission.createdAt,
+          user: submission.user,
+          problem: {
+            id: submission.problem?.id || submission.problemId,
+            title: meta?.title || submission.problem?.title || submission.problemId,
+            label: meta?.label || '',
+          },
+        };
       }),
     };
   }

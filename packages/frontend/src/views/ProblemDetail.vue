@@ -22,6 +22,8 @@ import { useAuthStore } from '../stores/auth';
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const contestId = computed(() => String(route.query.contestId || ''));
+const isAuthorPreview = computed(() => String(route.query.preview || '') === '1');
 const problem = ref<any>(null);
 const problemState = ref<any>(null);
 const code = ref('');
@@ -102,9 +104,14 @@ function formatMemoryKb(value: unknown) {
 
 onMounted(async () => {
   try {
-    const { data } = await api.get(`/api/problems/${route.params.id}`);
+    const problemUrl = contestId.value
+      ? `/api/contests/${contestId.value}/problems/${route.params.id}`
+      : isAuthorPreview.value
+        ? `/api/problems/mine/created/${route.params.id}`
+      : `/api/problems/${route.params.id}`;
+    const { data } = await api.get(problemUrl);
     problem.value = data;
-    if (auth.token) {
+    if (auth.token && !contestId.value && !isAuthorPreview.value) {
       problemState.value = (await api.get(`/api/learning/problem-states/${route.params.id}`)).data;
       if (problemState.value?.draft?.language) language.value = problemState.value.draft.language;
       if (problemState.value?.status === 'PASSED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
@@ -184,7 +191,7 @@ function isTemplateCode(value: string) {
 }
 
 function scheduleDraftSave() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   if (draftSaveTimer) clearTimeout(draftSaveTimer);
   draftSaveTimer = setTimeout(() => {
     draftSaveTimer = null;
@@ -193,7 +200,7 @@ function scheduleDraftSave() {
 }
 
 async function persistDraft() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   try {
     if (!code.value.trim() || isTemplateCode(code.value)) {
       if (problemState.value?.hasDraft) {
@@ -211,7 +218,7 @@ async function persistDraft() {
 }
 
 async function refreshProblemState() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   problemState.value = (await api.get(`/api/learning/problem-states/${problem.value.id}`)).data;
 }
 
@@ -276,7 +283,10 @@ async function submitCode() {
   isExternal.value = false;
   try {
     await persistDraft();
-    const { data } = await api.post('/api/submissions', {
+    const submitUrl = contestId.value
+      ? `/api/contests/${contestId.value}/submit`
+      : (isAuthorPreview.value ? '/api/submissions/preview' : '/api/submissions');
+    const { data } = await api.post(submitUrl, {
       problemId: problem.value.id,
       language: language.value,
       sourceCode: code.value,

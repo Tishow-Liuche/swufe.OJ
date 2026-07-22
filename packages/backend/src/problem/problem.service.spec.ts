@@ -374,6 +374,39 @@ describe('ProblemService createFull with judge data', () => {
     }));
   });
 
+  it('keeps authored problem difficulty unrated when difficulty is intentionally blank', async () => {
+    prisma.problem.create.mockResolvedValue({ id: 'p-unrated' });
+
+    await service.createFull({
+      title: 'Hidden difficulty contest problem',
+      description: 'desc',
+      difficulty: null,
+      judgeMode: 'STANDARD',
+    } as any, actor);
+
+    expect(prisma.problem.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        difficulty: null,
+      }),
+    }));
+  });
+
+  it('allows editing a local problem back to unrated difficulty', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p1', status: 'DRAFT', source: 'LOCAL' });
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      id: 'version-1',
+      checker: { type: 'STANDARD', language: null, sourceCode: null },
+    });
+    prisma.problem.update.mockResolvedValue({ id: 'p1', difficulty: null });
+
+    await service.update('p1', { difficulty: '' } as any, actor);
+
+    expect(prisma.problem.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { difficulty: null },
+    });
+  });
+
   it('rejects spj problems without checker code', async () => {
     await expect(
       service.createFull({
