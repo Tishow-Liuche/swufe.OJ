@@ -666,6 +666,179 @@ export class UserService {
     return { id: membership.id, classId: cls.id, className: cls.name, status: membership.status };
   }
 
+  async listMyAssignments(userId: string) {
+    const memberships = await this.prisma.classMember.findMany({
+      where: { userId, status: 'APPROVED' },
+      include: {
+        class: {
+          select: {
+            id: true,
+            name: true,
+            teacherId: true,
+            status: true,
+            course: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { joinedAt: 'desc' },
+    });
+    const classIds = [...new Set(memberships.map((membership) => membership.classId))];
+    if (!classIds.length) return { total: 0, items: [] };
+
+    const assignments = await this.prisma.assignment.findMany({
+      where: { classId: { in: classIds } },
+      include: {
+        problems: {
+          orderBy: { order: 'asc' },
+          include: {
+            problem: {
+              select: {
+                id: true,
+                title: true,
+                source: true,
+                difficulty: true,
+                sourceInfo: {
+                  select: {
+                    platform: true,
+                    remoteProblemId: true,
+                    remoteUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+    if (!assignments.length) return { total: 0, items: [] };
+
+    const assignmentIds = assignments.map((assignment) => assignment.id);
+    const enrollmentRows = await this.prisma.assignmentStudent.findMany({
+      where: { userId, assignmentId: { in: assignmentIds } },
+      select: {
+        assignmentId: true,
+        status: true,
+        score: true,
+        submittedAt: true,
+        completedAt: true,
+      },
+    });
+
+    const classById = new Map(memberships.map((membership) => [membership.class.id, membership.class]));
+    const teacherIds = [...new Set(memberships.map((membership) => membership.class.teacherId))];
+    const teachers = teacherIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: teacherIds } },
+          select: { id: true, username: true, nickname: true },
+        })
+      : [];
+    const teacherById = new Map(teachers.map((teacher) => [teacher.id, teacher]));
+    const enrollmentByAssignment = new Map(enrollmentRows.map((row) => [row.assignmentId, row]));
+
+    const problemIds = [
+      ...new Set(assignments.flatMap((assignment) => assignment.problems.map((item) => item.problem.id))),
+    ];
+    const assignmentStartTimes = assignments.map((assignment) => assignment.startTime.getTime());
+    const assignmentEndTimes = assignments.map((assignment) => assignment.endTime.getTime());
+    const submissions = problemIds.length
+      ? await this.prisma.submission.findMany({
+          where: {
+            userId,
+            problemId: { in: problemIds },
+            createdAt: {
+              gte: new Date(Math.min(...assignmentStartTimes)),
+              lte: new Date(Math.max(...assignmentEndTimes)),
+            },
+          },
+          select: {
+            id: true,
+            problemId: true,
+            status: true,
+            score: true,
+            timeUsed: true,
+            memoryUsed: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+      : [];
+    const submissionsByProblem = new Map<string, typeof submissions>();
+    for (const submission of submissions) {
+      const bucket = submissionsByProblem.get(submission.problemId) || [];
+      bucket.push(submission);
+      submissionsByProblem.set(submission.problemId, bucket);
+    }
+
+    const now = new Date();
+    const items = assignments.map((assignment) => {
+      let solved = 0;
+      let latestAcceptedAt: Date | null = null;
+      const problems = assignment.problems.map((item) => {
+        const attempts = (submissionsByProblem.get(item.problem.id) || []).filter((submission) =>
+          submission.createdAt >= assignment.startTime && submission.createdAt <= assignment.endTime,
+        );
+        const accepted = attempts.find((submission) => submission.status === 'ACCEPTED');
+        const best = accepted || attempts[0];
+        if (accepted) {
+          solved++;
+          if (!latestAcceptedAt || accepted.createdAt > latestAcceptedAt) {
+            latestAcceptedAt = accepted.createdAt;
+          }
+        }
+        return {
+          id: item.problem.id,
+          title: item.problem.title,
+          source: item.problem.source,
+          difficulty: item.problem.difficulty,
+          sourceInfo: item.problem.sourceInfo,
+          order: item.order,
+          score: item.score,
+          status: best ? best.status : 'NOT_SUBMITTED',
+          attempts: attempts.length,
+          bestSubmissionId: best?.id || null,
+          bestScore: best?.score ?? 0,
+          timeUsed: best?.timeUsed ?? null,
+          memoryUsed: best?.memoryUsed ?? null,
+          submittedAt: best?.createdAt ?? null,
+        };
+      });
+      const cls = classById.get(assignment.classId);
+      const enrollment = enrollmentByAssignment.get(assignment.id);
+      const total = problems.length;
+      const completed = ['COMPLETED', 'LATE', 'SETTLED'].includes(enrollment?.status || '')
+        || (total > 0 && solved === total);
+      const lifecycle = now < assignment.startTime
+        ? 'NOT_STARTED'
+        : now > assignment.endTime
+          ? 'ENDED'
+          : 'ACTIVE';
+      return {
+        id: assignment.id,
+        classId: assignment.classId,
+        title: assignment.title,
+        description: assignment.description,
+        startTime: assignment.startTime,
+        endTime: assignment.endTime,
+        lifecycle,
+        enrollmentStatus: completed ? 'COMPLETED' : enrollment?.status || 'PENDING',
+        submittedAt: enrollment?.submittedAt || null,
+        completedAt: enrollment?.completedAt || (completed ? latestAcceptedAt : null),
+        class: cls ? {
+          id: cls.id,
+          name: cls.name,
+          status: cls.status,
+          course: cls.course,
+        } : { id: assignment.classId, name: '未知班级', status: 'UNKNOWN', course: null },
+        teacher: cls ? teacherById.get(cls.teacherId) || null : null,
+        progress: { total, solved, completed },
+        problems,
+      };
+    });
+
+    return { total: items.length, items };
+  }
+
   /** 全年每日提交热力图数据 */
   private async getHeatmap(userId: string) {
     const now = new Date();

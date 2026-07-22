@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { BarChart3, Medal, Sparkles, Target, Trophy } from '@lucide/vue';
+import { BarChart3, Sparkles, Target, Trophy } from '@lucide/vue';
 import api from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
 
@@ -33,7 +33,7 @@ const scopeMeta = computed(() => ({
   OVERALL: {
     title: '综合排名',
     kicker: 'SINGULARITY SCORE',
-    desc: '综合积分榜框架已预留，等你给出积分公式后接入正式计算。',
+    desc: '按本 OJ 提交 AC 的题目难度计做题分，比赛分当前为 0。',
     icon: Sparkles,
   },
 })[scope.value]);
@@ -43,7 +43,7 @@ const currentScopeTitle = computed(() => (
 ));
 const currentScopeDesc = computed(() => (
   scope.value === 'OVERALL'
-    ? '综合分 = 做题分 + 比赛分；当前做题分只统计本地原创题 AC，比赛分暂为 0。'
+    ? '综合分 = 做题分 + 比赛分；当前做题分只统计本 OJ 提交并 AC 的题，比赛分暂为 0。'
     : scopeMeta.value.desc
 ));
 
@@ -60,13 +60,13 @@ const boardColumns = computed(() => {
     return ['排名', '选手', '得分', '已解决'];
   }
   if (scope.value === 'OVERALL') {
-    return ['排名', '用户', '综合积分', '构成'];
+    return ['排名', '用户', '综合得分', '构成'];
   }
   return ['排名', '用户', '已解决', '提交数', '通过率'];
 });
 
 const displayBoardColumns = computed(() => (
-  scope.value === 'OVERALL' ? ['排名', '用户', '综合分数', '构成'] : boardColumns.value
+  scope.value === 'OVERALL' ? ['排名', '用户', '综合得分', '构成'] : boardColumns.value
 ));
 
 async function loadContests() {
@@ -186,15 +186,6 @@ onMounted(async () => {
       />
       <span v-if="!contests.length">暂无可选择比赛，或比赛列表加载失败。</span>
     </div>
-
-    <section v-if="scope === 'OVERALL'" class="overall-placeholder">
-      <div class="placeholder-icon"><Medal :size="34" /></div>
-      <div>
-        <p class="eyebrow">SCORE FORMULA</p>
-        <h2>综合分公式已启用</h2>
-        <p>做题分只统计本地原创题 AC：P0=1，P1=4，P2=10，P3=20，P4=40，P5=66；比赛分当前为 0，后续创建比赛积分后会加入总分。</p>
-      </div>
-    </section>
 
     <p v-if="error" class="notice">{{ error }}</p>
     <div v-if="loading" class="state">正在计算排行榜…</div>
@@ -397,38 +388,6 @@ onMounted(async () => {
 
 .contest-select {
   width: min(360px, 100%);
-}
-
-.overall-placeholder {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 18px;
-  align-items: center;
-  margin-bottom: 18px;
-  padding: 24px;
-  border: 1px dashed #aac7fa;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #fff, #f3f8ff);
-}
-
-.placeholder-icon {
-  display: grid;
-  width: 72px;
-  height: 72px;
-  place-items: center;
-  border-radius: 20px;
-  background: #fff3d7;
-  color: #d58618;
-}
-
-.overall-placeholder h2 {
-  margin: 0 0 8px;
-}
-
-.overall-placeholder p:last-child {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.75;
 }
 
 .notice {

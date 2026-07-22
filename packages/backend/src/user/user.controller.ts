@@ -86,6 +86,12 @@ export class UserController {
     return this.userService.listMyClasses(req.user.id);
   }
 
+  @Get('assignments')
+  @UseGuards(AuthGuard('jwt'))
+  listMyAssignments(@Req() req: any) {
+    return this.userService.listMyAssignments(req.user.id);
+  }
+
   @Post('classes/join')
   @UseGuards(AuthGuard('jwt'))
   applyToClass(@Req() req: any, @Body('joinCode') joinCode: string) {

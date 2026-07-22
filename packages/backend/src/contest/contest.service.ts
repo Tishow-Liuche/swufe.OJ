@@ -413,7 +413,7 @@ export class ContestService {
       this.prisma.submission.findMany({
         where: {
           status: 'ACCEPTED',
-          problem: { source: 'LOCAL', status: 'PUBLISHED' },
+          problem: { status: 'PUBLISHED' },
         },
         select: {
           userId: true,

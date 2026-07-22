@@ -13,6 +13,7 @@ describe('UserService profile settings', () => {
       user: {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
+        findMany: jest.fn(),
         update: jest.fn(),
       },
       userSession: {
@@ -47,6 +48,9 @@ describe('UserService profile settings', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+      },
+      assignmentStudent: {
+        findMany: jest.fn(),
       },
       $transaction: jest.fn(async (operations: any[]) => Promise.all(operations)),
     };
@@ -428,6 +432,57 @@ describe('UserService profile settings', () => {
         progress: expect.objectContaining({ solvedCount: 0, totalProblems: 1, completed: false, status: 'EXPIRED' }),
       }),
     ]));
+  });
+
+  it('lists assignments across the current student approved classes with problem progress', async () => {
+    prisma.classMember.findMany.mockResolvedValue([{
+      classId: 'class-1',
+      status: 'APPROVED',
+      class: {
+        id: 'class-1', name: '算法训练一班', teacherId: 'teacher-1', status: 'APPROVED', course: null,
+      },
+    }]);
+    prisma.assignment.findMany.mockResolvedValue([{
+      id: 'assignment-1',
+      classId: 'class-1',
+      title: '第一周作业',
+      description: '基础题训练',
+      startTime: new Date('2026-07-20T00:00:00.000Z'),
+      endTime: new Date('2026-07-30T00:00:00.000Z'),
+      createdAt: new Date('2026-07-19T00:00:00.000Z'),
+      problems: [
+        { order: 1, score: 100, problem: { id: 'problem-1', title: 'A+B', source: 'LOCAL', difficulty: 'POINT_0', sourceInfo: null } },
+        { order: 2, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: 'POINT_1', sourceInfo: null } },
+      ],
+    }]);
+    prisma.assignmentStudent.findMany.mockResolvedValue([{
+      assignmentId: 'assignment-1', status: 'COMPLETED', score: 100, submittedAt: null, completedAt: null,
+    }]);
+    prisma.user.findMany.mockResolvedValue([{ id: 'teacher-1', username: 'teacher', nickname: '王老师' }]);
+    prisma.submission.findMany.mockResolvedValue([{
+      id: 'submission-1', problemId: 'problem-1', status: 'ACCEPTED', score: 100,
+      timeUsed: 12, memoryUsed: 256, createdAt: new Date('2026-07-21T00:00:00.000Z'),
+    }]);
+
+    const result = await service.listMyAssignments('student-1');
+
+    expect(prisma.classMember.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'student-1', status: 'APPROVED' },
+    }));
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'assignment-1',
+      class: { id: 'class-1', name: '算法训练一班' },
+      teacher: { id: 'teacher-1', username: 'teacher', nickname: '王老师' },
+      progress: { total: 2, solved: 1, completed: true },
+      enrollmentStatus: 'COMPLETED',
+    });
+    expect(result.items[0].problems[0]).toMatchObject({
+      id: 'problem-1', status: 'ACCEPTED', attempts: 1, bestSubmissionId: 'submission-1',
+    });
+    expect(result.items[0].problems[1]).toMatchObject({
+      id: 'problem-2', status: 'NOT_SUBMITTED', attempts: 0,
+    });
   });
 
   it('requires the current password when changing password from settings', async () => {
