@@ -446,6 +446,7 @@ export class UserService {
             teacherId: true,
             status: true,
             course: { select: { name: true } },
+            _count: { select: { members: { where: { status: 'APPROVED' } } } },
           },
         },
       },

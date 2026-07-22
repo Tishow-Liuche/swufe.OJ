@@ -59,4 +59,12 @@ describe('protected route session restore', () => {
 
     expect(router.currentRoute.value.path).toBe('/problems');
   });
+
+  it('registers joining a class as a protected student page', () => {
+    const route = router.resolve('/classes/join');
+
+    expect(route.matched).toHaveLength(1);
+    expect(route.meta.requiresAuth).toBe(true);
+    expect(route.meta.requiresStudent).toBe(true);
+  });
 });

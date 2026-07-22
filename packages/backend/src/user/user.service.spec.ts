@@ -116,6 +116,34 @@ describe('UserService profile settings', () => {
     expect(result).toMatchObject({ mustChangePassword: true });
   });
 
+  it('includes the approved member count in each student class record', async () => {
+    prisma.classMember.findMany.mockResolvedValue([{
+      id: 'membership-1',
+      status: 'APPROVED',
+      reviewNote: null,
+      joinedAt: new Date('2026-07-22T08:00:00.000Z'),
+      reviewedAt: new Date('2026-07-22T09:00:00.000Z'),
+      class: {
+        id: 'class-1', name: '算法训练一班', teacherId: 'teacher-1', status: 'APPROVED', course: null,
+        _count: { members: 36 },
+      },
+    }]);
+    prisma.user.findMany.mockResolvedValue([{ id: 'teacher-1', username: 'teacher', nickname: '王老师' }]);
+
+    const result = await service.listMyClasses('student-1');
+
+    expect(prisma.classMember.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        class: expect.objectContaining({
+          select: expect.objectContaining({
+            _count: { select: { members: { where: { status: 'APPROVED' } } } },
+          }),
+        }),
+      }),
+    }));
+    expect(result[0].class._count.members).toBe(36);
+  });
+
   it('rejects duplicate email when another user already owns it', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u2' });
 

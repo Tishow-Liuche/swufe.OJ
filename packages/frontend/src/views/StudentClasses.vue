@@ -27,7 +27,7 @@ interface Membership {
   reviewNote?: string | null;
   appliedAt: string;
   reviewedAt?: string | null;
-  class: { id: string; name: string; status: string; course?: { name: string } | null };
+  class: { id: string; name: string; status: string; course?: { name: string } | null; _count?: { members: number } };
   teacher?: { username: string; nickname?: string | null } | null;
 }
 
@@ -60,11 +60,8 @@ interface Assignment {
 
 const memberships = ref<Membership[]>([]);
 const assignments = ref<Assignment[]>([]);
-const joinCode = ref('');
 const loading = ref(true);
 const assignmentLoading = ref(true);
-const submitting = ref(false);
-const message = ref('');
 const error = ref('');
 const sidebarCollapsed = useStorage('swufe-oj:student-class-sidebar-collapsed-v1', true);
 const selectedClassId = ref('');
@@ -160,26 +157,6 @@ function openAssignments() {
   if (canViewSelectedAssignments.value) activeView.value = 'assignments';
 }
 
-async function applyToClass() {
-  const code = joinCode.value.trim().toUpperCase();
-  message.value = '';
-  error.value = '';
-  if (!code) {
-    error.value = '请输入老师提供的班级码';
-    return;
-  }
-  submitting.value = true;
-  try {
-    const { data } = await api.post('/api/user/classes/join', { joinCode: code });
-    joinCode.value = '';
-    message.value = `已向“${data.className}”提交申请，请等待老师审核。`;
-    await loadAll();
-  } catch (e: any) {
-    error.value = e.response?.data?.message || '提交入班申请失败';
-  } finally {
-    submitting.value = false;
-  }
-}
 </script>
 
 <template>
@@ -220,6 +197,7 @@ async function applyToClass() {
         <button type="button" :class="{ active: activeView === 'info' }" :disabled="!selectedMembership" @click="activeView = 'info'">
           <Info :size="18" /><span>基本信息</span>
         </button>
+        <router-link to="/classes/join"><DoorOpen :size="18" /><span>申请加入班级</span></router-link>
       </nav>
     </aside>
 
@@ -237,6 +215,7 @@ async function applyToClass() {
           <div><strong>{{ unfinishedAssignments }}</strong><span>待完成作业</span></div>
         </div>
       </header>
+      <p v-if="error" class="load-error">{{ error }}</p>
 
       <section v-if="activeView === 'assignments'" class="assignment-section">
         <div class="section-heading">
@@ -289,19 +268,13 @@ async function applyToClass() {
         <div v-if="loading" class="empty-state">正在加载班级信息...</div>
         <article v-else-if="selectedMembership" class="class-info-card">
           <div class="class-info-heading"><span class="class-mark">{{ selectedMembership.class.name.slice(0, 1) }}</span><div><h3>{{ selectedMembership.class.name }}</h3><p>{{ selectedMembership.class.course?.name || '未关联课程' }}</p></div><span class="status" :class="selectedMembership.status.toLowerCase()"><component :is="statusMeta(selectedMembership.status).icon" :size="15" />{{ statusMeta(selectedMembership.status).label }}</span></div>
-          <dl class="class-info-grid"><div><dt>任课老师</dt><dd>{{ selectedMembership.teacher?.nickname || selectedMembership.teacher?.username || '未知' }}</dd></div><div><dt>申请时间</dt><dd>{{ formatDate(selectedMembership.appliedAt) }}</dd></div><div v-if="selectedMembership.reviewedAt"><dt>审核时间</dt><dd>{{ formatDate(selectedMembership.reviewedAt) }}</dd></div><div><dt>作业权限</dt><dd>{{ canViewSelectedAssignments ? '可查看和完成班级作业' : '审核通过后开放' }}</dd></div></dl>
+          <dl class="class-info-grid"><div><dt>任课老师</dt><dd>{{ selectedMembership.teacher?.nickname || selectedMembership.teacher?.username || '未知' }}</dd></div><div><dt>申请时间</dt><dd>{{ formatDate(selectedMembership.appliedAt) }}</dd></div><div><dt>班级人数</dt><dd>{{ selectedMembership.class._count?.members ?? 0 }} 人</dd></div></dl>
           <p v-if="selectedMembership.status === 'PENDING'" class="state-note pending-note">申请已送达，老师审核前不会进入正式名单，也暂时看不到班级作业。</p>
           <p v-if="selectedMembership.status === 'REJECTED'" class="state-note rejected-note">{{ selectedMembership.reviewNote || '老师未通过本次申请，可确认班级码后重新申请。' }}</p>
         </article>
         <div v-else class="empty-state">还没有班级记录，输入班级码发起第一次申请。</div>
       </section>
 
-      <section class="join-panel">
-        <div class="join-copy"><span class="join-icon"><DoorOpen :size="24" /></span><div><h2>申请加入班级</h2><p>班级码为 8 位字母和数字，不区分大小写。审核通过后即可查看班级作业。</p></div></div>
-        <form class="join-form" @submit.prevent="applyToClass"><input v-model="joinCode" maxlength="8" autocomplete="off" aria-label="班级码" placeholder="输入 8 位班级码" @input="joinCode = joinCode.toUpperCase().replace(/[^A-Z2-9]/g, '')"><button type="submit" :disabled="submitting || joinCode.length !== 8">提交申请</button></form>
-        <p v-if="message" class="feedback success">{{ message }}</p>
-        <p v-if="error" class="feedback error">{{ error }}</p>
-      </section>
     </main>
   </div>
 </template>
@@ -323,9 +296,9 @@ async function applyToClass() {
 .sidebar-collapse-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; margin-left: auto; border: 0; border-radius: 10px; color: #637488; background: transparent; cursor: pointer; }.sidebar-collapse-button:hover { color: #1f5eff; background: #e7efff; }.sidebar-collapse-button:focus-visible { outline: 2px solid #1f5eff; outline-offset: 2px; }.sidebar-label { margin: 3px 7px 8px; color: #8493a5; font-size: 10px; font-weight: 900; }
 .sidebar-class-list { display: grid; min-height: 0; gap: 5px; overflow-y: auto; padding: 0 2px 4px; }.sidebar-class-list > button { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; min-height: 54px; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid transparent; border-radius: 11px; color: #314a63; background: transparent; font: inherit; text-align: left; cursor: pointer; }.sidebar-class-list > button:hover { background: #edf5fc; }.sidebar-class-list > button.selected { border-color: #c9dcf0; color: #1f5eff; background: #e7efff; }.sidebar-class-list .class-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; color: #245f94; background: #dcecf9; font-size: 13px; font-weight: 900; }.sidebar-class-list > button.selected .class-mark { color: #fff; background: #1f5eff; }
 .sidebar-class-copy { display: grid; min-width: 0; gap: 3px; }.sidebar-class-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }.sidebar-class-copy small { overflow: hidden; color: #8492a2; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }.sidebar-class-status { max-width: 46px; overflow: hidden; color: #7c8997; font-size: 9px; font-style: normal; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }.sidebar-class-status.approved { color: #197149; }.sidebar-class-status.pending { color: #a06f08; }.sidebar-class-status.rejected { color: #a13d36; }.sidebar-state { margin: 0; padding: 12px 7px; color: #8493a5; font-size: 11px; text-align: center; }.sidebar-divider { height: 1px; flex: 0 0 1px; margin: 14px 4px; background: #dce5ee; }
-.sidebar-navigation { display: grid; gap: 4px; }.sidebar-navigation button { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; min-height: 44px; align-items: center; gap: 9px; padding: 7px 10px; border: 0; border-radius: 10px; color: #607187; background: transparent; font: inherit; font-size: 12px; font-weight: 800; text-align: left; cursor: pointer; }.sidebar-navigation button:hover:not(:disabled) { color: #1f5eff; background: #edf5fc; }.sidebar-navigation button.active { color: #1f5eff; background: #e7efff; }.sidebar-navigation button:disabled { color: #a6b1bd; cursor: not-allowed; }.sidebar-navigation button small { display: grid; min-width: 19px; height: 19px; place-items: center; border-radius: 6px; color: #63819f; background: #edf1f5; font-size: 10px; }.sidebar-navigation button.active small { color: #1f5eff; background: #fff; }
+.sidebar-navigation { display: grid; gap: 4px; }.sidebar-navigation button,.sidebar-navigation a { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; min-height: 44px; align-items: center; gap: 9px; padding: 7px 10px; border: 0; border-radius: 10px; color: #607187; background: transparent; font: inherit; font-size: 12px; font-weight: 800; text-align: left; text-decoration: none; cursor: pointer; }.sidebar-navigation button:hover:not(:disabled),.sidebar-navigation a:hover { color: #1f5eff; background: #edf5fc; }.sidebar-navigation button.active { color: #1f5eff; background: #e7efff; }.sidebar-navigation button:disabled { color: #a6b1bd; cursor: not-allowed; }.sidebar-navigation button small { display: grid; min-width: 19px; height: 19px; place-items: center; border-radius: 6px; color: #63819f; background: #edf1f5; font-size: 10px; }.sidebar-navigation button.active small { color: #1f5eff; background: #fff; }
 .class-main { min-width: 0; flex: 1; padding: 26px 30px 64px; }.class-main > .page-heading,.class-main > section { width: min(1440px, 100%); margin-right: auto; margin-left: auto; }
-.classes-page.sidebar-collapsed .class-sidebar { width: 72px; flex-basis: 72px; padding-right: 10px; padding-left: 10px; }.classes-page.sidebar-collapsed .sidebar-title { justify-content: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-title-icon,.classes-page.sidebar-collapsed .sidebar-title-copy,.classes-page.sidebar-collapsed .sidebar-label,.classes-page.sidebar-collapsed .sidebar-class-copy,.classes-page.sidebar-collapsed .sidebar-class-status,.classes-page.sidebar-collapsed .sidebar-state,.classes-page.sidebar-collapsed .sidebar-divider { display: none; }.classes-page.sidebar-collapsed .sidebar-collapse-button { margin-left: 0; }.classes-page.sidebar-collapsed .sidebar-class-list { gap: 6px; overflow-y: auto; }.classes-page.sidebar-collapsed .sidebar-class-list > button { grid-template-columns: 1fr; justify-items: center; min-height: 46px; padding: 6px 0; }.classes-page.sidebar-collapsed .sidebar-navigation button { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-navigation button span,.classes-page.sidebar-collapsed .sidebar-navigation button small { display: none; }
+.classes-page.sidebar-collapsed .class-sidebar { width: 72px; flex-basis: 72px; padding-right: 10px; padding-left: 10px; }.classes-page.sidebar-collapsed .sidebar-title { justify-content: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-title-icon,.classes-page.sidebar-collapsed .sidebar-title-copy,.classes-page.sidebar-collapsed .sidebar-label,.classes-page.sidebar-collapsed .sidebar-class-copy,.classes-page.sidebar-collapsed .sidebar-class-status,.classes-page.sidebar-collapsed .sidebar-state,.classes-page.sidebar-collapsed .sidebar-divider { display: none; }.classes-page.sidebar-collapsed .sidebar-collapse-button { margin-left: 0; }.classes-page.sidebar-collapsed .sidebar-class-list { gap: 6px; overflow-y: auto; }.classes-page.sidebar-collapsed .sidebar-class-list > button { grid-template-columns: 1fr; justify-items: center; min-height: 46px; padding: 6px 0; }.classes-page.sidebar-collapsed .sidebar-navigation button,.classes-page.sidebar-collapsed .sidebar-navigation a { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-navigation button span,.classes-page.sidebar-collapsed .sidebar-navigation button small,.classes-page.sidebar-collapsed .sidebar-navigation a span { display: none; }
 .page-heading {
   display: flex;
   min-height: 158px;
@@ -376,7 +349,7 @@ h1 { font-size: 34px; }
 .summary-strip div + div { border-left: 1px solid #e4ebf3; }
 .summary-strip strong { color: #1f5eff; font-size: 22px; }
 .summary-strip span { color: #728092; font-size: 12px; }
-.join-panel, .assignment-section, .class-info-section {
+.assignment-section, .class-info-section {
   margin-top: 18px;
   padding: 22px;
   border: 1px solid var(--class-line);
@@ -384,47 +357,8 @@ h1 { font-size: 34px; }
   background: #fff;
   box-shadow: 0 7px 20px rgba(23, 59, 102, .04);
 }
-.join-copy {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.join-icon {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--class-blue);
-  color: #fff;
-}
-.join-copy h2, .section-heading h2 { font-size: 17px; }
-.join-copy p { margin: 4px 0 0; color: #6f7d8e; font-size: 13px; }
-.join-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  margin-top: 18px;
-}
-.join-form input {
-  min-width: 0;
-  height: 46px;
-  padding: 0 14px;
-  border: 1px solid #bfcde0;
-  border-radius: 7px;
-  background: #fff;
-  color: #18365f;
-  font-family: Consolas, monospace;
-  font-size: 19px;
-  font-weight: 800;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-}
-.join-form input:focus {
-  border-color: #2f72ca;
-  outline: 3px solid rgba(47, 114, 202, .13);
-}
-.join-form button, .refresh-button {
+.section-heading h2 { font-size: 17px; }
+.refresh-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -433,21 +367,7 @@ h1 { font-size: 34px; }
   font-weight: 800;
   cursor: pointer;
 }
-.join-form button {
-  min-width: 116px;
-  border: 0;
-  background: var(--class-blue);
-  color: #fff;
-}
-.join-form button:disabled, .refresh-button:disabled { opacity: .5; cursor: default; }
-.feedback {
-  margin: 12px 0 0;
-  padding: 9px 11px;
-  border-radius: 6px;
-  font-size: 13px;
-}
-.feedback.success { background: #eaf7ef; color: #176b42; }
-.feedback.error { background: #fff0ef; color: #a33c35; }
+.refresh-button:disabled { opacity: .5; cursor: default; }
 .section-heading {
   display: flex;
   align-items: center;
@@ -644,6 +564,7 @@ h1 { font-size: 34px; }
   padding: 8px 10px;
   border-radius: 6px;
 }
+.load-error { width: min(1440px, 100%); margin: 14px auto 0; padding: 10px 12px; border: 1px solid #f1c9ca; border-radius: 10px; color: #a33c35; background: #fff0ef; font-size: 13px; }
 .section-actions { display: inline-flex; align-items: center; gap: 8px; }.detail-link { display: inline-flex; min-height: 38px; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid #d3dde9; border-radius: 8px; color: #285d8a; background: #fff; font-size: 12px; font-weight: 800; text-decoration: none; }.detail-link:hover { border-color: #9cbfe0; color: #1f5eff; background: #f5f9fe; }
 .assignment-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; color: #2469ad; font-size: 12px; font-weight: 800; text-decoration: none; }
 .assignment-link:hover { color: #1f5eff; text-decoration: underline; }
@@ -657,8 +578,8 @@ h1 { font-size: 34px; }
 @media (max-width: 760px) {
   .page-heading { align-items: stretch; flex-direction: column; }
   .summary-strip { width: 100%; min-width: 0; }
-  .join-form { grid-template-columns: 1fr; }
-  .join-form button { min-height: 44px; }
+  .section-heading { align-items: flex-start; flex-direction: column; }
+  .section-actions { width: 100%; }.section-actions > * { flex: 1; }
   .assignment-card header, .problem-row, .class-title {
     align-items: flex-start;
     flex-direction: column;
@@ -681,8 +602,8 @@ h1 { font-size: 34px; }
   .sidebar-state,.classes-page.sidebar-collapsed .sidebar-state { display: block; grid-column: 1 / -1; }
   .sidebar-divider,.classes-page.sidebar-collapsed .sidebar-divider { display: none; }
   .sidebar-navigation,.classes-page.sidebar-collapsed .sidebar-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; grid-column: 1 / -1; }
-  .sidebar-navigation button,.classes-page.sidebar-collapsed .sidebar-navigation button { grid-template-columns: 20px minmax(0, 1fr) auto; justify-items: initial; min-height: 42px; padding: 7px 10px; }
-  .sidebar-navigation button span,.classes-page.sidebar-collapsed .sidebar-navigation button span { display: inline; }
+  .sidebar-navigation button,.sidebar-navigation a,.classes-page.sidebar-collapsed .sidebar-navigation button,.classes-page.sidebar-collapsed .sidebar-navigation a { grid-template-columns: 20px minmax(0, 1fr) auto; justify-items: initial; min-height: 42px; padding: 7px 10px; }
+  .sidebar-navigation button span,.sidebar-navigation a span,.classes-page.sidebar-collapsed .sidebar-navigation button span,.classes-page.sidebar-collapsed .sidebar-navigation a span { display: inline; }
   .sidebar-navigation button small,.classes-page.sidebar-collapsed .sidebar-navigation button small { display: grid; }
 }
 </style>
