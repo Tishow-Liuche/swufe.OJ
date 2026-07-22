@@ -246,8 +246,13 @@
 
 @media (max-width: 760px) {
   #app .app-main .messages-workspace,
+  #app .app-main .messages-workspace.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
   #app .app-main .notification-workspace,
-  #app .app-main .messages-workspace.sidebar-collapsed,
   #app .app-main .notification-workspace.sidebar-collapsed {
     grid-template-columns: 1fr;
   }
