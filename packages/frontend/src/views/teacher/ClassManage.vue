@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useStorage } from '@vueuse/core';
 import {
-  BarChart3, BookOpenCheck, Check, ChevronDown, ChevronRight, Clipboard, ClipboardList,
+  BarChart3, BookOpenCheck, Check, ChevronRight, Clipboard, ClipboardList,
   Clock3, Download, FileSpreadsheet, KeyRound, LayoutDashboard, Plus,
   PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Trash2, UploadCloud, UserCheck, UserPlus, UsersRound, X,
 } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import api from '../../api/client';
+import FilterSelect from '../../components/FilterSelect.vue';
+import { pointDifficultyOptions, pointDifficultyShortLabel } from '../../utils/pointDifficulty';
+import { isCurrentPageSelected, setCurrentPageSelected, toggleProblem } from './assignment-selection';
 
 type WorkspacePanel = 'overview' | 'access' | 'members' | 'import' | 'assignment' | 'report';
 interface ClassInfo {
@@ -20,8 +23,16 @@ interface ClassMember {
   user: { id: string; username: string; nickname?: string };
 }
 interface ProblemItem {
-  id: string; title: string; source?: string; difficulty?: string;
-  sourceInfo?: { platform?: string; remoteProblemId?: string };
+  id: string; title: string; source?: string; difficulty?: string | null;
+  sourceInfo?: { platform?: string; remoteProblemId?: string } | null;
+  tags: Array<{ name: string }>;
+}
+interface ProblemResponse {
+  items: ProblemItem[]; total: number; page: number; pageSize: number;
+}
+interface ProblemMetadata {
+  tags: Array<{ name: string; count: number }>;
+  sources: Array<{ source: string; count: number }>;
 }
 interface AssignmentItem {
   id: string; title: string; description?: string; startTime: string; endTime: string;
@@ -79,14 +90,20 @@ const assignmentTitle = ref('');
 const assignmentDescription = ref('');
 const assignmentEndTime = ref('');
 const problemKeyword = ref('');
+const problemPage = ref(1);
+const problemPageSize = 10;
+const problemTotal = ref(0);
+const problemSource = ref('');
+const problemDifficulty = ref('');
+const problemTag = ref('');
+const problemMetadata = ref<ProblemMetadata | null>(null);
+const problemMetadataLoading = ref(false);
 const joinCodeExpiresAt = ref('');
 const importMode = ref<'excel' | 'text'>('excel');
 const excelRows = ref<ExcelStudentRow[]>([]);
 const excelDragging = ref(false);
 const excelImporting = ref(false);
 const excelInput = ref<HTMLInputElement | null>(null);
-const classMenuOpen = ref(false);
-const classSwitcher = ref<HTMLElement | null>(null);
 const sidebarCollapsed = useStorage('swufe-oj:class-sidebar-collapsed-v1', true);
 
 const selectedClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value));
@@ -95,12 +112,25 @@ const approvedMembers = computed(() => members.value.filter((member) => member.s
 const totalMembers = computed(() => classes.value.reduce((sum, item) => sum + (item.memberCount || 0), 0));
 const activeCodes = computed(() => classes.value.filter((item) => item.joinCode && item.joinCodeExpiresAt && new Date(item.joinCodeExpiresAt) > new Date()).length);
 const invalidExcelRows = computed(() => excelRows.value.filter((row) => !row.valid));
+const problemTotalPages = computed(() => Math.max(1, Math.ceil(problemTotal.value / problemPageSize)));
+const problemTagOptions = computed(() => [
+  { value: '', label: '全部标签' },
+  ...(problemMetadata.value?.tags || []).map((item) => ({ value: item.name, label: `${item.name} (${item.count})` })),
+]);
+const problemSourceOptions = computed(() => [
+  { value: '', label: '全部来源' },
+  ...(problemMetadata.value?.sources || []).map((item) => ({
+    value: item.source,
+    label: item.source === 'LOCAL' ? '原创' : item.source,
+  })),
+]);
+const selectedProblemIds = computed(() => new Set(selectedProblems.value.map((item) => item.id)));
+const currentPageFullySelected = computed(() => isCurrentPageSelected(selectedProblems.value, problemResults.value));
+let problemSearchRequest = 0;
 
 onMounted(() => {
   void loadClasses();
-  document.addEventListener('pointerdown', closeClassMenuOnOutside);
 });
-onBeforeUnmount(() => document.removeEventListener('pointerdown', closeClassMenuOnOutside));
 
 function showMessage(text: string) { msg.value = text; }
 function defaultJoinCodeExpiry() {
@@ -114,11 +144,7 @@ function parseIdentifiers(text: string) { return text.split(/[\n,，\s]+/).map((
 function classStatus(status: string) {
   return status === 'APPROVED' ? '已启用' : status === 'PENDING' ? '待管理员审核' : '未启用';
 }
-function closeClassMenuOnOutside(event: PointerEvent) {
-  if (!classSwitcher.value?.contains(event.target as Node)) classMenuOpen.value = false;
-}
-async function selectClassFromMenu(id: string) {
-  classMenuOpen.value = false;
+async function selectClass(id: string) {
   if (id === selectedClassId.value) return;
   selectedClassId.value = id;
   await loadClassData();
@@ -172,6 +198,10 @@ async function chooseClass(id: string, panel: WorkspacePanel = 'access') {
 function openPanel(panel: WorkspacePanel) {
   if (panel !== 'overview' && !selectedClassId.value) return showMessage('请先创建或选择一个班级');
   activePanel.value = panel;
+  if (panel === 'assignment') {
+    void loadProblemMetadata();
+    void searchProblems(1);
+  }
 }
 async function createClass() {
   const name = newClassName.value.trim();
@@ -307,16 +337,68 @@ async function reviewMember(member: ClassMember, status: 'APPROVED' | 'REJECTED'
   } catch (e: any) { showMessage('审核失败：' + (e.response?.data?.message || e.message)); }
   finally { reviewingUserId.value = ''; }
 }
-async function searchProblems() {
+function problemSourceLabel(problem: ProblemItem) {
+  const source = problem.sourceInfo?.platform || problem.source || 'LOCAL';
+  return source === 'LOCAL' ? '原创' : source;
+}
+function problemDifficultyLabel(problem: ProblemItem) {
+  return pointDifficultyShortLabel(problem.difficulty || '');
+}
+async function loadProblemMetadata() {
+  problemMetadataLoading.value = true;
+  try {
+    const { data } = await api.get<ProblemMetadata>('/api/problems/metadata');
+    problemMetadata.value = data;
+  } catch (e: any) {
+    showMessage('加载题库筛选项失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    problemMetadataLoading.value = false;
+  }
+}
+async function searchProblems(page = problemPage.value) {
+  const requestId = ++problemSearchRequest;
   problemSearching.value = true;
   try {
-    const { data } = await api.get('/api/problems', { params: { keyword: problemKeyword.value.trim(), pageSize: 20, status: 'PUBLISHED' } });
+    const params: Record<string, string | number> = {
+      page,
+      pageSize: problemPageSize,
+      status: 'PUBLISHED',
+    };
+    if (problemKeyword.value.trim()) params.keyword = problemKeyword.value.trim();
+    if (problemSource.value) params.source = problemSource.value;
+    if (problemDifficulty.value) params.difficulty = problemDifficulty.value;
+    if (problemTag.value) params.tag = problemTag.value;
+    const { data } = await api.get<ProblemResponse>('/api/problems', { params });
+    if (requestId !== problemSearchRequest) return;
     problemResults.value = data.items || [];
-  } catch (e: any) { showMessage('搜索题目失败：' + (e.response?.data?.message || e.message)); }
-  finally { problemSearching.value = false; }
+    problemTotal.value = data.total || 0;
+    problemPage.value = Math.min(data.page || page, Math.max(1, Math.ceil(problemTotal.value / problemPageSize)));
+  } catch (e: any) {
+    if (requestId === problemSearchRequest) showMessage('加载题目失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    if (requestId === problemSearchRequest) problemSearching.value = false;
+  }
 }
-function addProblem(problem: ProblemItem) { if (!selectedProblems.value.some((item) => item.id === problem.id)) selectedProblems.value.push(problem); }
+function resetProblemPage() {
+  problemPage.value = 1;
+  void searchProblems(1);
+}
+function selectProblemDifficulty(value: string) {
+  problemDifficulty.value = value;
+  resetProblemPage();
+}
+function toggleAssignmentProblem(problem: ProblemItem) {
+  selectedProblems.value = toggleProblem(selectedProblems.value, problem);
+}
+function toggleCurrentProblemPage() {
+  selectedProblems.value = setCurrentPageSelected(
+    selectedProblems.value,
+    problemResults.value,
+    !currentPageFullySelected.value,
+  );
+}
 function removeProblem(problemId: string) { selectedProblems.value = selectedProblems.value.filter((item) => item.id !== problemId); }
+function clearSelectedProblems() { selectedProblems.value = []; }
 async function createAssignment() {
   if (!assignmentTitle.value.trim()) return showMessage('请输入作业标题');
   if (!selectedProblems.value.length) return showMessage('请至少选择一道题目');
@@ -358,23 +440,17 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
         </button>
       </nav>
       <div class="sidebar-divider"></div>
-      <div ref="classSwitcher" class="class-switcher" @keydown.esc="classMenuOpen = false">
+      <section class="class-list-section" aria-label="当前班级">
         <span class="class-switcher-label">当前班级</span>
-        <button class="class-switcher-trigger" type="button" aria-haspopup="listbox" :aria-expanded="classMenuOpen" @click="classMenuOpen = !classMenuOpen" @keydown.down.prevent="classMenuOpen = true">
-          <i>{{ selectedClass?.name?.slice(0, 1) || '?' }}</i>
-          <span><strong>{{ selectedClass?.name || '选择班级' }}</strong><small>{{ selectedClass ? `${selectedClass.memberCount || 0} 名学生` : '从班级列表中选择' }}</small></span>
-          <ChevronDown :size="15" :class="{ rotated: classMenuOpen }" />
-        </button>
-        <div v-if="classMenuOpen" class="class-switcher-menu" role="listbox" aria-label="选择班级">
-          <p v-if="!classes.length">暂无可选班级</p>
-          <button v-for="item in classes" :key="item.id" type="button" role="option" :aria-selected="selectedClassId === item.id" :class="{ selected: selectedClassId === item.id }" @click="selectClassFromMenu(item.id)">
+        <div v-if="classes.length" class="class-list" role="list">
+          <button v-for="item in classes" :key="item.id" type="button" role="listitem" class="class-list-item" :class="{ selected: selectedClassId === item.id }" :title="sidebarCollapsed ? item.name : undefined" @click="selectClass(item.id)">
             <i>{{ item.name.slice(0, 1) }}</i>
-            <span><strong>{{ item.name }}</strong><small><b :class="item.status.toLowerCase()"></b>{{ classStatus(item.status) }} · {{ item.memberCount || 0 }} 人</small></span>
+            <span><strong>{{ item.name }}</strong><small>{{ item.memberCount || 0 }} 名学生</small></span>
             <Check v-if="selectedClassId === item.id" :size="15" />
           </button>
         </div>
-      </div>
-      <button class="sidebar-overview" @click="activePanel = 'overview'"><LayoutDashboard :size="16" />查看全部班级</button>
+        <p v-else class="class-list-empty">暂无可选班级</p>
+      </section>
     </aside>
 
     <main class="workspace-main">
@@ -460,7 +536,73 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 
         <section v-else-if="activePanel === 'assignment'" class="content-view">
           <div class="view-heading"><div><p>ASSIGNMENT BUILDER</p><h2>发布作业</h2><span>从题库选择题目并设置截止时间。</span></div><span class="selection-count">已选 {{ selectedProblems.length }} 题</span></div>
-          <section class="surface assignment-builder"><div class="form-grid"><label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label><label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label></div><label>作业说明<textarea v-model="assignmentDescription" rows="3" placeholder="可选"></textarea></label><div class="problem-search"><Search :size="17" /><input v-model="problemKeyword" placeholder="搜索题目标题或编号" @keyup.enter="searchProblems"><button :disabled="problemSearching" @click="searchProblems">搜索</button></div><div v-if="problemResults.length" class="problem-results"><button v-for="problem in problemResults" :key="problem.id" @click="addProblem(problem)"><span>{{ problem.title }}</span><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }} · 加入</small></button></div><div class="selected-problems"><p>已选题目</p><div v-if="selectedProblems.length"><span v-for="problem in selectedProblems" :key="problem.id">{{ problem.title }}<button title="移除" @click="removeProblem(problem.id)"><X :size="14" /></button></span></div><div v-else class="surface-empty compact">还没有选择题目</div></div><footer class="builder-footer"><span>发布后将同步到当前正式成员</span><button class="primary-command" :disabled="!selectedProblems.length" @click="createAssignment"><BookOpenCheck :size="16" />发布作业</button></footer></section>
+          <section class="surface assignment-builder">
+            <div class="form-grid">
+              <label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label>
+              <label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label>
+            </div>
+            <label>作业说明<textarea v-model="assignmentDescription" rows="3" placeholder="可选"></textarea></label>
+
+            <div class="assignment-workspace">
+              <section class="problem-bank" aria-label="题库选题">
+                <header class="problem-bank-heading">
+                  <div><strong>题库</strong><span>筛选后可批量加入当前作业</span></div>
+                  <span>{{ problemSearching ? '正在加载' : `共 ${problemTotal} 题` }}</span>
+                </header>
+                <div class="problem-filter-row">
+                  <label class="problem-keyword"><Search :size="16" /><input v-model="problemKeyword" placeholder="搜索题目标题、编号" @keyup.enter="resetProblemPage"></label>
+                  <FilterSelect v-model="problemSource" :options="problemSourceOptions" label="按来源筛选" @update:model-value="resetProblemPage" />
+                  <FilterSelect v-model="problemTag" :options="problemTagOptions" label="按标签筛选" @update:model-value="resetProblemPage" />
+                </div>
+                <div class="difficulty-filter" role="group" aria-label="按难度筛选">
+                  <button type="button" :class="{ active: !problemDifficulty }" :aria-pressed="!problemDifficulty" @click="selectProblemDifficulty('')">全部难度</button>
+                  <button v-for="item in pointDifficultyOptions" :key="item.value" type="button" :class="{ active: problemDifficulty === item.value }" :aria-pressed="problemDifficulty === item.value" @click="selectProblemDifficulty(item.value)">{{ item.level }}</button>
+                </div>
+
+                <div v-if="problemSearching" class="assignment-empty">正在加载题库...</div>
+                <template v-else>
+                  <div v-if="problemResults.length" class="assignment-table-wrap">
+                    <table class="assignment-table">
+                      <thead><tr><th><input type="checkbox" :checked="currentPageFullySelected" :aria-label="currentPageFullySelected ? '取消选择当前页' : '选择当前页'" @change="toggleCurrentProblemPage"></th><th>题目</th><th>来源</th><th>难度</th><th>标签</th></tr></thead>
+                      <tbody>
+                        <tr v-for="problem in problemResults" :key="problem.id" :class="{ selected: selectedProblemIds.has(problem.id) }">
+                          <td><input type="checkbox" :checked="selectedProblemIds.has(problem.id)" :aria-label="`选择题目 ${problem.title}`" @change="toggleAssignmentProblem(problem)"></td>
+                          <td><strong>{{ problem.title }}</strong><small v-if="problem.sourceInfo?.remoteProblemId">{{ problem.sourceInfo.remoteProblemId }}</small></td>
+                          <td>{{ problemSourceLabel(problem) }}</td>
+                          <td><span class="problem-difficulty">{{ problemDifficultyLabel(problem) }}</span></td>
+                          <td><span v-for="tag in problem.tags.slice(0, 2)" :key="tag.name" class="assignment-tag">{{ tag.name }}</span><span v-if="problem.tags.length > 2" class="assignment-tag">+{{ problem.tags.length - 2 }}</span></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div v-if="problemResults.length" class="assignment-mobile-list">
+                    <label v-for="problem in problemResults" :key="problem.id" class="assignment-mobile-item" :class="{ selected: selectedProblemIds.has(problem.id) }">
+                      <input type="checkbox" :checked="selectedProblemIds.has(problem.id)" :aria-label="`选择题目 ${problem.title}`" @change="toggleAssignmentProblem(problem)">
+                      <span><strong>{{ problem.title }}</strong><small>{{ problemSourceLabel(problem) }} · {{ problemDifficultyLabel(problem) }}</small><em><i v-for="tag in problem.tags.slice(0, 2)" :key="tag.name">{{ tag.name }}</i></em></span>
+                    </label>
+                  </div>
+                  <div v-if="!problemResults.length" class="assignment-empty">没有符合筛选条件的题目</div>
+                </template>
+                <footer class="assignment-pagination">
+                  <button type="button" :disabled="problemPage <= 1 || problemSearching" @click="searchProblems(problemPage - 1)">上一页</button>
+                  <span>第 {{ problemPage }} / {{ problemTotalPages }} 页</span>
+                  <button type="button" :disabled="problemPage >= problemTotalPages || problemSearching" @click="searchProblems(problemPage + 1)">下一页</button>
+                </footer>
+              </section>
+
+              <aside class="assignment-problem-set" aria-label="作业题单">
+                <header><div><strong>作业题单</strong><span>已选 {{ selectedProblems.length }} 题</span></div><button v-if="selectedProblems.length" type="button" class="clear-problem-set" @click="clearSelectedProblems">清空</button></header>
+                <div v-if="selectedProblems.length" class="problem-set-list">
+                  <article v-for="problem in selectedProblems" :key="problem.id">
+                    <div><strong>{{ problem.title }}</strong><span>{{ problemSourceLabel(problem) }} · {{ problemDifficultyLabel(problem) }}</span></div>
+                    <button type="button" title="移除题目" :aria-label="`移除题目 ${problem.title}`" @click="removeProblem(problem.id)"><X :size="15" /></button>
+                  </article>
+                </div>
+                <div v-else class="problem-set-empty">从左侧题库勾选题目</div>
+                <footer class="builder-footer"><span>发布后同步至当前正式成员</span><button class="primary-command" :disabled="!selectedProblems.length" @click="createAssignment"><BookOpenCheck :size="16" />发布作业</button></footer>
+              </aside>
+            </div>
+          </section>
         </section>
 
         <section v-else class="content-view">
@@ -518,4 +660,143 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 .hero-facts div + div { border-left-color: #e4ebf3; }
 .hero-facts strong { color: #1f5eff; }
 .hero-facts small { color: #728092; }
+
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.class-list-section {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 7px;
+  margin: 0 7px;
+  color: #718095;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.class-list {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 4px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.class-list-item {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 16px;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #314a63;
+  text-align: left;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.class-list-item:hover { background: #edf5fc; }
+.class-list-item.selected { border-color: #c9dcf0; color: #1f5eff; background: #e7efff; }
+.class-list-item > i { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: #245f94; background: #dcecf9; font-size: 12px; font-style: normal; font-weight: 900; }
+.class-list-item.selected > i { color: #fff; background: #1f5eff; }
+.class-list-item > span { display: grid; min-width: 0; gap: 2px; }
+.class-list-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.class-list-item small { color: #8492a2; font-size: 9px; font-weight: 650; }
+.class-list-item > svg { color: #1f5eff; }
+.class-list-empty { margin: 0; padding: 12px 6px; color: #8492a2; text-align: center; }
+
+.assignment-builder { padding: 22px; }
+.assignment-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 272px; align-items: start; gap: 18px; margin-top: 18px; }
+.problem-bank { min-width: 0; }
+.problem-bank-heading,.assignment-problem-set > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.problem-bank-heading > div,.assignment-problem-set > header > div { display: grid; gap: 3px; }
+.problem-bank-heading strong,.assignment-problem-set strong { color: #29475f; font-size: 13px; }
+.problem-bank-heading span,.assignment-problem-set header span { color: #7c8998; font-size: 10px; }
+.problem-bank-heading > span { flex: 0 0 auto; padding: 4px 7px; border-radius: 999px; color: #245f94; background: #edf5fc; font-size: 10px; font-weight: 800; }
+.problem-filter-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(130px, .62fr) minmax(130px, .62fr); gap: 8px; margin-top: 13px; }
+.problem-keyword { display: flex !important; height: 44px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #ced9e4; border-radius: 8px; color: #778697; background: #fff; }
+.problem-keyword:focus-within { border-color: #81a9d0; box-shadow: 0 0 0 3px rgba(36, 105, 173, .09); }
+.problem-keyword input { min-width: 0; height: auto; padding: 0; border: 0; outline: 0; }
+.difficulty-filter { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.difficulty-filter button { min-width: 34px; height: 30px; padding: 0 8px; border: 1px solid #d7e1eb; border-radius: 7px; color: #62768b; background: #fff; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.difficulty-filter button:hover,.difficulty-filter button.active { border-color: #a9c7e2; color: #1f5eff; background: #e7efff; }
+.assignment-table-wrap { margin-top: 12px; overflow: auto; border: 1px solid #dce5ed; border-radius: 10px; }
+.assignment-table { width: 100%; min-width: 660px; border-collapse: collapse; }
+.assignment-table th,.assignment-table td { padding: 10px 11px; border-bottom: 1px solid #eaf0f5; color: #53677b; text-align: left; font-size: 11px; }
+.assignment-table th { color: #718094; background: #f8fafc; font-size: 10px; }
+.assignment-table th:first-child,.assignment-table td:first-child { width: 32px; text-align: center; }
+.assignment-table tbody tr { transition: background .14s; }
+.assignment-table tbody tr:hover { background: #f7fbff; }
+.assignment-table tbody tr.selected { background: #eef5ff; }
+.assignment-table td strong { display: block; color: #304a64; font-size: 12px; overflow-wrap: anywhere; }
+.assignment-table td small { display: block; margin-top: 3px; color: #8794a2; font-size: 9px; }
+.problem-difficulty { display: inline-flex; padding: 3px 5px; border-radius: 5px; color: #365d85; background: #edf4fa; font-size: 9px; white-space: nowrap; }
+.assignment-tag { display: inline-block; max-width: 100px; margin: 2px 3px 2px 0; overflow: hidden; padding: 3px 5px; border-radius: 5px; color: #55708a; text-overflow: ellipsis; white-space: nowrap; background: #f0f3f6; font-size: 9px; }
+.assignment-empty { display: grid; min-height: 160px; place-items: center; margin-top: 12px; border: 1px dashed #cfdce8; border-radius: 10px; color: #8492a1; font-size: 12px; }
+.assignment-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; color: #738297; font-size: 10px; }
+.assignment-pagination button { min-height: 32px; padding: 0 10px; border: 1px solid #d4e0eb; border-radius: 7px; color: #315f88; background: #fff; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.assignment-pagination button:disabled { opacity: .48; cursor: default; }
+.assignment-problem-set { position: sticky; top: 76px; padding-left: 16px; border-left: 1px solid #dce5ed; }
+.clear-problem-set { border: 0; color: #a43d36; background: transparent; font: inherit; font-size: 10px; font-weight: 850; cursor: pointer; }
+.problem-set-list { display: grid; gap: 7px; max-height: 360px; margin-top: 13px; overflow-y: auto; }
+.problem-set-list article { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 7px; padding: 9px 8px 9px 10px; border-left: 2px solid #9cc8f0; background: #f7fbff; }
+.problem-set-list article > div { display: grid; min-width: 0; gap: 3px; }
+.problem-set-list article strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.problem-set-list article span { overflow: hidden; color: #8290a0; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.problem-set-list article button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 7px; color: #a3433b; background: #fff1ef; cursor: pointer; }
+.problem-set-empty { display: grid; min-height: 144px; place-items: center; margin-top: 13px; border: 1px dashed #d1dce6; color: #8a97a5; text-align: center; font-size: 11px; }
+.assignment-problem-set .builder-footer { align-items: stretch; flex-direction: column; margin-top: 14px; }
+.assignment-problem-set .builder-footer .primary-command { width: 100%; }
+.assignment-mobile-list { display: none; }
+
+.teacher-workspace.sidebar-collapsed .class-list-section { display: block; margin: 0; }
+.teacher-workspace.sidebar-collapsed .class-list-section .class-switcher-label { display: none; }
+.teacher-workspace.sidebar-collapsed .class-list { gap: 5px; overflow-y: auto; }
+.teacher-workspace.sidebar-collapsed .class-list-item { grid-template-columns: 1fr; justify-items: center; padding: 7px 0; }
+.teacher-workspace.sidebar-collapsed .class-list-item > span,.teacher-workspace.sidebar-collapsed .class-list-item > svg { display: none; }
+
+@media(max-width:980px) {
+  .workspace-sidebar { display: block; overflow: visible; }
+  .teacher-workspace.sidebar-collapsed .workspace-sidebar { width: auto; flex-basis: auto; padding: 12px; }
+  .class-list-section { display: block; margin: 10px 4px 0; }
+  .class-switcher-label { display: none; }
+  .class-list { display: flex; width: max-content; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 0 2px 2px; }
+  .class-list-item { width: 142px; min-height: 42px; flex: 0 0 142px; }
+  .teacher-workspace.sidebar-collapsed .class-list-section { display: block; }
+  .teacher-workspace.sidebar-collapsed .class-list { display: flex; overflow-x: auto; }
+  .teacher-workspace.sidebar-collapsed .class-list-item { grid-template-columns: 32px minmax(0, 1fr) 16px; justify-items: stretch; padding: 6px 8px; }
+  .teacher-workspace.sidebar-collapsed .class-list-item > span,.teacher-workspace.sidebar-collapsed .class-list-item > svg { display: grid; }
+  .assignment-workspace { grid-template-columns: 1fr; }
+  .assignment-problem-set { position: static; padding-top: 16px; padding-left: 0; border-top: 1px solid #dce5ed; border-left: 0; }
+  .assignment-problem-set .builder-footer { align-items: center; flex-direction: row; }
+  .assignment-problem-set .builder-footer .primary-command { width: auto; }
+}
+
+@media(max-width:620px) {
+  .assignment-builder { padding: 16px; }
+  .problem-filter-row { grid-template-columns: 1fr; }
+  .difficulty-filter button { min-width: 38px; min-height: 36px; }
+  .assignment-table-wrap { display: none; }
+  .assignment-mobile-list { display: grid; gap: 7px; margin-top: 12px; }
+  .assignment-mobile-item { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 9px; padding: 11px; border: 1px solid #dce5ed; border-radius: 10px; background: #fff; }
+  .assignment-mobile-item.selected { border-color: #a9c7e2; background: #eef5ff; }
+  .assignment-mobile-item > span { display: grid; min-width: 0; gap: 4px; }
+  .assignment-mobile-item strong { overflow-wrap: anywhere; color: #304a64; font-size: 12px; }
+  .assignment-mobile-item small { color: #7b8998; font-size: 10px; }
+  .assignment-mobile-item em { display: flex; flex-wrap: wrap; gap: 4px; font-style: normal; }
+  .assignment-mobile-item i { padding: 2px 5px; border-radius: 4px; color: #58718a; background: #f0f3f6; font-size: 9px; font-style: normal; }
+  .assignment-pagination { justify-content: space-between; }
+  .assignment-problem-set .builder-footer { align-items: stretch; flex-direction: column; }
+  .assignment-problem-set .builder-footer .primary-command { width: 100%; }
+}
 </style>
