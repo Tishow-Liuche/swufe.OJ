@@ -2,6 +2,7 @@
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { randomInt } from 'crypto';
+import { formatAssignmentDeadline } from './assignment-notification';
 
 type StudentImportRow = {
   studentId: string;
@@ -327,6 +328,19 @@ export class TeacherService {
         data: members.map((member) => ({ assignmentId: assignment.id, userId: member.userId })),
         skipDuplicates: true,
       });
+      try {
+        await this.prisma.notification.createMany({
+          data: members.map((member) => ({
+            userId: member.userId,
+            type: 'ASSIGNMENT',
+            title: `${cls.name} 发布了作业`,
+            content: `${assignment.title} · 截止 ${formatAssignmentDeadline(assignment.endTime)}`,
+            link: `/classes/${data.classId}/assignments?assignment=${assignment.id}`,
+          })),
+        });
+      } catch {
+        // The assignment has already been persisted; notification delivery must not report publication as failed.
+      }
     }
 
     return assignment;

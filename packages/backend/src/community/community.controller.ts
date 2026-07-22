@@ -20,11 +20,13 @@ export class CommunityController {
   constructor(private readonly community: CommunityService) {}
 
   @Get('announcements')
+  @UseGuards(AuthGuard('jwt'))
   listAnnouncements() {
     return this.community.listAnnouncements();
   }
 
   @Get('posts')
+  @UseGuards(AuthGuard('jwt'))
   listPosts(
     @Query('type') type?: string,
     @Query('problemId') problemId?: string,

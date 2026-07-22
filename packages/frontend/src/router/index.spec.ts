@@ -41,6 +41,14 @@ describe('protected route session restore', () => {
     expect(router.currentRoute.value.path).toBe('/profile');
   });
 
+  it('redirects an anonymous visitor away from the community', async () => {
+    await router.push('/community');
+
+    expect(auth.restoreSession).toHaveBeenCalledOnce();
+    expect(router.currentRoute.value.path).toBe('/login');
+    expect(router.currentRoute.value.query.redirect).toBe('/community');
+  });
+
   it('does not expose administrator routes to an authenticated teacher', async () => {
     auth.token = 'teacher-token';
     auth.user = {};

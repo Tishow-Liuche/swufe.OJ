@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { CheckCircle2, Clock3, DoorOpen, RefreshCw, ShieldCheck, XCircle } from '@lucide/vue';
+import { CheckCircle2, Clock3, DoorOpen, FileText, RefreshCw, ShieldCheck, XCircle } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import api from '../api/client';
@@ -120,6 +120,7 @@ async function applyToClass() {
             <div class="class-title"><h3>{{ membership.class.name }}</h3><span class="status" :class="membership.status.toLowerCase()"><component :is="statusMeta(membership.status).icon" :size="15" />{{ statusMeta(membership.status).label }}</span></div>
             <p>{{ membership.class.course?.name || '未关联课程' }} · 任课老师 {{ membership.teacher?.nickname || membership.teacher?.username || '未知' }}</p>
             <span>申请时间 {{ formatDate(membership.appliedAt) }}</span>
+            <router-link v-if="membership.status === 'APPROVED'" class="assignment-link" :to="`/classes/${membership.class.id}/assignments`"><FileText :size="14" />班级作业</router-link>
             <p v-if="membership.status === 'PENDING'" class="state-note pending-note">申请已送达，老师审核前不会进入班级名单。</p>
             <p v-if="membership.status === 'REJECTED'" class="state-note rejected-note">{{ membership.reviewNote || '老师未通过本次申请，可确认班级码后重新申请。' }}</p>
           </div>
@@ -172,6 +173,7 @@ h2, h3 { margin: 0; color: #202c3d; }
 .status.pending { background: #fff6dc; color: #8a6200; }
 .status.rejected { background: #fff0ef; color: #a13d36; }
 .state-note { margin-top: 9px !important; padding: 8px 10px; border-radius: 6px; }
+.assignment-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; color: #2469ad; font-size: 12px; font-weight: 800; text-decoration: none; }.assignment-link:hover { color: #1f5eff; text-decoration: underline; }
 .pending-note { background: #fff9e9; color: #775b12 !important; }
 .rejected-note { background: #fff2f1; color: #8f403b !important; }
 .empty-state { padding: 42px 16px; color: #8a95a3; text-align: center; }

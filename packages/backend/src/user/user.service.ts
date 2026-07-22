@@ -465,6 +465,88 @@ export class UserService {
     }));
   }
 
+  async getClassAssignments(userId: string, classId: string) {
+    const membership = await this.prisma.classMember.findUnique({
+      where: { classId_userId: { classId, userId } },
+      select: { status: true },
+    });
+    if (!membership || membership.status !== 'APPROVED') {
+      throw new ForbiddenException('仅正式班级成员可以查看作业');
+    }
+
+    const cls = await this.prisma.class.findUnique({
+      where: { id: classId },
+      select: { id: true, name: true },
+    });
+    if (!cls) throw new NotFoundException('班级不存在');
+
+    const assignments = await this.prisma.assignment.findMany({
+      where: { classId },
+      include: {
+        problems: {
+          where: { problem: { status: 'PUBLISHED' } },
+          orderBy: { order: 'asc' },
+          include: {
+            problem: { select: { id: true, title: true, source: true, difficulty: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const problemIds = [...new Set(assignments.flatMap((assignment) => assignment.problems.map((item) => item.problem.id)))];
+    const earliestStart = assignments.reduce<Date | null>(
+      (earliest, assignment) => !earliest || assignment.startTime < earliest ? assignment.startTime : earliest,
+      null,
+    );
+    const latestEnd = assignments.reduce<Date | null>(
+      (latest, assignment) => !latest || assignment.endTime > latest ? assignment.endTime : latest,
+      null,
+    );
+    const acceptedSubmissions = problemIds.length && earliestStart && latestEnd
+      ? await this.prisma.submission.findMany({
+          where: {
+            userId,
+            status: 'ACCEPTED',
+            problemId: { in: problemIds },
+            createdAt: { gte: earliestStart, lte: latestEnd },
+          },
+          select: { problemId: true, createdAt: true },
+        })
+      : [];
+
+    return {
+      class: cls,
+      assignments: assignments.map((assignment) => {
+        const solvedIds = new Set(
+          acceptedSubmissions
+            .filter((submission) => submission.createdAt >= assignment.startTime && submission.createdAt <= assignment.endTime)
+            .map((submission) => submission.problemId),
+        );
+        const problems = assignment.problems.map((item) => ({
+          ...item.problem,
+          order: item.order,
+          score: item.score,
+        }));
+        const solvedCount = problems.filter((problem) => solvedIds.has(problem.id)).length;
+        return {
+          id: assignment.id,
+          title: assignment.title,
+          description: assignment.description,
+          startTime: assignment.startTime,
+          endTime: assignment.endTime,
+          createdAt: assignment.createdAt,
+          problems,
+          progress: {
+            solvedCount,
+            totalProblems: problems.length,
+            completed: problems.length > 0 && solvedCount === problems.length,
+          },
+        };
+      }),
+    };
+  }
+
   async applyToClass(userId: string, joinCodeInput: string) {
     const joinCode = String(joinCodeInput || '').trim().toUpperCase();
     if (!/^[A-Z2-9]{8}$/.test(joinCode)) {

@@ -27,6 +27,9 @@ describe('TeacherService', () => {
       assignmentStudent: {
         createMany: jest.fn(),
       },
+      notification: {
+        createMany: jest.fn(),
+      },
       submission: {
         findMany: jest.fn(),
       },
@@ -71,7 +74,7 @@ describe('TeacherService', () => {
   });
 
   it('removes a student from a class owned by the teacher', async () => {
-    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1', name: '算法训练一班' });
     prisma.classMember.findUnique.mockResolvedValue({ classId: 'class-1', userId: 'student-1' });
 
     const result = await service.removeStudent('class-1', 'teacher-1', 'student-1');
@@ -134,9 +137,14 @@ describe('TeacherService', () => {
   });
 
   it('creates an assignment with selected problems and enrolls current class members', async () => {
-    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1', name: '算法训练一班' });
     prisma.problem.findMany.mockResolvedValue([{ id: 'problem-1' }, { id: 'problem-2' }]);
-    prisma.assignment.create.mockResolvedValue({ id: 'assignment-1', classId: 'class-1', title: '第一周作业' });
+    prisma.assignment.create.mockResolvedValue({
+      id: 'assignment-1',
+      classId: 'class-1',
+      title: '第一周作业',
+      endTime: new Date('2026-07-30T12:00:00.000Z'),
+    });
     prisma.classMember.findMany = jest.fn().mockResolvedValue([
       { userId: 'student-1' },
       { userId: 'student-2' },
@@ -162,10 +170,28 @@ describe('TeacherService', () => {
       ],
       skipDuplicates: true,
     });
-    expect(result).toEqual({ id: 'assignment-1', classId: 'class-1', title: '第一周作业' });
+    expect(result).toMatchObject({ id: 'assignment-1', classId: 'class-1', title: '第一周作业' });
     expect(prisma.classMember.findMany).toHaveBeenCalledWith({
       where: { classId: 'class-1', status: 'APPROVED' },
       select: { userId: true },
+    });
+    expect(prisma.notification.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          userId: 'student-1',
+          type: 'ASSIGNMENT',
+          title: '算法训练一班 发布了作业',
+          content: expect.stringContaining('第一周作业'),
+          link: '/classes/class-1/assignments?assignment=assignment-1',
+        }),
+        expect.objectContaining({
+          userId: 'student-2',
+          type: 'ASSIGNMENT',
+          title: '算法训练一班 发布了作业',
+          content: expect.stringContaining('第一周作业'),
+          link: '/classes/class-1/assignments?assignment=assignment-1',
+        }),
+      ],
     });
   });
 

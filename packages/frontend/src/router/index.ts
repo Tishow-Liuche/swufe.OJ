@@ -10,7 +10,7 @@ const router = createRouter({
     { path: '/problems/:id', component: () => import('../views/ProblemDetail.vue') },
     { path: '/leaderboard', component: () => import('../views/Leaderboard.vue') },
     { path: '/contests', component: () => import('../views/Contests.vue') },
-    { path: '/community', component: () => import('../views/CommunityHub.vue') },
+    { path: '/community', component: () => import('../views/CommunityHub.vue'), meta: { requiresAuth: true } },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue'), meta: { requiresAuth: true } },
     { path: '/learning-plans/:id', component: () => import('../views/LearningPlanDetail.vue'), meta: { requiresAuth: true } },
     { path: '/check-in', component: () => import('../views/CheckIn.vue'), meta: { requiresAuth: true } },
@@ -18,6 +18,7 @@ const router = createRouter({
     { path: '/messages', component: () => import('../views/Messages.vue'), meta: { requiresAuth: true } },
     { path: '/notifications', component: () => import('../views/Notifications.vue'), meta: { requiresAuth: true } },
     { path: '/classes', component: () => import('../views/StudentClasses.vue'), meta: { requiresAuth: true, requiresStudent: true } },
+    { path: '/classes/:classId/assignments', component: () => import('../views/StudentClassAssignments.vue'), meta: { requiresAuth: true, requiresStudent: true } },
     { path: '/change-password', component: () => import('../views/ChangePassword.vue'), meta: { requiresAuth: true } },
     { path: '/external/accounts', component: () => import('../views/external/AccountBind.vue'), meta: { requiresAuth: true } },
     // 教师
