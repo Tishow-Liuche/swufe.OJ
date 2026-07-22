@@ -66,13 +66,66 @@ const error = ref('');
 const sidebarCollapsed = useStorage('swufe-oj:student-class-sidebar-collapsed-v1', true);
 const selectedClassId = ref('');
 const activeView = ref<'assignments' | 'info'>('assignments');
+const assignmentFilter = ref<'all' | 'active' | 'not_started' | 'ended' | 'requirement_met' | 'fully_completed'>('all');
 
 const approvedCount = computed(() => memberships.value.filter((item) => item.status === 'APPROVED').length);
 const pendingCount = computed(() => memberships.value.filter((item) => item.status === 'PENDING').length);
-const activeAssignments = computed(() => assignments.value.filter((item) => item.lifecycle === 'ACTIVE').length);
-const unfinishedAssignments = computed(() => assignments.value.filter((item) => !item.progress.completed).length);
+const unfinishedAssignments = computed(() => {
+  const source = selectedClassId.value
+    ? assignments.value.filter((item) => item.classId === selectedClassId.value)
+    : assignments.value;
+  return source.filter((item) => !item.progress.completed).length;
+});
 const selectedMembership = computed(() => memberships.value.find((item) => item.class.id === selectedClassId.value) || null);
 const selectedAssignments = computed(() => assignments.value.filter((item) => item.classId === selectedClassId.value));
+
+function isRequirementMetOnly(item: Assignment) {
+  return Boolean(
+    item.progress.completed
+    && item.progress.requiredCount != null
+    && item.progress.requiredCount < item.progress.total,
+  );
+}
+function isFullyCompleted(item: Assignment) {
+  return Boolean(item.progress.completed && !isRequirementMetOnly(item));
+}
+
+const assignmentFilterCounts = computed(() => {
+  const list = selectedAssignments.value;
+  return {
+    all: list.length,
+    active: list.filter((item) => item.lifecycle === 'ACTIVE' && !item.progress.completed).length,
+    not_started: list.filter((item) => item.lifecycle === 'NOT_STARTED' && !item.progress.completed).length,
+    ended: list.filter((item) => item.lifecycle === 'ENDED' && !item.progress.completed).length,
+    requirement_met: list.filter((item) => isRequirementMetOnly(item)).length,
+    fully_completed: list.filter((item) => isFullyCompleted(item)).length,
+  };
+});
+const filteredSelectedAssignments = computed(() => {
+  const list = selectedAssignments.value;
+  switch (assignmentFilter.value) {
+    case 'active':
+      return list.filter((item) => item.lifecycle === 'ACTIVE' && !item.progress.completed);
+    case 'not_started':
+      return list.filter((item) => item.lifecycle === 'NOT_STARTED' && !item.progress.completed);
+    case 'ended':
+      return list.filter((item) => item.lifecycle === 'ENDED' && !item.progress.completed);
+    case 'requirement_met':
+      return list.filter((item) => isRequirementMetOnly(item));
+    case 'fully_completed':
+      return list.filter((item) => isFullyCompleted(item));
+    default:
+      return list;
+  }
+});
+const assignmentFilterOptions = [
+  { value: 'all' as const, label: '全部' },
+  { value: 'active' as const, label: '进行中' },
+  { value: 'not_started' as const, label: '未开始' },
+  { value: 'ended' as const, label: '已截止' },
+  { value: 'requirement_met' as const, label: '已达要求' },
+  { value: 'fully_completed' as const, label: '全部完成' },
+];
 const canViewSelectedAssignments = computed(() => canViewClassAssignments(selectedMembership.value?.status));
 
 onMounted(loadAll);
@@ -88,18 +141,16 @@ function statusMeta(status: Membership['status']) {
 }
 
 function assignmentStateText(item: Assignment) {
-  if (item.progress.completed) {
-    return item.progress.requiredCount != null && item.progress.requiredCount < item.progress.total
-      ? '已达要求'
-      : '已完成';
-  }
+  if (isRequirementMetOnly(item)) return '已达要求';
+  if (isFullyCompleted(item)) return '全部完成';
   if (item.lifecycle === 'NOT_STARTED') return '未开始';
   if (item.lifecycle === 'ENDED') return '已截止';
   return '进行中';
 }
 
 function assignmentStateClass(item: Assignment) {
-  if (item.progress.completed) return 'done';
+  if (isRequirementMetOnly(item)) return 'requirement-met';
+  if (isFullyCompleted(item)) return 'done';
   return item.lifecycle.toLowerCase().replace('_', '-');
 }
 
@@ -153,6 +204,7 @@ async function loadAssignments() {
 
 function selectClass(classId: string) {
   selectedClassId.value = classId;
+  assignmentFilter.value = 'all';
   const membership = memberships.value.find((item) => item.class.id === classId);
   if (!canViewClassAssignments(membership?.status)) activeView.value = 'info';
 }
@@ -215,7 +267,7 @@ function openAssignments() {
         <div class="summary-strip">
           <div><strong>{{ approvedCount }}</strong><span>已加入</span></div>
           <div><strong>{{ pendingCount }}</strong><span>待审核</span></div>
-          <div><strong>{{ activeAssignments }}</strong><span>进行中</span></div>
+          <div><strong>{{ selectedAssignments.length }}</strong><span>作业</span></div>
           <div><strong>{{ unfinishedAssignments }}</strong><span>待完成作业</span></div>
         </div>
       </header>
@@ -226,7 +278,6 @@ function openAssignments() {
           <div>
             <span class="eyebrow small"><BookOpenCheck :size="15" />CLASS ASSIGNMENTS</span>
             <h2>班级作业</h2>
-            <p>只展示当前选中班级的作业，完成后进度会自动刷新。</p>
           </div>
           <div class="section-actions">
             <router-link v-if="selectedMembership && canViewSelectedAssignments" class="detail-link" :to="`/classes/${selectedMembership.class.id}/assignments`"><FileText :size="15" />作业详情</router-link>
@@ -234,11 +285,26 @@ function openAssignments() {
           </div>
         </div>
 
+        <div v-if="canViewSelectedAssignments && selectedAssignments.length" class="assignment-filter-bar" role="tablist" aria-label="作业筛选">
+          <button
+            v-for="option in assignmentFilterOptions"
+            :key="option.value"
+            type="button"
+            role="tab"
+            :aria-selected="assignmentFilter === option.value"
+            :class="{ active: assignmentFilter === option.value }"
+            @click="assignmentFilter = option.value"
+          >
+            {{ option.label }}
+            <small>{{ assignmentFilterCounts[option.value] }}</small>
+          </button>
+        </div>
+
         <div v-if="assignmentLoading" class="empty-state">正在加载作业...</div>
         <div v-else-if="!selectedMembership" class="empty-state">先选择或申请加入一个班级。</div>
         <div v-else-if="!canViewSelectedAssignments" class="empty-state">该班级仍在审核中，审核通过后即可查看班级作业。</div>
-        <div v-else-if="selectedAssignments.length" class="assignment-list">
-          <article v-for="assignment in selectedAssignments" :key="assignment.id" class="assignment-card">
+        <div v-else-if="filteredSelectedAssignments.length" class="assignment-list">
+          <article v-for="assignment in filteredSelectedAssignments" :key="assignment.id" class="assignment-card">
             <header>
               <div>
                 <p>{{ assignment.class.name }} · {{ assignment.teacher?.nickname || assignment.teacher?.username || '任课老师' }}</p>
@@ -262,7 +328,7 @@ function openAssignments() {
             </div>
           </article>
         </div>
-        <div v-else class="empty-state">当前班级还没有可查看的作业。老师发布后会自动出现在这里。</div>
+        <div v-else class="empty-state">{{ selectedAssignments.length ? '没有符合筛选条件的作业。' : '当前班级还没有可查看的作业。老师发布后会自动出现在这里。' }}</div>
       </section>
 
       <section v-else class="class-info-section">
@@ -307,25 +373,30 @@ function openAssignments() {
 .classes-page.sidebar-collapsed .class-sidebar { width: 72px; flex-basis: 72px; padding-right: 10px; padding-left: 10px; }.classes-page.sidebar-collapsed .sidebar-title { justify-content: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-title-icon,.classes-page.sidebar-collapsed .sidebar-title-copy,.classes-page.sidebar-collapsed .sidebar-label,.classes-page.sidebar-collapsed .sidebar-class-copy,.classes-page.sidebar-collapsed .sidebar-class-status,.classes-page.sidebar-collapsed .sidebar-state,.classes-page.sidebar-collapsed .sidebar-divider { display: none; }.classes-page.sidebar-collapsed .sidebar-collapse-button { margin-left: 0; }.classes-page.sidebar-collapsed .sidebar-class-list { gap: 6px; overflow-y: auto; }.classes-page.sidebar-collapsed .sidebar-class-list > button { grid-template-columns: 1fr; justify-items: center; min-height: 46px; padding: 6px 0; }.classes-page.sidebar-collapsed .sidebar-navigation button,.classes-page.sidebar-collapsed .sidebar-navigation a { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-navigation button span,.classes-page.sidebar-collapsed .sidebar-navigation button small,.classes-page.sidebar-collapsed .sidebar-navigation a span { display: none; }
 .classes-page.sidebar-collapsed .sidebar-join-link { grid-template-columns: 1fr; justify-items: center; padding-right: 0; padding-left: 0; }.classes-page.sidebar-collapsed .sidebar-join-link span { display: none; }
 .page-heading {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: flex;
-  min-height: 158px;
+  min-height: 178px;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 26px 30px;
+  gap: 30px;
+  padding: 32px 40px;
   border: 1px solid #dce5ef;
-  border-radius: 8px;
+  border-radius: 26px;
   background: #fff;
   box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
+  color: #1f2a37;
 }
 .eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-bottom: 7px;
+  margin: 0 0 7px;
   color: #3977aa;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 900;
+  letter-spacing: .15em;
 }
 .eyebrow.small {
   margin-bottom: 4px;
@@ -333,8 +404,15 @@ function openAssignments() {
   letter-spacing: .05em;
 }
 h1, h2, h3 { margin: 0; color: #1f2a37; }
-h1 { font-size: 34px; }
-.page-heading p, .section-heading p {
+h1 { font-size: 42px; letter-spacing: -.05em; line-height: 1.1; }
+.page-heading p {
+  max-width: 610px;
+  margin: 11px 0 0;
+  color: #66778a;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.section-heading p {
   margin: 6px 0 0;
   color: #66778a;
   font-size: 14px;
@@ -344,13 +422,13 @@ h1 { font-size: 34px; }
   min-width: 330px;
   grid-template-columns: repeat(4, 1fr);
   border: 1px solid #dce5ef;
-  border-radius: 8px;
+  border-radius: 11px;
   background: #f8faff;
 }
 .summary-strip div {
   display: grid;
   gap: 2px;
-  padding: 12px 16px;
+  padding: 13px 16px;
   text-align: center;
 }
 .summary-strip div + div { border-left: 1px solid #e4ebf3; }
@@ -419,6 +497,7 @@ h1 { font-size: 34px; }
 .assignment-state.active { color: #1d6c45; background: #e8f7ee; }
 .assignment-state.ended { color: #8a6200; background: #fff4d7; }
 .assignment-state.not-started { color: #2b6595; background: #e7f1fb; }
+.assignment-state.requirement-met { color: #0f5f8a; background: #e3f3fc; }
 .assignment-state.done { color: #fff; background: #1d7a4d; }
 .assignment-desc {
   margin: 10px 0 0;
@@ -573,6 +652,50 @@ h1 { font-size: 34px; }
 }
 .load-error { width: min(1440px, 100%); margin: 14px auto 0; padding: 10px 12px; border: 1px solid #f1c9ca; border-radius: 10px; color: #a33c35; background: #fff0ef; font-size: 13px; }
 .section-actions { display: inline-flex; align-items: center; gap: 8px; }.detail-link { display: inline-flex; min-height: 38px; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid #d3dde9; border-radius: 8px; color: #285d8a; background: #fff; font-size: 12px; font-weight: 800; text-decoration: none; }.detail-link:hover { border-color: #9cbfe0; color: #1f5eff; background: #f5f9fe; }
+.assignment-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 4px;
+  border: 1px solid #dce5ef;
+  border-radius: 12px;
+  background: #f5f8fc;
+}
+.assignment-filter-bar button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  color: #5f7388;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.assignment-filter-bar button:hover { color: #1f5eff; background: #fff; }
+.assignment-filter-bar button.active {
+  color: #1f5eff;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(31, 66, 104, .08);
+}
+.assignment-filter-bar small {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: #6d8298;
+  background: #e8eef5;
+  font-size: 10px;
+  font-weight: 800;
+}
+.assignment-filter-bar button.active small { color: #1f5eff; background: #e7efff; }
 .assignment-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; color: #2469ad; font-size: 12px; font-weight: 800; text-decoration: none; }
 .assignment-link:hover { color: #1f5eff; text-decoration: underline; }
 .pending-note { background: #fff9e9; color: #775b12 !important; }

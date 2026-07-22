@@ -44,6 +44,9 @@ const showComposer = ref(false);
 const showAnnouncementComposer = ref(false);
 const notificationsOpen = ref(false);
 const moderationOpen = ref(false);
+const moderationLoading = ref(false);
+const moderationError = ref('');
+const moderationDialog = ref<HTMLElement | null>(null);
 const reports = ref<any[]>([]);
 const feedbacks = ref<any[]>([]);
 const loading = ref(false);
@@ -417,16 +420,32 @@ async function markNotificationRead(notification: any) {
   if (notification.link) void router.push(notification.link);
 }
 
-async function toggleModeration() {
+function closeModeration() {
+  moderationOpen.value = false;
+  moderationError.value = '';
+}
+
+async function openModeration() {
   if (!isModerator.value) return;
-  moderationOpen.value = !moderationOpen.value;
-  if (!moderationOpen.value) return;
-  const [reportResponse, feedbackResponse] = await Promise.all([
-    api.get('/api/community/moderation/reports', { params: { status: 'OPEN' } }),
-    api.get('/api/community/moderation/feedback', { params: { status: 'OPEN' } }),
-  ]);
-  reports.value = reportResponse.data;
-  feedbacks.value = feedbackResponse.data;
+  moderationOpen.value = true;
+  moderationLoading.value = true;
+  moderationError.value = '';
+  await nextTick();
+  moderationDialog.value?.focus();
+
+  try {
+    const [reportResponse, feedbackResponse] = await Promise.all([
+      api.get('/api/community/moderation/reports', { params: { status: 'OPEN' } }),
+      api.get('/api/community/moderation/feedback', { params: { status: 'OPEN' } }),
+    ]);
+    reports.value = reportResponse.data;
+    feedbacks.value = feedbackResponse.data;
+  } catch (error: any) {
+    const message = error.response?.data?.message;
+    moderationError.value = Array.isArray(message) ? message.join(' ') : (message || '审核内容暂时无法加载，请稍后重试。');
+  } finally {
+    moderationLoading.value = false;
+  }
 }
 
 async function handleReport(report: any, hideTarget: boolean) {
@@ -480,7 +499,7 @@ onBeforeUnmount(clearPendingImages);
       <div class="topbar-actions">
         <div class="search-field"><Search :size="17" /><input v-model="keyword" type="search" placeholder="搜索帖子、关键词" @keyup.enter="loadPosts"></div>
         <div class="notification-anchor"><button class="icon-command" type="button" title="站内通知" @click="notificationsOpen = !notificationsOpen"><Bell :size="19" /><span v-if="unreadCount" class="counter">{{ unreadCount > 9 ? '9+' : unreadCount }}</span></button><div v-if="notificationsOpen" class="notification-popover"><header>站内通知</header><button v-for="item in notifications" :key="item.id" type="button" :class="{ unread: !item.readAt }" @click="markNotificationRead(item)"><strong>{{ item.title }}</strong><span>{{ item.content || '点击查看' }}</span><time>{{ formatDate(item.createdAt) }}</time></button><p v-if="!notifications.length">暂无新通知</p></div></div>
-        <button v-if="isModerator" class="icon-command" type="button" title="审核中心" @click="toggleModeration"><ShieldCheck :size="19" /></button>
+        <button v-if="isModerator" class="icon-command" type="button" title="审核中心" @click="openModeration"><ShieldCheck :size="19" /></button>
       </div>
     </header>
 
@@ -529,12 +548,13 @@ onBeforeUnmount(clearPendingImages);
       <aside class="community-aside">
         <section><h3>社区准则</h3><ol><li>先说明问题与已尝试的方法。</li><li>题解、关键代码与最终答案请放到题解区。</li><li>尊重他人，避免人身攻击和灌水。</li></ol><button type="button" @click="switchPanel('help')">查看帮助 <ChevronRight :size="15" /></button></section>
         <section><h3>推荐入口</h3><button type="button" @click="router.push('/problems')">去题库练习 <ChevronRight :size="15" /></button><button type="button" @click="router.push('/problem-lists')">查看题单 <ChevronRight :size="15" /></button><button type="button" @click="switchPanel('announcements')">平台公告 <ChevronRight :size="15" /></button></section>
-        <section v-if="isModerator" class="moderation-shortcut"><h3>内容审核</h3><p>{{ reports.length + feedbacks.length }} 项待处理内容</p><button type="button" @click="toggleModeration">打开审核中心 <ChevronRight :size="15" /></button></section>
+        <section v-if="isModerator" class="moderation-shortcut"><h3>内容审核</h3><p>{{ reports.length + feedbacks.length }} 项待处理内容</p><button type="button" @click="openModeration">打开审核中心 <ChevronRight :size="15" /></button></section>
       </aside>
       </div>
 
-      <section v-if="moderationOpen" class="moderation-drawer"><header><div><p>教师 / 管理员</p><h2>审核中心</h2></div><button class="icon-command" type="button" title="关闭" @click="moderationOpen = false"><X :size="18" /></button></header><div class="moderation-columns"><div><h3>内容举报 <span>{{ reports.length }}</span></h3><article v-for="item in reports" :key="item.id"><b>{{ item.targetType === 'REPLY' ? '回复举报' : '帖子举报' }} · {{ item.reason }}</b><p class="report-target-content">{{ item.target?.title || item.target?.content || '原内容已不可见' }}</p><p>{{ item.detail || '未填写补充说明' }}</p><small>被举报者：{{ item.target?.author?.nickname || item.target?.author?.username || '未知' }} · 举报人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleReport(item, false)">保留</button><button type="button" class="danger" @click="handleReport(item, true)">隐藏内容</button></footer></article><p v-if="!reports.length" class="no-item">暂无待处理举报</p></div><div><h3>题目纠错 <span>{{ feedbacks.length }}</span></h3><article v-for="item in feedbacks" :key="item.id"><b>{{ item.problem?.title }} · {{ item.type }}</b><p>{{ item.content }}</p><small>反馈人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleFeedback(item)">开始核实</button></footer></article><p v-if="!feedbacks.length" class="no-item">暂无待处理反馈</p></div></div></section>
     </main>
+
+    <div v-if="moderationOpen" class="dialog-backdrop moderation-backdrop" @click.self="closeModeration"><section ref="moderationDialog" class="moderation-drawer" role="dialog" aria-modal="true" aria-labelledby="moderation-title" tabindex="-1"><header><div><p>教师 / 管理员</p><h2 id="moderation-title">审核中心</h2></div><button class="icon-command" type="button" title="关闭" @click="closeModeration"><X :size="18" /></button></header><div v-if="moderationLoading" class="moderation-state" role="status">正在加载待审核内容...</div><p v-else-if="moderationError" class="moderation-state error" role="alert">{{ moderationError }}</p><div v-else class="moderation-columns"><div><h3>内容举报 <span>{{ reports.length }}</span></h3><article v-for="item in reports" :key="item.id"><b>{{ item.targetType === 'REPLY' ? '回复举报' : '帖子举报' }} · {{ item.reason }}</b><p class="report-target-content">{{ item.target?.title || item.target?.content || '原内容已不可见' }}</p><p>{{ item.detail || '未填写补充说明' }}</p><small>被举报者：{{ item.target?.author?.nickname || item.target?.author?.username || '未知' }} · 举报人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleReport(item, false)">保留</button><button type="button" class="danger" @click="handleReport(item, true)">隐藏内容</button></footer></article><p v-if="!reports.length" class="no-item">暂无待处理举报</p></div><div><h3>题目纠错 <span>{{ feedbacks.length }}</span></h3><article v-for="item in feedbacks" :key="item.id"><b>{{ item.problem?.title }} · {{ item.type }}</b><p>{{ item.content }}</p><small>反馈人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleFeedback(item)">开始核实</button></footer></article><p v-if="!feedbacks.length" class="no-item">暂无待处理反馈</p></div></div></section></div>
 
     <div v-if="selectedPost" class="dialog-backdrop" @click.self="closePost">
       <article class="post-dialog thread-dialog" aria-label="讨论详情">
@@ -641,10 +661,24 @@ onBeforeUnmount(clearPendingImages);
 
 /* Community workspace skin shared with Home and Contests. */
 .community-hub { --community-navy:#173b66; --community-blue:#2469ad; --community-pale:#eaf3fc; --community-line:#dfe7ef; display:flex; width:100%; max-width:none; min-height:calc(100vh - 56px); margin:0; padding:0; background:#f3f5f7; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
-.community-main { min-width:0; flex:1; padding:26px 28px 60px; }.community-main>.community-topbar,.community-main>.toast,.community-main>.community-layout,.community-main>.moderation-drawer { width:min(1180px,100%); margin-right:auto; margin-left:auto; }
-.community-topbar { min-height:128px; margin-bottom:0; padding:24px 28px; border-radius:8px; background:var(--community-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
-.brand-block p { color:#8fc2ec; letter-spacing:0; }
-.brand-block h1 { color:#fff; font-size:31px; letter-spacing:0; }
+.community-main { min-width:0; flex:1; padding:26px 28px 60px; }.community-main>.community-topbar,.community-main>.toast,.community-main>.community-layout,.community-main>.moderation-drawer { width:min(1440px,100%); margin-right:auto; margin-left:auto; }
+.community-topbar {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  min-height: 178px;
+  margin-bottom: 0;
+  padding: 32px 40px;
+  border-radius: 26px;
+  background: var(--community-navy);
+  box-shadow: 0 10px 24px rgba(31, 66, 104, .08);
+}
+.brand-block p { color:#8fc2ec; font-size:11px; font-weight:900; letter-spacing:.15em; }
+.brand-block h1 { color:#fff; font-size:42px; letter-spacing:-.05em; line-height:1.1; }
 .brand-title-row>span { color:#d6e6f4; }
 .brand-title-row>span i { background:#f2c66d; }
 .search-field { width:min(360px,32vw); border-color:rgba(255,255,255,.28); background:#fff; }
@@ -677,16 +711,47 @@ onBeforeUnmount(clearPendingImages);
 .notification-popover,.post-dialog { border-radius:8px; }
 @media(max-width:1050px){.community-layout{grid-template-columns:minmax(0,1fr)}.community-aside{display:none}}
 @media(max-width:860px){.community-hub{display:block}.community-main{padding:18px 16px 46px}.community-nav,.community-hub.sidebar-collapsed .community-nav{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:auto;height:auto;padding:12px;border-right:0}.community-nav-title,.community-nav .nav-rule,.community-nav .signed-state{display:none}.community-nav>button,.community-hub.sidebar-collapsed .community-nav>button{grid-template-columns:22px minmax(0,1fr) auto;justify-items:initial;padding:7px 10px}.community-nav>button>span,.community-hub.sidebar-collapsed .community-nav>button>span{display:grid}.community-nav>button>b,.community-hub.sidebar-collapsed .community-nav>button>b{display:grid}.community-nav .create-discussion{grid-column:1/-1}.community-topbar{align-items:stretch;flex-direction:column;padding:20px}.topbar-actions{width:100%}.search-field{width:auto;flex:1}.community-layout{display:block;margin-top:18px}.community-feed{width:100%}}
-/* Community keeps its information architecture while sharing the light library skin. */
+/* Community keeps its information architecture while sharing the contest hero skin. */
 .community-topbar {
   border: 1px solid #dce5ef;
   background: #fff;
   box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
+  color: #1f2a37;
 }
-.brand-block p { color: #3977aa; }
-.brand-block h1 { color: #1f2a37; }
+.brand-block p {
+  margin: 0 0 7px;
+  color: #3977aa;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+.brand-block h1 {
+  margin: 0;
+  color: #1f2a37;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -.05em;
+}
+.brand-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .brand-title-row span { color: #66778a; }
 .brand-title-row i { background: #1f5eff; box-shadow: 0 0 0 4px #e7efff; }
+.topbar-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  min-width: 145px;
+}
+.topbar-actions .search-field,
+.topbar-actions .icon-command {
+  border-radius: 11px;
+}
 .community-nav > button.active {
   border-color: #aec7f4;
   background: #e7efff;
@@ -762,6 +827,7 @@ onBeforeUnmount(clearPendingImages);
 .profile-card-close:hover { background: rgba(255,255,255,.16); color: #fff; }
 .profile-card-copy { position: relative; margin-top: 15px; }.profile-card-copy h2 { display: flex; align-items: center; gap: 7px; margin: 0; color: #fff; font-size: 24px; }.profile-card-copy h2 span { display: inline-grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: #2a91d3; color: #fff; font-size: 10px; }.profile-card-copy p { margin: 5px 0 0; color: #bfc9d5; font-size: 13px; }.profile-card-copy small { display: block; margin-top: 8px; color: #8fa0b2; font-size: 12px; }
 .profile-message-button { display: inline-flex; width: 100%; min-height: 40px; align-items: center; justify-content: center; gap: 7px; margin-top: 24px; border: 0; border-radius: 5px; background: #1674d1; color: #fff; font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; }.profile-message-button:hover { background: #0e64ba; }.profile-self-note { margin: 24px 0 0; color: #aebdcb; font-size: 12px; }
+.moderation-backdrop { z-index: 65; padding: 20px 32px; }.moderation-drawer { width: min(1260px, calc(100vw - 64px)); max-height: calc(100vh - 40px); margin: 0; padding: 28px 30px; overflow: auto; outline: 0; border-color: #d8e1eb; background: #fff; box-shadow: 0 24px 60px rgba(16, 24, 40, .28); }.moderation-drawer > header { position: sticky; z-index: 1; top: 0; padding-bottom: 14px; background: #fff; }.moderation-state { display: grid; min-height: 220px; place-items: center; color: #66778a; font-size: 14px; text-align: center; }.moderation-state.error { padding: 18px; border: 1px solid #f1c9ca; border-radius: 6px; background: #fff5f5; color: #b42318; }@media (max-width:720px) { .moderation-backdrop { padding: 14px; }.moderation-drawer { width: 100%; max-height: calc(100vh - 28px); padding: 18px 16px; } }
 .thread-author > div { display: grid; gap: 3px; min-width: 0; }
 .thread-author b { overflow: hidden; color: #24364b; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .thread-author span { color: #8796a7; font-size: 11px; }

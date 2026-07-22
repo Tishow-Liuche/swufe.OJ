@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { useStorage } from '@vueuse/core';
+import { onClickOutside, useStorage } from '@vueuse/core';
 import {
-  BarChart3, BookOpenCheck, Check, ChevronRight, Clipboard, ClipboardList,
+  BarChart3, BookOpenCheck, Check, ChevronDown, ChevronRight, Clipboard, ClipboardList,
   Clock3, Download, FileSpreadsheet, KeyRound, LayoutDashboard, Plus,
   PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Trash2, UploadCloud, UserCheck, UserPlus, UsersRound, X,
 } from '@lucide/vue';
@@ -64,6 +64,24 @@ interface AssignmentReport {
     inProgressStudents?: number; notStartedStudents?: number;
   };
 }
+interface CombinedAssignmentCell {
+  assignmentId: string;
+  title: string;
+  present: boolean;
+  completed: boolean;
+  status: string;
+  statusLabel: string;
+  solvedCount: number;
+  totalProblems: number;
+  score: number;
+}
+interface CombinedStudentRow {
+  user: { id: string; username: string; nickname?: string };
+  completedAssignments: number;
+  totalAssignments: number;
+  totalScore: number;
+  byAssignment: CombinedAssignmentCell[];
+}
 interface ExcelStudentRow {
   studentId: string; name: string; phone: string; email: string;
   valid: boolean; reason?: string;
@@ -83,8 +101,10 @@ const selectedClassId = ref('');
 const activePanel = ref<WorkspacePanel>('overview');
 const members = ref<ClassMember[]>([]);
 const assignments = ref<AssignmentItem[]>([]);
-const selectedAssignmentId = ref('');
-const report = ref<AssignmentReport | null>(null);
+const selectedAssignmentIds = ref<string[]>([]);
+const reports = ref<AssignmentReport[]>([]);
+const assignmentPickerOpen = ref(false);
+const assignmentPickerRoot = ref<HTMLElement | null>(null);
 const problemResults = ref<ProblemItem[]>([]);
 const selectedProblems = ref<ProblemItem[]>([]);
 const loading = ref(true);
@@ -128,7 +148,6 @@ const selectedClass = computed(() => classes.value.find((item) => item.id === se
 const pendingMembers = computed(() => members.value.filter((member) => member.status === 'PENDING'));
 const approvedMembers = computed(() => members.value.filter((member) => member.status === 'APPROVED'));
 const totalMembers = computed(() => classes.value.reduce((sum, item) => sum + (item.memberCount || 0), 0));
-const activeCodes = computed(() => classes.value.filter((item) => item.joinCode && item.joinCodeExpiresAt && new Date(item.joinCodeExpiresAt) > new Date()).length);
 const invalidExcelRows = computed(() => excelRows.value.filter((row) => !row.valid));
 const problemTotalPages = computed(() => Math.max(1, Math.ceil(problemTotal.value / problemPageSize)));
 const problemTagOptions = computed(() => [
@@ -164,14 +183,119 @@ const reportCompletionOptions = [
   { value: 'completed', label: '仅已完成' },
   { value: 'incomplete', label: '仅未完成' },
 ];
-const reportAssignmentOptions = computed(() => [
-  { value: '', label: '选择作业' },
-  ...assignments.value.map((item) => ({
-    value: item.id,
-    label: `${item.title}（${item._count?.problems || item.problems?.length || 0} 题 / ${item._count?.students || 0} 人）`,
-  })),
-]);
+const reportAssignmentOptions = computed(() => assignments.value.map((item) => ({
+  value: item.id,
+  label: `${item.title}（${item._count?.problems || item.problems?.length || 0} 题 / ${item._count?.students || 0} 人）`,
+})));
+const selectedAssignmentIdSet = computed(() => new Set(selectedAssignmentIds.value));
+const hasSelectedAssignments = computed(() => selectedAssignmentIds.value.length > 0);
+const selectedAssignmentLabel = computed(() => {
+  if (!selectedAssignmentIds.value.length) return '选择作业（可多选）';
+  if (selectedAssignmentIds.value.length === 1) {
+    const only = assignments.value.find((item) => item.id === selectedAssignmentIds.value[0]);
+    return only?.title || '已选 1 项作业';
+  }
+  return `已选 ${selectedAssignmentIds.value.length} 项作业`;
+});
+const showCombinedReport = computed(() => reports.value.length > 1);
+const combinedReportRows = computed<CombinedStudentRow[]>(() => {
+  if (reports.value.length < 2) return [];
+  const keyword = reportKeyword.value.trim().toLowerCase();
+  const byUser = new Map<string, CombinedStudentRow>();
+
+  for (const report of reports.value) {
+    for (const student of report.students) {
+      const userId = student.user.id;
+      let row = byUser.get(userId);
+      if (!row) {
+        row = {
+          user: student.user,
+          completedAssignments: 0,
+          totalAssignments: reports.value.length,
+          totalScore: 0,
+          byAssignment: reports.value.map((item) => ({
+            assignmentId: item.assignment.id,
+            title: item.assignment.title,
+            present: false,
+            completed: false,
+            status: 'MISSING',
+            statusLabel: '无数据',
+            solvedCount: 0,
+            totalProblems: item.problems?.length || item.summary.problemCount || 0,
+            score: 0,
+          })),
+        };
+        byUser.set(userId, row);
+      }
+      const cell = row.byAssignment.find((item) => item.assignmentId === report.assignment.id);
+      if (!cell) continue;
+      cell.present = true;
+      cell.completed = Boolean(student.completed);
+      cell.status = student.status || (student.completed ? 'COMPLETED' : 'IN_PROGRESS');
+      cell.statusLabel = student.statusLabel || statusLabel(cell.status);
+      cell.solvedCount = student.solvedCount;
+      cell.totalProblems = student.totalProblems;
+      cell.score = student.score ?? 0;
+    }
+  }
+
+  const rows = [...byUser.values()].map((row) => {
+    row.completedAssignments = row.byAssignment.filter((item) => item.completed).length;
+    row.totalScore = row.byAssignment.reduce((sum, item) => sum + (item.present ? item.score : 0), 0);
+    return row;
+  });
+
+  const filtered = keyword
+    ? rows.filter((row) => {
+      const name = `${row.user.username} ${row.user.nickname || ''}`.toLowerCase();
+      return name.includes(keyword);
+    })
+    : rows;
+
+  return filtered.sort((a, b) => {
+    if (b.completedAssignments !== a.completedAssignments) return b.completedAssignments - a.completedAssignments;
+    if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+    return (a.user.nickname || a.user.username).localeCompare(b.user.nickname || b.user.username, 'zh-CN');
+  });
+});
+function formatPublishDate(value?: string | null) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+const combinedReportSummary = computed(() => {
+  if (!showCombinedReport.value) return null;
+  const rows = combinedReportRows.value;
+  const totalAssignments = reports.value.length;
+  const fullCompleted = rows.filter((row) => row.completedAssignments === totalAssignments).length;
+  const publishTimes = reports.value
+    .map((item) => item.assignment.startTime)
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  let publishDateLabel = '-';
+  if (publishTimes.length) {
+    const earliest = formatPublishDate(new Date(publishTimes[0]).toISOString());
+    const latest = formatPublishDate(new Date(publishTimes[publishTimes.length - 1]).toISOString());
+    publishDateLabel = earliest === latest ? earliest : `${earliest}–${latest}`;
+  }
+  return {
+    studentCount: rows.length,
+    assignmentCount: totalAssignments,
+    fullCompleted,
+    averageCompleted: rows.length
+      ? (rows.reduce((sum, row) => sum + row.completedAssignments, 0) / rows.length).toFixed(1)
+      : '0',
+    publishDateLabel,
+  };
+});
 let problemSearchRequest = 0;
+
+onClickOutside(assignmentPickerRoot, () => {
+  assignmentPickerOpen.value = false;
+});
 
 onMounted(() => {
   void loadClasses();
@@ -231,8 +355,9 @@ async function loadClasses() {
   } finally { loading.value = false; }
 }
 async function loadClassData() {
-  report.value = null;
-  selectedAssignmentId.value = '';
+  reports.value = [];
+  selectedAssignmentIds.value = [];
+  assignmentPickerOpen.value = false;
   joinCodeExpiresAt.value = selectedClass.value?.joinCodeExpiresAt
     ? (() => { const date = new Date(selectedClass.value!.joinCodeExpiresAt!); date.setMinutes(date.getMinutes() - date.getTimezoneOffset()); return date.toISOString().slice(0, 16); })()
     : defaultJoinCodeExpiry();
@@ -361,7 +486,7 @@ async function saveJoinCode() {
   joinCodeSaving.value = true;
   try {
     await api.put(`/api/teacher/classes/${selectedClassId.value}/join-code`, { expiresAt: new Date(joinCodeExpiresAt.value).toISOString() });
-    showMessage('班级码已生成，旧班级码已失效');
+    showMessage(selectedClass.value?.joinCode ? '新班级码已生效，旧班级码已失效' : '班级码已生成');
     await loadClasses();
   } catch (e: any) { showMessage('设置班级码失败：' + (e.response?.data?.message || e.message)); }
   finally { joinCodeSaving.value = false; }
@@ -476,64 +601,153 @@ async function createAssignment() {
 async function loadAssignments() {
   if (!selectedClassId.value) return;
   assignmentsLoading.value = true;
-  try { const { data } = await api.get(`/api/teacher/classes/${selectedClassId.value}/assignments`); assignments.value = data; }
+  try {
+    const { data } = await api.get(`/api/teacher/classes/${selectedClassId.value}/assignments`);
+    assignments.value = data;
+    const validIds = new Set((data as AssignmentItem[]).map((item) => item.id));
+    selectedAssignmentIds.value = selectedAssignmentIds.value.filter((id) => validIds.has(id));
+    if (!selectedAssignmentIds.value.length) reports.value = [];
+  }
   catch (e: any) { showMessage('加载作业失败：' + (e.response?.data?.message || e.message)); }
   finally { assignmentsLoading.value = false; }
 }
-async function loadReport(assignmentId = selectedAssignmentId.value) {
-  if (!assignmentId) {
-    report.value = null;
+function toggleReportAssignment(assignmentId: string) {
+  const selected = new Set(selectedAssignmentIds.value);
+  if (selected.has(assignmentId)) selected.delete(assignmentId);
+  else selected.add(assignmentId);
+  selectedAssignmentIds.value = assignments.value
+    .map((item) => item.id)
+    .filter((id) => selected.has(id));
+  if (!selectedAssignmentIds.value.length) reports.value = [];
+}
+function selectAllReportAssignments() {
+  selectedAssignmentIds.value = assignments.value.map((item) => item.id);
+}
+function clearReportAssignments() {
+  selectedAssignmentIds.value = [];
+  reports.value = [];
+}
+function matchesReportStudent(
+  student: AssignmentReport['students'][number],
+  options: { keyword?: string; status?: string; completion?: 'all' | 'completed' | 'incomplete' } = {},
+) {
+  const keyword = (options.keyword || '').trim().toLowerCase();
+  if (keyword) {
+    const name = `${student.user.username} ${student.user.nickname || ''}`.toLowerCase();
+    if (!name.includes(keyword)) return false;
+  }
+  if (options.status && (student.status || '') !== options.status) return false;
+  if (options.completion === 'completed' && !student.completed) return false;
+  if (options.completion === 'incomplete' && student.completed) return false;
+  return true;
+}
+function filteredReportStudents(report: AssignmentReport) {
+  return report.students.filter((student) => matchesReportStudent(student, {
+    keyword: reportKeyword.value,
+    status: reportStatus.value,
+    completion: reportCompletion.value,
+  }));
+}
+async function loadReport(assignmentIds = selectedAssignmentIds.value) {
+  if (!assignmentIds.length) {
+    reports.value = [];
     return;
   }
-  selectedAssignmentId.value = assignmentId;
   reportLoading.value = true;
   try {
-    const { data } = await api.get(`/api/teacher/assignments/${assignmentId}/report`, {
-      params: {
+    // Multi-select loads full student progress so the combined summary can count
+    // completed assignments accurately; detail tables filter client-side.
+    const multi = assignmentIds.length > 1;
+    const params = multi
+      ? {}
+      : {
         keyword: reportKeyword.value || undefined,
         status: reportStatus.value || undefined,
         completion: reportCompletion.value === 'all' ? undefined : reportCompletion.value,
-      },
-    });
-    report.value = data;
+      };
+    const results = await Promise.all(assignmentIds.map(async (assignmentId) => {
+      const { data } = await api.get<AssignmentReport>(`/api/teacher/assignments/${assignmentId}/report`, { params });
+      return data;
+    }));
+    reports.value = results;
   }
   catch (e: any) { showMessage('加载作业情况失败：' + (e.response?.data?.message || e.message)); }
   finally { reportLoading.value = false; }
 }
-function onReportAssignmentChange(value: string) {
-  selectedAssignmentId.value = value;
-  if (value) void loadReport(value);
-  else report.value = null;
+function downloadCombinedReportCsv() {
+  if (!showCombinedReport.value || !combinedReportRows.value.length) return false;
+  const assignmentTitles = reports.value.map((item) => item.assignment.title);
+  const header = ['用户名', '昵称', '完成作业数', '作业总数', '总得分', ...assignmentTitles.flatMap((title) => [
+    `${title}-状态`,
+    `${title}-完成题数`,
+    `${title}-得分`,
+  ])];
+  const lines = [header];
+  for (const row of combinedReportRows.value) {
+    lines.push([
+      row.user.username,
+      row.user.nickname || '',
+      String(row.completedAssignments),
+      String(row.totalAssignments),
+      String(row.totalScore),
+      ...row.byAssignment.flatMap((cell) => [
+        cell.present ? cell.statusLabel : '无数据',
+        cell.present ? `${cell.solvedCount}/${cell.totalProblems}` : '-',
+        cell.present ? String(cell.score) : '-',
+      ]),
+    ]);
+  }
+  const escape = (value: string) => `"${String(value).replace(/"/g, '""')}"`;
+  const csv = `﻿${lines.map((line) => line.map(escape).join(',')).join('\n')}`;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `combined-assignment-report-${selectedClass.value?.name || 'class'}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  return true;
 }
-async function exportReportCsv() {
-  if (!selectedAssignmentId.value) return showMessage('请先选择作业');
+function exportCombinedReportCsv() {
+  if (!downloadCombinedReportCsv()) return showMessage('请先选择多项作业并生成报告');
+  showMessage('跨作业汇总 CSV 已开始下载');
+}
+async function exportSingleAssignmentCsv(assignmentId: string, title?: string) {
+  if (!assignmentId) return showMessage('请先选择作业');
   try {
-    const { data } = await api.get(`/api/teacher/assignments/${selectedAssignmentId.value}/report.csv`, {
-      params: {
-        keyword: reportKeyword.value || undefined,
-        status: reportStatus.value || undefined,
-        completion: reportCompletion.value === 'all' ? undefined : reportCompletion.value,
-      },
+    const params = {
+      keyword: reportKeyword.value || undefined,
+      status: reportStatus.value || undefined,
+      completion: reportCompletion.value === 'all' ? undefined : reportCompletion.value,
+    };
+    const { data } = await api.get(`/api/teacher/assignments/${assignmentId}/report.csv`, {
+      params,
       responseType: 'blob',
     });
     const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `assignment-${selectedAssignmentId.value}-report.csv`;
+    const safeTitle = (title || assignmentId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40);
+    link.download = `assignment-${safeTitle}-report.csv`;
     link.click();
     URL.revokeObjectURL(url);
-    showMessage('CSV 已开始下载');
+    showMessage(`「${title || '作业'}」CSV 已开始下载`);
   } catch (e: any) {
     showMessage('导出失败：' + (e.response?.data?.message || e.message));
   }
 }
 async function settleCurrentAssignment() {
-  if (!selectedAssignmentId.value) return;
-  if (!window.confirm('确认结算该作业？结算后自动进度更新将锁定。')) return;
+  if (!selectedAssignmentIds.value.length) return;
+  const count = selectedAssignmentIds.value.length;
+  if (!window.confirm(count > 1
+    ? `确认结算已选的 ${count} 项作业？结算后自动进度更新将锁定。`
+    : '确认结算该作业？结算后自动进度更新将锁定。')) return;
   try {
-    await api.post(`/api/teacher/assignments/${selectedAssignmentId.value}/settle`);
-    showMessage('作业已结算');
+    await Promise.all(selectedAssignmentIds.value.map((assignmentId) => (
+      api.post(`/api/teacher/assignments/${assignmentId}/settle`)
+    )));
+    showMessage(count > 1 ? `已结算 ${count} 项作业` : '作业已结算');
     await loadReport();
   } catch (e: any) {
     showMessage('结算失败：' + (e.response?.data?.message || e.message));
@@ -569,7 +783,7 @@ async function settleCurrentAssignment() {
     <main class="workspace-main">
       <header class="workspace-hero">
         <div><p>TEACHING WORKSPACE</p><h1>{{ activePanel === 'overview' ? '我的班级' : selectedClass?.name || '班级管理' }}</h1><span>{{ activePanel === 'overview' ? '查看班级状态与教学概况，再进入具体功能。' : panels.find((item) => item.id === activePanel)?.label }}</span></div>
-        <div class="hero-facts"><div><strong>{{ classes.length }}</strong><small>班级</small></div><div><strong>{{ totalMembers }}</strong><small>学生</small></div><div><strong>{{ activeCodes }}</strong><small>有效班级码</small></div></div>
+        <div class="hero-facts"><div><strong>{{ classes.length }}</strong><small>班级</small></div><div><strong>{{ totalMembers }}</strong><small>学生</small></div></div>
       </header>
 
       <p v-if="msg" class="message-bar">{{ msg }}<button title="关闭" @click="msg = ''"><X :size="15" /></button></p>
@@ -593,7 +807,7 @@ async function settleCurrentAssignment() {
         <section v-else-if="activePanel === 'access'" class="content-view">
           <div class="view-heading"><div><p>ACCESS CONTROL</p><h2>班级码与入班审核</h2><span>学生凭码申请，审核通过后进入正式名单。</span></div><button class="secondary-command" :disabled="membersLoading" @click="loadMembers"><RefreshCw :size="16" />刷新</button></div>
           <div class="access-grid">
-            <section class="surface code-surface"><div class="surface-title"><span><KeyRound :size="18" /></span><div><h3>班级码</h3><p>{{ selectedClass?.status === 'APPROVED' ? '设置有效期后生成或轮换班级码。' : '班级通过管理员审核后才能启用。' }}</p></div></div><div class="code-value" :class="{ inactive: !selectedClass?.joinCode }">{{ selectedClass?.joinCode || '未启用' }}</div><p class="code-expiry"><Clock3 :size="15" />{{ selectedClass?.joinCode ? `有效至 ${formatDate(selectedClass.joinCodeExpiresAt)}` : '当前没有有效班级码' }}</p><label>有效期<input v-model="joinCodeExpiresAt" type="datetime-local" :disabled="selectedClass?.status !== 'APPROVED'"></label><div class="button-row"><button class="primary-command" :disabled="joinCodeSaving || selectedClass?.status !== 'APPROVED'" @click="saveJoinCode"><RefreshCw :size="16" />{{ selectedClass?.joinCode ? '重新生成' : '生成班级码' }}</button><button v-if="selectedClass?.joinCode" class="secondary-command" @click="copyJoinCode"><Clipboard :size="16" />复制</button><button v-if="selectedClass?.joinCode" class="danger-command" title="停用班级码" @click="disableJoinCode"><X :size="17" /></button></div></section>
+            <section class="surface code-surface"><div class="surface-title"><span><KeyRound :size="18" /></span><div><h3>班级码</h3><p>{{ selectedClass?.status === 'APPROVED' ? '每个班级仅保留一个班级码；生成新码后旧码立即失效。' : '班级通过管理员审核后才能启用。' }}</p></div></div><div class="code-value" :class="{ inactive: !selectedClass?.joinCode }">{{ selectedClass?.joinCode || '未启用' }}</div><p class="code-expiry"><Clock3 :size="15" />{{ selectedClass?.joinCode ? `有效至 ${formatDate(selectedClass.joinCodeExpiresAt)}` : '当前没有班级码' }}</p><label>有效期<input v-model="joinCodeExpiresAt" type="datetime-local" :disabled="selectedClass?.status !== 'APPROVED'"></label><div class="button-row"><button class="primary-command" :disabled="joinCodeSaving || selectedClass?.status !== 'APPROVED'" @click="saveJoinCode"><RefreshCw :size="16" />{{ selectedClass?.joinCode ? '生成新码并作废旧码' : '生成班级码' }}</button><button v-if="selectedClass?.joinCode" class="secondary-command" @click="copyJoinCode"><Clipboard :size="16" />复制</button><button v-if="selectedClass?.joinCode" class="danger-command" title="停用班级码" @click="disableJoinCode"><X :size="17" /></button></div></section>
             <section class="surface review-surface"><div class="surface-title"><span><UserCheck :size="18" /></span><div><h3>待审核申请</h3><p>{{ pendingMembers.length }} 人等待处理</p></div></div><div v-if="pendingMembers.length" class="application-list"><article v-for="member in pendingMembers" :key="member.user.id"><span class="student-avatar">{{ (member.user.nickname || member.user.username).slice(0, 1).toUpperCase() }}</span><div><strong>{{ member.user.nickname || member.user.username }}</strong><small>@{{ member.user.username }} · {{ formatDate(member.joinedAt) }}</small></div><footer><button class="approve" :disabled="reviewingUserId === member.user.id" @click="reviewMember(member, 'APPROVED')"><Check :size="16" />通过</button><button class="reject" :disabled="reviewingUserId === member.user.id" @click="reviewMember(member, 'REJECTED')"><X :size="16" />拒绝</button></footer></article></div><div v-else class="surface-empty">暂无待审核申请</div></section>
           </div>
         </section>
@@ -770,25 +984,51 @@ async function settleCurrentAssignment() {
             <div>
               <p>ASSIGNMENT REPORT</p>
               <h2>作业报告</h2>
-              <span>按学生与题目查看完成情况，支持筛选与导出。</span>
+              <span>可一次选择多项作业查看完成情况，支持筛选与导出。</span>
             </div>
             <div class="report-actions">
-              <button class="secondary-command" :disabled="!selectedAssignmentId" @click="exportReportCsv"><Download :size="16" />导出 CSV</button>
-              <button class="secondary-command" :disabled="!selectedAssignmentId" @click="settleCurrentAssignment">结算作业</button>
-              <button class="primary-command" :disabled="!selectedAssignmentId || reportLoading" @click="loadReport()"><BarChart3 :size="16" />{{ reportLoading ? '生成中' : '生成报告' }}</button>
+              <button class="secondary-command" :disabled="!showCombinedReport" @click="exportCombinedReportCsv"><Download :size="16" />导出汇总 CSV</button>
+              <button class="secondary-command" :disabled="!hasSelectedAssignments" @click="settleCurrentAssignment">结算作业</button>
+              <button class="primary-command" :disabled="!hasSelectedAssignments || reportLoading" @click="loadReport()"><BarChart3 :size="16" />{{ reportLoading ? '生成中' : '生成报告' }}</button>
             </div>
           </div>
 
           <section class="surface report-filter-surface">
             <div class="report-filter-row">
               <label class="rule-field report-assignment-field">
-                <span>作业</span>
-                <FilterSelect
-                  :model-value="selectedAssignmentId"
-                  :options="reportAssignmentOptions"
-                  label="选择作业"
-                  @update:model-value="onReportAssignmentChange"
-                />
+                <span>作业（可多选）</span>
+                <div ref="assignmentPickerRoot" class="assignment-picker" :class="{ open: assignmentPickerOpen }">
+                  <button
+                    type="button"
+                    class="assignment-picker-trigger"
+                    :aria-expanded="assignmentPickerOpen"
+                    aria-haspopup="listbox"
+                    @click="assignmentPickerOpen = !assignmentPickerOpen"
+                  >
+                    <span>{{ selectedAssignmentLabel }}</span>
+                    <ChevronDown :size="17" :class="{ rotated: assignmentPickerOpen }" />
+                  </button>
+                  <div v-if="assignmentPickerOpen" class="assignment-picker-menu" role="listbox" aria-multiselectable="true">
+                    <div class="assignment-picker-toolbar">
+                      <button type="button" :disabled="!assignments.length" @click="selectAllReportAssignments">全选</button>
+                      <button type="button" :disabled="!hasSelectedAssignments" @click="clearReportAssignments">清空</button>
+                    </div>
+                    <button
+                      v-for="item in reportAssignmentOptions"
+                      :key="item.value"
+                      type="button"
+                      class="assignment-picker-option"
+                      :class="{ selected: selectedAssignmentIdSet.has(item.value) }"
+                      role="option"
+                      :aria-selected="selectedAssignmentIdSet.has(item.value)"
+                      @click="toggleReportAssignment(item.value)"
+                    >
+                      <span>{{ item.label }}</span>
+                      <Check v-if="selectedAssignmentIdSet.has(item.value)" :size="16" />
+                    </button>
+                    <p v-if="!reportAssignmentOptions.length" class="assignment-picker-empty">当前班级还没有作业</p>
+                  </div>
+                </div>
               </label>
               <label class="problem-keyword report-search">
                 <Search :size="16" />
@@ -803,46 +1043,98 @@ async function settleCurrentAssignment() {
             </div>
           </section>
 
-          <section v-if="report" class="surface report-surface">
-            <div class="report-summary">
-              <div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div>
-              <div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div>
-              <div><strong>{{ report.summary.filteredCount ?? report.students.length }}</strong><span>当前筛选</span></div>
-              <div><strong>{{ report.assignment.title }}</strong><span>当前作业</span></div>
-            </div>
-            <div v-if="!report.students.length" class="surface-empty">没有符合筛选条件的学生</div>
-            <div v-else class="report-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>学生</th>
-                    <th>状态</th>
-                    <th>完成</th>
-                    <th>得分</th>
-                    <th v-for="problem in report.problems" :key="problem.id">{{ problem.title }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="student in report.students" :key="student.user.id">
-                    <td>
-                      <span class="member-name">
-                        <i>{{ (student.user.nickname || student.user.username).slice(0, 1).toUpperCase() }}</i>
-                        {{ student.user.nickname || student.user.username }}
-                      </span>
-                    </td>
-                    <td><span class="judge-state" :class="statusClass(student.status || '')">{{ student.statusLabel || statusLabel(student.status || '') }}</span></td>
-                    <td>{{ student.solvedCount }}/{{ student.totalProblems }}</td>
-                    <td>{{ student.score ?? 0 }}</td>
-                    <td v-for="problem in student.problems" :key="problem.problemId">
-                      <span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span>
-                      <small v-if="problem.attempts">{{ problem.attempts }} 次</small>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <div v-else class="empty-state">选择一个作业查看完成情况</div>
+          <div v-if="reports.length" class="report-list">
+            <section v-if="showCombinedReport && combinedReportSummary" class="surface report-surface combined-report-surface">
+              <div class="report-summary">
+                <div><strong>跨作业汇总</strong><span>{{ combinedReportSummary.publishDateLabel }}</span></div>
+                <div><strong>{{ combinedReportSummary.studentCount }}</strong><span>汇总学生</span></div>
+                <div><strong>{{ combinedReportSummary.assignmentCount }}</strong><span>所选作业</span></div>
+                <div><strong>{{ combinedReportSummary.fullCompleted }}</strong><span>全部完成</span></div>
+                <div><strong>{{ combinedReportSummary.averageCompleted }}</strong><span>人均完成作业数</span></div>
+              </div>
+              <div v-if="!combinedReportRows.length" class="surface-empty">没有符合筛选条件的学生</div>
+              <div v-else class="report-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>学生</th>
+                      <th>完成作业</th>
+                      <th>总得分</th>
+                      <th v-for="report in reports" :key="`h-${report.assignment.id}`">{{ report.assignment.title }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in combinedReportRows" :key="row.user.id">
+                      <td>
+                        <span class="member-name">
+                          <i>{{ (row.user.nickname || row.user.username).slice(0, 1).toUpperCase() }}</i>
+                          {{ row.user.nickname || row.user.username }}
+                        </span>
+                      </td>
+                      <td>
+                        <strong class="combined-count">{{ row.completedAssignments }}/{{ row.totalAssignments }}</strong>
+                      </td>
+                      <td>{{ row.totalScore }}</td>
+                      <td v-for="cell in row.byAssignment" :key="`${row.user.id}-${cell.assignmentId}`">
+                        <span class="judge-state" :class="statusClass(cell.completed ? 'COMPLETED' : cell.status)">{{ cell.statusLabel }}</span>
+                        <small v-if="cell.present">{{ cell.solvedCount }}/{{ cell.totalProblems }} · {{ cell.score }} 分</small>
+                        <small v-else>未计入本次筛选</small>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section v-for="report in reports" :key="report.assignment.id" class="surface report-surface">
+              <div class="report-summary report-summary-assignment">
+                <div class="report-title-cell"><strong>{{ report.assignment.title }}</strong><span>{{ formatPublishDate(report.assignment.startTime) }}</span></div>
+                <div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div>
+                <div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div>
+                <div class="report-export-cell">
+                  <button
+                    class="secondary-command report-export-button"
+                    type="button"
+                    @click="exportSingleAssignmentCsv(report.assignment.id, report.assignment.title)"
+                  >
+                    <Download :size="16" />导出 CSV
+                  </button>
+                </div>
+              </div>
+              <div v-if="!filteredReportStudents(report).length" class="surface-empty">没有符合筛选条件的学生</div>
+              <div v-else class="report-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>学生</th>
+                      <th>状态</th>
+                      <th>完成</th>
+                      <th>得分</th>
+                      <th v-for="problem in report.problems" :key="problem.id">{{ problem.title }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="student in filteredReportStudents(report)" :key="student.user.id">
+                      <td>
+                        <span class="member-name">
+                          <i>{{ (student.user.nickname || student.user.username).slice(0, 1).toUpperCase() }}</i>
+                          {{ student.user.nickname || student.user.username }}
+                        </span>
+                      </td>
+                      <td><span class="judge-state" :class="statusClass(student.status || '')">{{ student.statusLabel || statusLabel(student.status || '') }}</span></td>
+                      <td>{{ student.solvedCount }}/{{ student.totalProblems }}</td>
+                      <td>{{ student.score ?? 0 }}</td>
+                      <td v-for="problem in student.problems" :key="problem.problemId">
+                        <span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span>
+                        <small v-if="problem.attempts">{{ problem.attempts }} 次</small>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+          <div v-else class="empty-state">{{ hasSelectedAssignments ? '点击「生成报告」查看所选作业完成情况' : '选择一个或多个作业查看完成情况' }}</div>
         </section>
       </template>
     </main>
@@ -865,6 +1157,21 @@ async function settleCurrentAssignment() {
 .report-filter-row { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(180px,1fr) minmax(130px,.7fr) minmax(130px,.7fr); gap:10px; align-items:end; }
 .report-search { width:100%; height:44px; }
 .report-assignment-field { min-width:0; }
+.assignment-picker { position:relative; width:100%; }
+.assignment-picker-trigger { display:flex; width:100%; min-height:44px; align-items:center; justify-content:space-between; gap:10px; padding:0 12px; border:1px solid #ced9e4; border-radius:8px; color:#293d54; background:#fff; font:inherit; font-size:12px; font-weight:750; cursor:pointer; }
+.assignment-picker-trigger:hover,.assignment-picker.open .assignment-picker-trigger { border-color:#81a9d0; box-shadow:0 0 0 3px rgba(36,105,173,.09); }
+.assignment-picker-trigger>span { overflow:hidden; text-align:left; text-overflow:ellipsis; white-space:nowrap; }
+.assignment-picker-trigger>svg { flex:0 0 auto; color:#7a8a9b; transition:transform .16s; }
+.assignment-picker-trigger>svg.rotated { transform:rotate(180deg); }
+.assignment-picker-menu { position:absolute; z-index:30; top:calc(100% + 6px); left:0; display:grid; width:100%; max-height:280px; overflow:auto; padding:6px; border:1px solid #cfdae5; border-radius:10px; background:#fff; box-shadow:0 12px 30px rgba(23,59,102,.14),0 2px 7px rgba(23,59,102,.07); }
+.assignment-picker-toolbar { display:flex; gap:6px; padding:2px 2px 8px; }
+.assignment-picker-toolbar button { min-height:28px; padding:0 10px; border:1px solid #d7e1eb; border-radius:6px; color:#315c84; background:#f7fafd; font:inherit; font-size:11px; font-weight:800; cursor:pointer; }
+.assignment-picker-toolbar button:disabled { opacity:.45; cursor:default; }
+.assignment-picker-option { display:flex; width:100%; min-height:42px; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; border:0; border-radius:7px; color:#314a63; text-align:left; background:transparent; font:inherit; font-size:12px; cursor:pointer; }
+.assignment-picker-option:hover { background:#edf5fc; }
+.assignment-picker-option.selected { color:#1f5eff; background:#e7efff; }
+.assignment-picker-option>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.assignment-picker-empty { margin:0; padding:18px 8px; color:#8a97a6; text-align:center; font-size:12px; }
 .report-filter-row :deep(.filter-select),
 .rule-field :deep(.filter-select) { width:100%; }
 .report-filter-row :deep(.filter-select__trigger),
@@ -872,11 +1179,19 @@ async function settleCurrentAssignment() {
 .teacher-workspace :deep(.filter-select__menu) { border-radius:10px; box-shadow:0 12px 30px rgba(23,59,102,.14),0 2px 7px rgba(23,59,102,.07); }
 .teacher-workspace :deep(.filter-select__option) { min-height:40px; border-radius:7px; color:#314a63; }
 .teacher-workspace :deep(.filter-select__option.is-selected) { color:#1f5eff; background:#e7efff; }
+.report-list { display:grid; gap:14px; }
 .report-surface { padding:0; overflow:hidden; }
+.combined-report-surface { border-color:#b7d0e8; box-shadow:0 10px 24px rgba(23,59,102,.08); }
+.combined-count { color:#174f84; font-size:15px; }
 .report-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:#dce5ed; }
+.combined-report-surface > .report-summary { grid-template-columns:minmax(140px,1.2fr) repeat(4,minmax(0,1fr)); }
+.report-summary-assignment { grid-template-columns:minmax(180px,1.4fr) minmax(100px,.8fr) minmax(90px,.7fr) minmax(130px,.9fr); }
 .report-summary div { display:grid; gap:3px; padding:15px 17px; background:#f8fbfe; }
 .report-summary strong { color:#214f79; font-size:16px; }
 .report-summary span { color:#7e8b9a; font-size:10px; }
+.report-title-cell strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; }
+.report-export-cell { align-content:center; justify-items:end; }
+.report-export-button { min-height:34px; padding:0 12px; }
 .report-table { overflow:auto; }
 .report-table table { min-width:900px; }
 .judge-state { display:inline-block; padding:3px 6px; border-radius:5px; font-size:10px; font-weight:800; }

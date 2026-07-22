@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
 import { basicSetup } from 'codemirror';
 import { EditorView } from '@codemirror/view';
@@ -9,17 +9,18 @@ import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
 import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { BookOpen, MessageCircle } from '@lucide/vue';
-import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
+import {
+  BookOpen, Clock3, HardDrive, MessageCircle, Play, RefreshCw, Send, Star, Tag, Target, Wrench, X,
+} from '@lucide/vue';
 import { sanitizeStatementHtml } from '../security/sanitize-statement';
 import 'katex/dist/katex.min.css';
 import { renderMarkdownWithMath } from '../utils/markdown';
 import { pointDifficultyLabel } from '../utils/pointDifficulty';
-import { Star } from '@lucide/vue';
 import ProblemStateBadges from '../components/ProblemStateBadges.vue';
 import { useAuthStore } from '../stores/auth';
 
 const route = useRoute();
+const router = useRouter();
 const auth = useAuthStore();
 const problem = ref<any>(null);
 const problemState = ref<any>(null);
@@ -30,6 +31,11 @@ const submitting = ref(false);
 const errorMsg = ref('');
 const showAllCases = ref(false);
 const isExternal = ref(false);
+const feedbackOpen = ref(false);
+const feedbackSubmitting = ref(false);
+const feedbackMessage = ref('');
+const feedbackError = ref('');
+const feedback = ref({ type: 'STATEMENT', content: '' });
 let cmView: EditorView | null = null;
 let pollTimer: any = null;
 let visibilityCleanupId: any = null;
@@ -405,6 +411,37 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
   return (!normalizedInput || normalizedDescription.includes(normalizedInput))
     && (!normalizedOutput || normalizedDescription.includes(normalizedOutput));
 }
+
+function toggleFeedback() {
+  feedbackOpen.value = !feedbackOpen.value;
+  feedbackMessage.value = '';
+  feedbackError.value = '';
+}
+
+async function submitFeedback() {
+  if (!problem.value) return;
+  if (!auth.isLoggedIn()) {
+    void router.push({ path: '/login', query: { redirect: `/problems/${problem.value.id}` } });
+    return;
+  }
+  feedbackSubmitting.value = true;
+  feedbackMessage.value = '';
+  feedbackError.value = '';
+  try {
+    await api.post('/api/community/feedback', {
+      problemId: problem.value.id,
+      type: feedback.value.type,
+      content: feedback.value.content,
+    });
+    feedback.value = { type: 'STATEMENT', content: '' };
+    feedbackOpen.value = false;
+    feedbackMessage.value = '题目反馈已提交，处理进度会通过站内通知返回。';
+  } catch (requestError: any) {
+    feedbackError.value = requestError.response?.data?.message || '反馈提交失败。';
+  } finally {
+    feedbackSubmitting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -412,106 +449,166 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
     <div v-if="errorMsg && !problem" class="error-msg">{{ errorMsg }}</div>
 
     <template v-if="problem">
-      <div class="problem-header">
+      <header class="problem-header">
         <div class="problem-title-row">
-          <h2>{{ problem.title }}</h2>
-          <button v-if="problemState" class="favorite-command" :class="{ active: problemState.favorite }" @click="toggleFavorite">
-            <Star :size="16" :fill="problemState.favorite ? 'currentColor' : 'none'" />{{ problemState.favorite ? '已收藏' : '收藏' }}
-          </button>
+          <div class="problem-title-block">
+            <p class="problem-kicker">{{ problem.source === 'LOCAL' ? '原创题目' : (problem.source || '题目') }}</p>
+            <h1>{{ problem.title }}</h1>
+            <ProblemStateBadges v-if="problemState" class="detail-state" :state="problemState" />
+          </div>
+          <div class="problem-header-actions">
+            <RouterLink
+              class="header-link"
+              :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }"
+            >
+              <MessageCircle :size="16" />讨论
+            </RouterLink>
+            <RouterLink
+              class="header-link"
+              :to="{ path: '/community', query: { panel: 'solutions', problemId: problem.id, problemTitle: problem.title } }"
+            >
+              <BookOpen :size="16" />题解
+            </RouterLink>
+            <button class="header-link" type="button" :class="{ active: feedbackOpen }" @click="toggleFeedback">
+              <Wrench :size="16" />题目纠错
+            </button>
+            <button
+              v-if="problemState"
+              class="favorite-command"
+              :class="{ active: problemState.favorite }"
+              type="button"
+              @click="toggleFavorite"
+            >
+              <Star :size="16" :fill="problemState.favorite ? 'currentColor' : 'none'" />
+              {{ problemState.favorite ? '已收藏' : '收藏' }}
+            </button>
+          </div>
         </div>
-        <ProblemStateBadges v-if="problemState" class="detail-state" :state="problemState" />
+
         <div class="problem-meta">
-          <span class="meta-item">⏱ {{ problem.timeLimit }}ms</span>
-          <span class="meta-item">📦 {{ problem.memoryLimit }}MB</span>
-          <span class="meta-item">🎯 {{ pointDifficultyLabel(problem.difficulty) }}</span>
-          <span class="meta-item">📝 {{ (problem.tags || []).map((t: any) => t.name).join(', ') || '-' }}</span>
+          <span class="meta-item"><Clock3 :size="14" />{{ problem.timeLimit }} ms</span>
+          <span class="meta-item"><HardDrive :size="14" />{{ problem.memoryLimit }} MB</span>
+          <span class="meta-item"><Target :size="14" />{{ pointDifficultyLabel(problem.difficulty) }}</span>
+          <span v-if="(problem.tags || []).length" class="meta-item tags">
+            <Tag :size="14" />
+            <i v-for="tag in problem.tags" :key="tag.name || tag">{{ tag.name || tag }}</i>
+          </span>
         </div>
-        <div class="problem-community-links">
-          <RouterLink :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }">
-            <MessageCircle :size="16" />题目讨论
-          </RouterLink>
-          <RouterLink :to="{ path: '/community', query: { panel: 'solutions', problemId: problem.id, problemTitle: problem.title } }">
-            <BookOpen :size="16" />查看题解
-          </RouterLink>
-        </div>
-      </div>
+
+        <p v-if="feedbackMessage" class="feedback-banner success">{{ feedbackMessage }}</p>
+        <p v-if="feedbackError" class="feedback-banner error">{{ feedbackError }}</p>
+
+        <form v-if="feedbackOpen" class="feedback-form" @submit.prevent="submitFeedback">
+          <div class="feedback-form-header">
+            <strong>题目纠错</strong>
+            <button class="feedback-close" type="button" title="关闭" @click="feedbackOpen = false"><X :size="16" /></button>
+          </div>
+          <select v-model="feedback.type" aria-label="问题类型">
+            <option value="STATEMENT">题面问题</option>
+            <option value="SAMPLE">样例问题</option>
+            <option value="TESTDATA">测试数据问题</option>
+            <option value="OTHER">其他问题</option>
+          </select>
+          <textarea
+            v-model="feedback.content"
+            maxlength="3000"
+            placeholder="说明发现的问题，并尽量给出可复现的信息"
+            required
+          />
+          <footer>
+            <button class="plain-button" type="button" @click="feedbackOpen = false">取消</button>
+            <button class="submit-button" type="submit" :disabled="feedbackSubmitting">
+              <Send :size="15" />{{ feedbackSubmitting ? '提交中...' : '提交反馈' }}
+            </button>
+          </footer>
+        </form>
+      </header>
 
       <div class="content-split">
         <div class="problem-content">
-          <div class="card">
+          <section class="card statement-card">
             <div class="desc" v-html="renderMd(currentVersion.description)"></div>
             <div v-if="sampleExamples.length" class="sample-section">
               <h3>样例</h3>
               <div v-for="sample in sampleExamples" :key="sample.index" class="sample-pair">
                 <div v-if="sample.input.trim()" class="sample-block">
-                  <div class="sample-title">输入样例 #{{ sample.index }}</div>
+                  <div class="sample-title">输入 #{{ sample.index }}</div>
                   <pre>{{ sample.input }}</pre>
                 </div>
                 <div v-if="sample.output.trim()" class="sample-block">
-                  <div class="sample-title">输出样例 #{{ sample.index }}</div>
+                  <div class="sample-title">输出 #{{ sample.index }}</div>
                   <pre>{{ sample.output }}</pre>
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         </div>
 
-        <div class="editor-panel">
-          <div class="card editor-card">
-            <div class="editor-toolbar">
-              <select v-model="language" class="lang-select">
-                <option value="cpp">C++</option>
-                <option value="c">C</option>
-                <option value="python">Python</option>
-                <option value="java">Java</option>
-              </select>
-              <button class="btn-submit" @click="submitCode" :disabled="submitting">
-                {{ submitting ? '提交中...' : '🚀 提交评测' }}
-              </button>
-            </div>
-            <div ref="editorHost" class="cm-editor-host"></div>
-          </div>
-
-          <div v-if="result" class="card result-card">
-            <div class="result-header">
-              <span class="result-badge" :style="{ background: statusColors[result.status] || '#999' }">
-                {{ statusLabels[result.status] || result.status }}
-              </span>
-              <span v-if="result.score !== undefined" class="result-score">得分: {{ result.score }}</span>
-              <span v-if="hasMetric(result.timeUsed) || hasMetric(result.memoryUsed)" class="result-info">
-                <template v-if="hasMetric(result.timeUsed)">{{ result.timeUsed }}ms</template>
-                <template v-if="hasMetric(result.timeUsed) && hasMetric(result.memoryUsed)"> · </template>
-                <template v-if="hasMetric(result.memoryUsed)">{{ formatMemoryKb(result.memoryUsed) }}</template>
-              </span>
-            </div>
-            <div v-if="result.compileMessage" class="compile-box"><pre>{{ result.compileMessage }}</pre></div>
-            <div v-if="result.cases?.length" class="cases">
-              <div class="cases-toggle" @click="showAllCases = !showAllCases">
-                📊 测试点详情 ({{ result.cases.filter((c: any) => c.status === 'ACCEPTED').length }}/{{ result.cases.length }} 通过)
-                <span class="toggle-arrow">{{ showAllCases ? '▼' : '▶' }}</span>
+        <aside class="editor-panel">
+          <div class="editor-sticky">
+            <section class="card editor-card">
+              <div class="editor-toolbar">
+                <div class="editor-toolbar-left">
+                  <span class="editor-label">代码编辑</span>
+                  <select v-model="language" class="lang-select" aria-label="选择语言">
+                    <option value="cpp">C++</option>
+                    <option value="c">C</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                  </select>
+                </div>
+                <button class="btn-submit" type="button" :disabled="submitting" @click="submitCode">
+                  <RefreshCw v-if="submitting" class="spin" :size="16" />
+                  <Play v-else :size="16" />
+                  {{ submitting ? '提交中...' : '提交评测' }}
+                </button>
               </div>
-              <div v-if="showAllCases" class="cases-grid">
-                <div v-for="c in result.cases" :key="c.caseIndex" class="case-dot"
-                  :class="c.status === 'ACCEPTED' ? 'ac' : 'wa'"
-                  :title="'#' + c.caseIndex + ': ' + c.status + ' (' + c.timeUsed + 'ms)'">
-                  {{ c.caseIndex }}
+              <div ref="editorHost" class="cm-editor-host"></div>
+            </section>
+
+            <section v-if="result" class="card result-card">
+              <div class="result-header">
+                <span class="result-badge" :style="{ background: statusColors[result.status] || '#95a5a6' }">
+                  {{ statusLabels[result.status] || result.status }}
+                </span>
+                <span v-if="result.score !== undefined" class="result-score">{{ result.score }} 分</span>
+                <span v-if="hasMetric(result.timeUsed) || hasMetric(result.memoryUsed)" class="result-info">
+                  <template v-if="hasMetric(result.timeUsed)">{{ result.timeUsed }} ms</template>
+                  <template v-if="hasMetric(result.timeUsed) && hasMetric(result.memoryUsed)"> · </template>
+                  <template v-if="hasMetric(result.memoryUsed)">{{ formatMemoryKb(result.memoryUsed) }}</template>
+                </span>
+              </div>
+              <div v-if="result.compileMessage" class="compile-box"><pre>{{ result.compileMessage }}</pre></div>
+              <div v-if="result.cases?.length" class="cases">
+                <button class="cases-toggle" type="button" @click="showAllCases = !showAllCases">
+                  测试点 {{ result.cases.filter((c: any) => c.status === 'ACCEPTED').length }}/{{ result.cases.length }} 通过
+                  <span class="toggle-arrow">{{ showAllCases ? '收起' : '展开' }}</span>
+                </button>
+                <div v-if="showAllCases" class="cases-grid">
+                  <div
+                    v-for="c in result.cases"
+                    :key="c.caseIndex"
+                    class="case-dot"
+                    :class="c.status === 'ACCEPTED' ? 'ac' : 'wa'"
+                    :title="'#' + c.caseIndex + ': ' + c.status + ' (' + c.timeUsed + 'ms)'"
+                  >
+                    {{ c.caseIndex }}
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </section>
 
-          <div v-if="pollExhausted" class="card exhausted-card" style="border-left:4px solid #f39c12; background:#fff8e1;">
-            <p style="margin:0; color:#e65100; font-size:14px;">
-              Polling stopped — the backend has not returned a result within the time limit.
-              <a href="javascript:void(0)" style="text-decoration:underline; color:#3498db;"
-                 @click="refreshPage">Refresh the page</a> to check the latest status.
-            </p>
+            <section v-if="pollExhausted" class="card exhausted-card">
+              <p>
+                轮询已停止：后端在时限内未返回结果。
+                <button type="button" class="link-button" @click="refreshPage">刷新页面</button>
+                查看最新状态。
+              </p>
+            </section>
+            <section v-if="errorMsg" class="card error-card">{{ errorMsg }}</section>
           </div>
-          <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
-        </div>
+        </aside>
       </div>
-
-      <ProblemDiscussionPanel :problem-id="problem.id" :problem-title="problem.title" />
     </template>
 
     <!-- 第三方 OJ 远程提交引导弹窗 -->
@@ -573,96 +670,407 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 </template>
 
 <style scoped>
-.problem-page { max-width: 100%; margin: 0; padding: 20px 24px; }
-.problem-header { margin-bottom: 20px; }
-.problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
-.problem-community-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.problem-community-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid #cbdde0; border-radius: 4px; background: #f7fbfa; color: #087a70; font-size: 13px; font-weight: 700; text-decoration: none; }
-.problem-community-links a:hover { border-color: #87bdb7; background: #eaf6f3; }
-.problem-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.problem-title-row h2 { min-width: 0; }
-.favorite-command { display: inline-flex; min-height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid #d4dce5; border-radius: 6px; color: #667587; background: #fff; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
-.favorite-command:hover, .favorite-command.active { border-color: #e2c45c; color: #846100; background: #fff8d8; }
-.detail-state { margin-bottom: 10px; }
-.problem-meta { display: flex; gap: 16px; flex-wrap: wrap; }
-.meta-item { font-size: 13px; color: #666; background: #f0f0f0; padding: 3px 10px; border-radius: 4px; }
-.content-split { display: grid; grid-template-columns: 1fr 480px; gap: 20px; align-items: start; }
-.card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
-.desc { line-height: 1.8; color: #333; font-size: 15px; overflow-x: auto; }
-.desc :deep(h2) { font-size: 20px; margin: 0 0 12px; }
-.desc :deep(h3) { font-size: 17px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 6px; margin: 20px 0 10px; }
-.desc :deep(h4) { font-size: 15px; margin: 16px 0 6px; }
+.problem-page {
+  --ink: #1f3145;
+  --muted: #718396;
+  --line: #dfe7ef;
+  --blue: #2469ad;
+  --navy: #173b66;
+  --surface: #fff;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 18px 20px 40px;
+  color: var(--ink);
+}
+.problem-header {
+  margin-bottom: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbfe 0%, #fff 100%);
+  box-shadow: 0 8px 22px rgba(23, 59, 102, .05);
+}
+.problem-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.problem-title-block { min-width: 0; flex: 1; }
+.problem-kicker {
+  margin: 0 0 6px;
+  color: #2f6fa8;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .04em;
+}
+.problem-header h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(22px, 2.2vw, 28px);
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+.problem-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.header-link,
+.favorite-command {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid #d4dce5;
+  border-radius: 8px;
+  color: #526579;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+}
+.header-link:hover,
+.header-link.active { border-color: #9fc0de; color: var(--blue); background: #edf5fc; }
+.favorite-command:hover,
+.favorite-command.active {
+  border-color: #e2c45c;
+  color: #846100;
+  background: #fff8d8;
+}
+.detail-state { margin-top: 10px; }
+.feedback-banner {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.feedback-banner.success { color: #087447; background: #eaf8f1; }
+.feedback-banner.error { color: #b42318; background: #fff1f2; }
+.feedback-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #d7e5f0;
+  border-radius: 10px;
+  background: #f5f9fd;
+}
+.feedback-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.feedback-form-header strong { color: #214f79; font-size: 13px; }
+.feedback-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: #718396;
+  background: transparent;
+  cursor: pointer;
+}
+.feedback-close:hover { color: #2469ad; background: #e7efff; }
+.feedback-form select,
+.feedback-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd7e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #253447;
+  font: inherit;
+}
+.feedback-form select { min-height: 36px; padding: 0 9px; }
+.feedback-form textarea { min-height: 94px; padding: 9px; resize: vertical; }
+.feedback-form footer { display: flex; justify-content: flex-end; gap: 8px; }
+.plain-button,
+.submit-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.plain-button { padding: 0 11px; color: #607287; background: transparent; }
+.submit-button {
+  padding: 0 12px;
+  border-radius: 7px;
+  color: #fff;
+  background: #2469ad;
+  font-weight: 800;
+}
+.submit-button:hover { background: #1d5a96; }
+.submit-button:disabled { opacity: .55; cursor: default; }
+.problem-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e3ebf2;
+  border-radius: 999px;
+  color: #516579;
+  background: #f7fafd;
+  font-size: 12px;
+  font-weight: 650;
+}
+.meta-item.tags { gap: 5px; }
+.meta-item.tags i {
+  display: inline-flex;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: #1f5eff;
+  background: #e7efff;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 750;
+}
+.content-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(420px, .95fr);
+  gap: 16px;
+  align-items: start;
+}
+.card {
+  margin-bottom: 14px;
+  padding: 18px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 20px rgba(23, 59, 102, .04);
+}
+.statement-card { padding: 20px 22px; }
+.desc { overflow-x: auto; color: #2c3e50; font-size: 15px; line-height: 1.8; }
+.desc :deep(h2) { margin: 0 0 12px; color: #1f3145; font-size: 19px; }
+.desc :deep(h3) {
+  margin: 20px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #edf1f5;
+  color: #29475f;
+  font-size: 16px;
+}
+.desc :deep(h4) { margin: 16px 0 6px; font-size: 15px; }
 .desc :deep(p) { margin: 8px 0; }
-.desc :deep(code) { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
-.desc :deep(pre) { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; margin: 12px 0; }
-.desc :deep(pre code) { background: none; padding: 0; color: inherit; }
-.desc :deep(ul), .desc :deep(ol) { padding-left: 24px; margin: 8px 0; }
+.desc :deep(code) {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #eef3f8;
+  color: #1f4f7a;
+  font-size: 13px;
+}
+.desc :deep(pre) {
+  margin: 12px 0;
+  padding: 14px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #1e2430;
+  color: #d7deea;
+  font-size: 13px;
+}
+.desc :deep(pre code) { padding: 0; background: none; color: inherit; }
+.desc :deep(ul), .desc :deep(ol) { margin: 8px 0; padding-left: 24px; }
 .desc :deep(li) { margin: 2px 0; }
-.desc :deep(table) { border-collapse: collapse; margin: 12px 0; width: auto; }
-.desc :deep(th), .desc :deep(td) { border: 1px solid #ddd; padding: 6px 12px; text-align: left; }
-.desc :deep(th) { background: #f8f9fa; font-weight: 600; }
-.desc :deep(blockquote) { border-left: 3px solid #4fc3f7; padding: 8px 16px; margin: 12px 0; background: #f5f5f5; border-radius: 0 4px 4px 0; color: #555; }
-.desc :deep(hr) { border: none; border-top: 1px solid #eee; margin: 16px 0; }
-/* KaTeX overlay fix */
+.desc :deep(table) { width: auto; margin: 12px 0; border-collapse: collapse; }
+.desc :deep(th), .desc :deep(td) { padding: 6px 12px; border: 1px solid #dde5ee; text-align: left; }
+.desc :deep(th) { background: #f7fafd; font-weight: 700; }
+.desc :deep(blockquote) {
+  margin: 12px 0;
+  padding: 8px 16px;
+  border-left: 3px solid #6aa8e0;
+  border-radius: 0 6px 6px 0;
+  background: #f5f9fd;
+  color: #516579;
+}
+.desc :deep(hr) { margin: 16px 0; border: none; border-top: 1px solid #edf1f5; }
 .desc :deep(.katex) { font-size: 1.05em; }
 .desc :deep(.katex-display) { margin: 12px 0; text-align: center; }
-/* handle overflow for wide formulas */
 .desc :deep(.katex-display > .katex) { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
-.sample-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid #edf0f4; }
-.sample-section h3 { margin: 0 0 14px; color: #1f2d3d; font-size: 18px; }
-.sample-pair + .sample-pair { margin-top: 18px; }
-.sample-block + .sample-block { margin-top: 12px; }
+.sample-section { margin-top: 22px; padding-top: 18px; border-top: 1px solid #edf1f5; }
+.sample-section h3 { margin: 0 0 12px; color: #1f3145; font-size: 16px; }
+.sample-pair + .sample-pair { margin-top: 14px; }
+.sample-block + .sample-block { margin-top: 10px; }
+.sample-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
 .sample-title {
   display: inline-flex;
   align-items: center;
   margin-bottom: 8px;
-  padding: 4px 10px;
+  padding: 3px 10px;
   border-radius: 999px;
   color: #24639b;
   background: #edf6ff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 .sample-block pre {
   margin: 0;
-  padding: 14px;
-  border-radius: 8px;
+  padding: 12px 14px;
   overflow-x: auto;
-  color: #d4d4d4;
-  background: #1e1e1e;
+  border-radius: 8px;
+  color: #d7deea;
+  background: #1e2430;
   font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
 }
-
+.editor-panel { min-width: 0; }
+.editor-sticky {
+  position: sticky;
+  top: 72px;
+}
 .editor-card { padding: 0; overflow: hidden; }
-.editor-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #282c34; border-bottom: 1px solid #333; }
-.lang-select { padding: 6px 12px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; font-size: 13px; }
-.btn-submit { padding: 8px 20px; background: #4fc3f7; color: #1a1a2e; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; }
-.btn-submit:hover { background: #29b6f6; }
-.btn-submit:disabled { opacity: 0.5; cursor: default; }
-.cm-editor-host { height: 420px; }
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2c3340;
+  background: #232833;
+}
+.editor-toolbar-left {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+.editor-label {
+  color: #9fb0c5;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.lang-select {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #424b5c;
+  border-radius: 7px;
+  color: #d7deea;
+  background: #2b3240;
+  font: inherit;
+  font-size: 13px;
+}
+.btn-submit {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(180deg, #2f86d8 0%, #2469ad 100%);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(36, 105, 173, .28);
+}
+.btn-submit:hover { filter: brightness(1.05); }
+.btn-submit:disabled { opacity: .55; cursor: default; box-shadow: none; }
+.btn-submit .spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.cm-editor-host { height: min(62vh, 560px); min-height: 360px; }
 .cm-editor-host :deep(.cm-editor) { height: 100%; }
-.cm-editor-host :deep(.cm-scroller) { overflow: auto; }
-
+.cm-editor-host :deep(.cm-scroller) { overflow: auto; font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; }
 .result-card { border-left: 4px solid #3498db; }
-.result-header { display: flex; align-items: center; gap: 12px; }
-.result-badge { padding: 4px 12px; border-radius: 4px; color: #fff; font-weight: bold; font-size: 16px; }
-.result-score { font-weight: bold; color: #1a1a2e; font-size: 16px; }
-.result-info { color: #888; font-size: 13px; }
-.compile-box { margin-top: 12px; background: #fff3e0; padding: 10px; border-radius: 4px; font-size: 12px; }
-.compile-box pre { margin: 0; white-space: pre-wrap; font-family: monospace; }
+.result-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.result-badge {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 28px;
+}
+.result-score { color: var(--ink); font-size: 15px; font-weight: 800; }
+.result-info { color: var(--muted); font-size: 12px; }
+.compile-box {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #fff3e0;
+  font-size: 12px;
+}
+.compile-box pre { margin: 0; white-space: pre-wrap; font-family: Consolas, monospace; }
 .cases { margin-top: 12px; }
-.cases-toggle { cursor: pointer; font-size: 14px; color: #3498db; font-weight: 500; }
-.toggle-arrow { font-size: 10px; margin-left: 4px; }
-.cases-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.case-dot { width: 36px; height: 36px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: #fff; }
+.cases-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--blue);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.toggle-arrow { color: var(--muted); font-size: 12px; font-weight: 650; }
+.cases-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.case-dot {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
 .case-dot.ac { background: #27ae60; }
 .case-dot.wa { background: #e74c3c; }
-.error-msg, .error-card { color: #e74c3c; padding: 20px; text-align: center; }
-.error-card { background: #fce4ec; }
+.exhausted-card {
+  border-left: 4px solid #f39c12;
+  background: #fff8e1;
+}
+.exhausted-card p {
+  margin: 0;
+  color: #b35c00;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  color: #2469ad;
+  background: transparent;
+  font: inherit;
+  font-weight: 750;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.error-msg, .error-card { color: #c0392b; padding: 16px; text-align: center; }
+.error-card { background: #fdecea; border-left: 4px solid #e74c3c; }
 
 .external-card { border-left: 4px solid #e67e22; background: #fff8e1; }
 .external-card h3 { color: #e65100; margin-bottom: 8px; }
@@ -706,5 +1114,18 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .cf-btn-secondary { background: #f0f0f0; color: #333; border: 1px solid #ddd; }
 .cf-btn-secondary:hover { background: #e0e0e0; }
 
-@media (max-width: 1000px) { .content-split { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) {
+  .content-split { grid-template-columns: 1fr; }
+  .editor-sticky { position: static; top: auto; }
+  .cm-editor-host { height: 420px; min-height: 320px; }
+  .sample-pair { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .problem-page { padding: 12px 12px 28px; }
+  .problem-header { padding: 14px; }
+  .problem-title-row { flex-direction: column; }
+  .problem-header-actions { width: 100%; justify-content: flex-start; }
+  .header-link, .favorite-command { flex: 1 1 auto; }
+  .statement-card { padding: 14px; }
+}
 </style>
