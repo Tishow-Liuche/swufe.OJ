@@ -661,10 +661,24 @@ onBeforeUnmount(clearPendingImages);
 
 /* Community workspace skin shared with Home and Contests. */
 .community-hub { --community-navy:#173b66; --community-blue:#2469ad; --community-pale:#eaf3fc; --community-line:#dfe7ef; display:flex; width:100%; max-width:none; min-height:calc(100vh - 56px); margin:0; padding:0; background:#f3f5f7; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
-.community-main { min-width:0; flex:1; padding:26px 28px 60px; }.community-main>.community-topbar,.community-main>.toast,.community-main>.community-layout,.community-main>.moderation-drawer { width:min(1180px,100%); margin-right:auto; margin-left:auto; }
-.community-topbar { min-height:128px; margin-bottom:0; padding:24px 28px; border-radius:8px; background:var(--community-navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }
-.brand-block p { color:#8fc2ec; letter-spacing:0; }
-.brand-block h1 { color:#fff; font-size:31px; letter-spacing:0; }
+.community-main { min-width:0; flex:1; padding:26px 28px 60px; }.community-main>.community-topbar,.community-main>.toast,.community-main>.community-layout,.community-main>.moderation-drawer { width:min(1440px,100%); margin-right:auto; margin-left:auto; }
+.community-topbar {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  min-height: 178px;
+  margin-bottom: 0;
+  padding: 32px 40px;
+  border-radius: 26px;
+  background: var(--community-navy);
+  box-shadow: 0 10px 24px rgba(31, 66, 104, .08);
+}
+.brand-block p { color:#8fc2ec; font-size:11px; font-weight:900; letter-spacing:.15em; }
+.brand-block h1 { color:#fff; font-size:42px; letter-spacing:-.05em; line-height:1.1; }
 .brand-title-row>span { color:#d6e6f4; }
 .brand-title-row>span i { background:#f2c66d; }
 .search-field { width:min(360px,32vw); border-color:rgba(255,255,255,.28); background:#fff; }
@@ -697,16 +711,47 @@ onBeforeUnmount(clearPendingImages);
 .notification-popover,.post-dialog { border-radius:8px; }
 @media(max-width:1050px){.community-layout{grid-template-columns:minmax(0,1fr)}.community-aside{display:none}}
 @media(max-width:860px){.community-hub{display:block}.community-main{padding:18px 16px 46px}.community-nav,.community-hub.sidebar-collapsed .community-nav{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:auto;height:auto;padding:12px;border-right:0}.community-nav-title,.community-nav .nav-rule,.community-nav .signed-state{display:none}.community-nav>button,.community-hub.sidebar-collapsed .community-nav>button{grid-template-columns:22px minmax(0,1fr) auto;justify-items:initial;padding:7px 10px}.community-nav>button>span,.community-hub.sidebar-collapsed .community-nav>button>span{display:grid}.community-nav>button>b,.community-hub.sidebar-collapsed .community-nav>button>b{display:grid}.community-nav .create-discussion{grid-column:1/-1}.community-topbar{align-items:stretch;flex-direction:column;padding:20px}.topbar-actions{width:100%}.search-field{width:auto;flex:1}.community-layout{display:block;margin-top:18px}.community-feed{width:100%}}
-/* Community keeps its information architecture while sharing the light library skin. */
+/* Community keeps its information architecture while sharing the contest hero skin. */
 .community-topbar {
   border: 1px solid #dce5ef;
   background: #fff;
   box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
+  color: #1f2a37;
 }
-.brand-block p { color: #3977aa; }
-.brand-block h1 { color: #1f2a37; }
+.brand-block p {
+  margin: 0 0 7px;
+  color: #3977aa;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+.brand-block h1 {
+  margin: 0;
+  color: #1f2a37;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -.05em;
+}
+.brand-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .brand-title-row span { color: #66778a; }
 .brand-title-row i { background: #1f5eff; box-shadow: 0 0 0 4px #e7efff; }
+.topbar-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  min-width: 145px;
+}
+.topbar-actions .search-field,
+.topbar-actions .icon-command {
+  border-radius: 11px;
+}
 .community-nav > button.active {
   border-color: #aec7f4;
   background: #e7efff;
