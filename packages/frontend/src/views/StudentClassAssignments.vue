@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { ArrowLeft, CalendarClock, CheckCircle2, Circle, FileText, RefreshCw } from '@lucide/vue';
+import { ArrowLeft, CalendarClock, CheckCircle2, ChevronRight, Circle, FileText, ListFilter, RefreshCw } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
-import { isLatestAssignmentRequest, selectInitialAssignment } from './student-class-assignment';
+import {
+  filterClassAssignments,
+  isLatestAssignmentRequest,
+  selectInitialAssignment,
+  type AssignmentFilter,
+} from './student-class-assignment';
 
 interface AssignmentProblem {
   id: string;
@@ -42,21 +47,31 @@ interface Assignment {
 }
 
 const route = useRoute();
+const router = useRouter();
 const classInfo = ref<{ id: string; name: string } | null>(null);
 const assignments = ref<Assignment[]>([]);
 const selectedAssignmentId = ref('');
+const assignmentFilter = ref<AssignmentFilter>('ALL');
 const loading = ref(true);
 const error = ref('');
 let latestAssignmentRequestId = 0;
 
 const selectedAssignment = computed(() => assignments.value.find((assignment) => assignment.id === selectedAssignmentId.value) || null);
+const filteredAssignments = computed(() => filterClassAssignments(assignments.value, assignmentFilter.value));
+const completedAssignmentCount = computed(() => assignments.value.filter((assignment) => assignment.progress.completed).length);
+const overallCompletionPercent = computed(() => assignments.value.length
+  ? Math.round((completedAssignmentCount.value / assignments.value.length) * 100)
+  : 0);
 const requestedAssignmentId = computed(() => {
   const value = route.query.assignment;
   return typeof value === 'string' ? value : '';
 });
 const assignmentStatus = computed(() => {
   const assignment = selectedAssignment.value;
-  if (!assignment) return { label: '', tone: 'muted' };
+  return assignment ? assignmentStatusMeta(assignment) : { label: '', tone: 'muted' };
+});
+
+function assignmentStatusMeta(assignment: Assignment) {
   if (assignment.progress?.status) {
     const status = assignment.progress.status;
     const tone =
@@ -71,7 +86,7 @@ const assignmentStatus = computed(() => {
     return { label: assignment.allowLate ? '已截止（可补交）' : '已截止', tone: assignment.allowLate ? 'pending' : 'muted' };
   }
   return { label: '进行中', tone: 'pending' };
-});
+}
 
 onMounted(loadAssignments);
 watch(() => route.params.classId, () => void loadAssignments());
@@ -83,6 +98,23 @@ function formatDate(value?: string) {
   return value ? new Intl.DateTimeFormat('zh-CN', {
     month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date(value)) : '-';
+}
+
+function assignmentCompletionPercent(assignment: Assignment) {
+  if (!assignment.progress.totalProblems) return 0;
+  return Math.round((assignment.progress.solvedCount / assignment.progress.totalProblems) * 100);
+}
+
+function openAssignment(assignmentId: string) {
+  selectedAssignmentId.value = assignmentId;
+}
+
+async function returnToOverview() {
+  selectedAssignmentId.value = '';
+  if (!requestedAssignmentId.value) return;
+  const query = { ...route.query };
+  delete query.assignment;
+  await router.replace({ query });
 }
 
 async function loadAssignments() {
@@ -127,27 +159,50 @@ async function loadAssignments() {
     <div v-else-if="error" class="page-state error-state">{{ error }}</div>
     <div v-else-if="!assignments.length" class="page-state empty-state"><FileText :size="28" /><b>暂时没有班级作业</b><span>老师发布作业后会在这里显示。</span></div>
 
-    <section v-else class="assignment-workspace">
-      <aside class="assignment-list" aria-label="班级作业列表">
-        <header><FileText :size="17" /><strong>班级作业</strong><span>{{ assignments.length }}</span></header>
-        <button
-          v-for="assignment in assignments"
-          :key="assignment.id"
-          type="button"
-          :class="{ selected: selectedAssignmentId === assignment.id }"
-          @click="selectedAssignmentId = assignment.id"
-        >
-          <span>
-            <b>{{ assignment.title }}</b>
-            <small>{{ formatDate(assignment.endTime) }} 截止</small>
-          </span>
-          <em class="list-status" :class="assignment.progress.completed ? 'ok' : 'muted'">
-            {{ assignment.progress.solvedCount }}/{{ assignment.progress.totalProblems }}
-          </em>
-        </button>
-      </aside>
+    <section v-else-if="!selectedAssignment" class="assignment-overview">
+      <header class="overview-heading">
+        <div>
+          <span class="overview-eyebrow"><ListFilter :size="15" />全部作业</span>
+          <h2>作业进度</h2>
+          <p>选择一份作业后查看题目、时间和完成情况。</p>
+        </div>
+        <div class="overview-progress" aria-label="班级作业完成进度">
+          <strong>{{ completedAssignmentCount }}<small>/ {{ assignments.length }} 份已完成</small></strong>
+          <div class="overview-progress-track"><i :style="{ width: `${overallCompletionPercent}%` }"></i></div>
+          <span>整体完成 {{ overallCompletionPercent }}%</span>
+        </div>
+      </header>
 
-      <main v-if="selectedAssignment" class="assignment-detail">
+      <div class="assignment-filter" aria-label="作业完成状态筛选">
+        <button type="button" :class="{ active: assignmentFilter === 'ALL' }" @click="assignmentFilter = 'ALL'">全部 {{ assignments.length }}</button>
+        <button type="button" :class="{ active: assignmentFilter === 'COMPLETED' }" @click="assignmentFilter = 'COMPLETED'">已完成 {{ completedAssignmentCount }}</button>
+        <button type="button" :class="{ active: assignmentFilter === 'INCOMPLETE' }" @click="assignmentFilter = 'INCOMPLETE'">未完成 {{ assignments.length - completedAssignmentCount }}</button>
+      </div>
+
+      <div v-if="filteredAssignments.length" class="overview-list">
+        <button v-for="assignment in filteredAssignments" :key="assignment.id" type="button" class="assignment-overview-row" @click="openAssignment(assignment.id)">
+          <span class="assignment-row-icon" :class="{ complete: assignment.progress.completed }">
+            <CheckCircle2 v-if="assignment.progress.completed" :size="19" /><FileText v-else :size="19" />
+          </span>
+          <span class="assignment-row-copy">
+            <span><b>{{ assignment.title }}</b><em class="status-pill" :class="assignmentStatusMeta(assignment).tone">{{ assignmentStatusMeta(assignment).label }}</em></span>
+            <small>{{ assignment.description || '点击查看作业题目和完成要求。' }}</small>
+            <small>截止时间：{{ formatDate(assignment.endTime) }}</small>
+          </span>
+          <span class="assignment-row-progress">
+            <strong>{{ assignment.progress.solvedCount }}/{{ assignment.progress.totalProblems }} 题</strong>
+            <span class="row-progress-track"><i :style="{ width: `${assignmentCompletionPercent(assignment)}%` }"></i></span>
+            <small>{{ assignment.progress.completed ? '已完成' : `完成 ${assignmentCompletionPercent(assignment)}%` }}</small>
+          </span>
+          <ChevronRight class="open-assignment-icon" :size="18" />
+        </button>
+      </div>
+      <div v-else class="filter-empty-state">没有符合当前筛选条件的作业。</div>
+    </section>
+
+    <section v-else class="assignment-detail assignment-detail-surface">
+      <button type="button" class="overview-back" @click="returnToOverview"><ArrowLeft :size="16" />全部作业</button>
+      <main>
         <header class="detail-heading">
           <div>
             <span class="status-pill" :class="assignmentStatus.tone">{{ assignmentStatus.label }}</span>
@@ -207,5 +262,6 @@ async function loadAssignments() {
 .assignment-detail { min-width: 0; padding: 26px 30px 34px; }.detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }.status-pill { display: inline-flex; align-items: center; margin-bottom: 8px; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 850; }.status-pill.ok { color: #197149; background: #edfaf4; }.status-pill.pending { color: #8a6200; background: #fff6dc; }.status-pill.muted { color: #607187; background: #edf1f5; }.detail-heading h2 { margin: 0; color: #263b51; font-size: 23px; }.detail-heading p { max-width: 650px; margin: 7px 0 0; color: #6d7d90; font-size: 13px; line-height: 1.65; }.completion-badge { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border: 1px solid #c7d8e8; border-radius: 10px; background: #f7fbff; color: #47708f; font-size: 12px; font-weight: 800; }.completion-badge span { display: grid; gap: 1px; }.completion-badge small { color: #7c8c9f; font-size: 10px; font-weight: 700; }.completion-badge.complete { border-color: #b7e1ce; background: #edfaf4; color: #197149; }.completion-badge.complete small { color: #2f8a5d; }
 .assignment-timing { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 12px; margin: 25px 0 22px; padding: 13px 15px; border: 1px solid #e3ebf2; border-radius: 10px; background: #f8fbfd; color: #4c7090; }.assignment-timing > div { display: grid; gap: 3px; }.assignment-timing > div + div { padding-left: 18px; border-left: 1px solid #e0e9f2; }.assignment-timing span { color: #8493a3; font-size: 11px; }.assignment-timing b { color: #3a5067; font-size: 12px; }
 .problem-section > header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }.problem-section h3 { margin: 0; color: #2b4056; font-size: 16px; }.problem-section > header span { color: #8493a3; font-size: 11px; }.problem-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid #e5ecf3; }.problem-list li { display: grid; min-height: 66px; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; border-bottom: 1px solid #e5ecf3; }.problem-list li.solved .problem-order { background: #edfaf4; color: #197149; }.problem-list li.solved b { color: #197149; }.problem-order { display: inline-grid; width: 24px; height: 24px; place-items: center; border-radius: 6px; background: #edf4fd; color: #3977aa; font-size: 11px; font-weight: 850; }.problem-list a { display: grid; min-width: 0; gap: 3px; color: inherit; text-decoration: none; }.problem-list a:hover b { color: #1f5eff; }.problem-list b { overflow: hidden; color: #344b62; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }.problem-list small { color: #8190a1; font-size: 11px; }.problem-meta { display: inline-flex; align-items: center; gap: 8px; }.problem-score { color: #63809b; font-size: 11px; font-weight: 800; white-space: nowrap; }
-@media (max-width: 720px) { .assignment-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.assignment-header { align-items: flex-start; padding: 20px; }.assignment-header h1 { font-size: 26px; }.assignment-workspace { grid-template-columns: 1fr; }.assignment-list { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e2e9f1; }.assignment-list > header { display: none; }.assignment-list > button { min-width: 190px; }.assignment-detail { padding: 22px 16px 28px; }.detail-heading { flex-direction: column; gap: 12px; }.completion-badge { align-self: flex-start; }.assignment-timing { grid-template-columns: auto minmax(0, 1fr); }.assignment-timing > div + div { grid-column: 2; padding-left: 0; border-left: 0; }.problem-list li { grid-template-columns: 30px minmax(0, 1fr); }.problem-meta { grid-column: 2; justify-content: flex-start; padding-bottom: 10px; } }
+.assignment-overview,.assignment-detail-surface { border: 1px solid #dce5ef; border-radius: 8px; background: #fff; box-shadow: 0 8px 20px rgba(31, 66, 104, .05); }.assignment-overview { padding: 26px 30px 30px; }.overview-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; }.overview-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: #3977aa; font-size: 11px; font-weight: 850; }.overview-heading h2 { margin: 5px 0 0; color: #263b51; font-size: 23px; }.overview-heading p { margin: 7px 0 0; color: #6d7d90; font-size: 13px; }.overview-progress { display: grid; width: min(248px, 100%); flex: 0 0 auto; gap: 6px; }.overview-progress strong { color: #263b51; font-size: 17px; }.overview-progress strong small { color: #8090a1; font-size: 11px; font-weight: 750; }.overview-progress > span { color: #6e8195; font-size: 11px; text-align: right; }.overview-progress-track,.row-progress-track { display: block; height: 7px; overflow: hidden; border-radius: 999px; background: #e9eff5; }.overview-progress-track i,.row-progress-track i { display: block; height: 100%; border-radius: inherit; background: #2f75c6; transition: width .2s ease; }.assignment-filter { display: inline-flex; gap: 3px; margin-top: 25px; padding: 4px; border: 1px solid #dfe8f0; border-radius: 8px; background: #f7fafd; }.assignment-filter button { min-height: 30px; padding: 0 10px; border: 0; border-radius: 5px; color: #6b7d90; background: transparent; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }.assignment-filter button:hover { color: #2469ad; }.assignment-filter button.active { color: #1f5eff; background: #fff; box-shadow: 0 1px 4px rgba(31, 66, 104, .11); }.overview-list { display: grid; gap: 9px; margin-top: 16px; }.assignment-overview-row { display: grid; width: 100%; grid-template-columns: 42px minmax(0, 1fr) minmax(150px, 23%) 20px; align-items: center; gap: 14px; padding: 14px; border: 1px solid #e0e8f0; border-radius: 8px; color: #2e465e; background: #fff; font: inherit; text-align: left; cursor: pointer; transition: border-color .18s, box-shadow .18s, transform .18s; }.assignment-overview-row:hover { border-color: #9fc3e8; box-shadow: 0 7px 18px rgba(36, 105, 173, .08); transform: translateY(-1px); }.assignment-row-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 8px; color: #3977aa; background: #edf4fd; }.assignment-row-icon.complete { color: #197149; background: #edfaf4; }.assignment-row-copy { display: grid; min-width: 0; gap: 4px; }.assignment-row-copy > span { display: flex; align-items: center; gap: 8px; min-width: 0; }.assignment-row-copy b { overflow: hidden; color: #2b4056; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.assignment-row-copy .status-pill { margin: 0; flex: 0 0 auto; }.assignment-row-copy small { overflow: hidden; color: #7c8d9f; font-size: 11px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }.assignment-row-progress { display: grid; gap: 5px; }.assignment-row-progress strong { color: #3f5871; font-size: 11px; }.assignment-row-progress small { color: #7c8d9f; font-size: 10px; }.open-assignment-icon { color: #8aa0b6; }.filter-empty-state { margin-top: 16px; padding: 42px 16px; border: 1px dashed #d4e0ec; border-radius: 8px; color: #7d8ea0; font-size: 13px; text-align: center; }.assignment-detail-surface { min-height: 550px; padding: 22px 30px 34px; }.assignment-detail-surface .assignment-detail { padding: 0; }.overview-back { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 20px; padding: 0; border: 0; color: #3977aa; background: transparent; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }.overview-back:hover { color: #1f5eff; }
+@media (max-width: 720px) { .assignment-page { width: min(100% - 28px, 1180px); padding-top: 18px; }.assignment-header { align-items: flex-start; padding: 20px; }.assignment-header h1 { font-size: 26px; }.assignment-workspace { grid-template-columns: 1fr; }.assignment-list { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e2e9f1; }.assignment-list > header { display: none; }.assignment-list > button { min-width: 190px; }.assignment-overview { padding: 22px 16px 24px; }.overview-heading { align-items: flex-start; flex-direction: column; gap: 18px; }.overview-progress { width: 100%; }.assignment-overview-row { grid-template-columns: 38px minmax(0, 1fr) 18px; gap: 10px; padding: 12px; }.assignment-row-icon { width: 34px; height: 34px; }.assignment-row-progress { grid-column: 2 / -1; grid-row: 2; }.assignment-detail { padding: 22px 16px 28px; }.detail-heading { flex-direction: column; gap: 12px; }.completion-badge { align-self: flex-start; }.assignment-timing { grid-template-columns: auto minmax(0, 1fr); }.assignment-timing > div + div { grid-column: 2; padding-left: 0; border-left: 0; }.problem-list li { grid-template-columns: 30px minmax(0, 1fr); }.problem-meta { grid-column: 2; justify-content: flex-start; padding-bottom: 10px; } }
 </style>
