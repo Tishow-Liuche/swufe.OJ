@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useStorage } from '@vueuse/core';
 import {
-  BarChart3, BookOpenCheck, Check, ChevronDown, ChevronRight, Clipboard, ClipboardList,
+  BarChart3, BookOpenCheck, Check, ChevronRight, Clipboard, ClipboardList,
   Clock3, Download, FileSpreadsheet, KeyRound, LayoutDashboard, Plus,
   PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Trash2, UploadCloud, UserCheck, UserPlus, UsersRound, X,
 } from '@lucide/vue';
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import api from '../../api/client';
+import FilterSelect from '../../components/FilterSelect.vue';
+import { pointDifficultyOptions, pointDifficultyShortLabel } from '../../utils/pointDifficulty';
+import { isCurrentPageSelected, setCurrentPageSelected, toggleProblem } from './assignment-selection';
 
 type WorkspacePanel = 'overview' | 'access' | 'members' | 'import' | 'assignment' | 'report';
 interface ClassInfo {
@@ -20,8 +23,16 @@ interface ClassMember {
   user: { id: string; username: string; nickname?: string };
 }
 interface ProblemItem {
-  id: string; title: string; source?: string; difficulty?: string;
-  sourceInfo?: { platform?: string; remoteProblemId?: string };
+  id: string; title: string; source?: string; difficulty?: string | null;
+  sourceInfo?: { platform?: string; remoteProblemId?: string } | null;
+  tags: Array<{ name: string }>;
+}
+interface ProblemResponse {
+  items: ProblemItem[]; total: number; page: number; pageSize: number;
+}
+interface ProblemMetadata {
+  tags: Array<{ name: string; count: number }>;
+  sources: Array<{ source: string; count: number }>;
 }
 interface AssignmentItem {
   id: string; title: string; description?: string; startTime: string; endTime: string;
@@ -29,18 +40,29 @@ interface AssignmentItem {
   _count?: { students: number; problems: number };
 }
 interface AssignmentReport {
-  assignment: { id: string; title: string; startTime: string; endTime: string };
+  assignment: {
+    id: string; title: string; startTime: string; endTime: string;
+    allowLate?: boolean; latePenalty?: number; passCondition?: string | null;
+    countExternalAc?: boolean; lifecycle?: string;
+  };
   problems: ProblemItem[];
   students: Array<{
     user: { id: string; username: string; nickname?: string };
+    status?: string; statusLabel?: string;
     solvedCount: number; totalProblems: number; completed: boolean;
+    score?: number; late?: boolean;
     problems: Array<{
       problemId: string; title: string; status: string; attempts: number;
       bestSubmissionId?: string | null; score: number;
       timeUsed?: number | null; memoryUsed?: number | null; submittedAt?: string | null;
+      late?: boolean;
     }>;
   }>;
-  summary: { studentCount: number; problemCount: number; completedStudents: number };
+  summary: {
+    studentCount: number; problemCount: number; completedStudents: number;
+    filteredCount?: number; lateStudents?: number; expiredStudents?: number;
+    inProgressStudents?: number; notStartedStudents?: number;
+  };
 }
 interface ExcelStudentRow {
   studentId: string; name: string; phone: string; email: string;
@@ -78,15 +100,28 @@ const importText = ref('');
 const assignmentTitle = ref('');
 const assignmentDescription = ref('');
 const assignmentEndTime = ref('');
+const assignmentAllowLate = ref(false);
+const assignmentLatePenalty = ref(0);
+const assignmentPassCondition = ref('ALL');
+const assignmentCountExternalAc = ref(false);
+const reportKeyword = ref('');
+const reportStatus = ref('');
+const reportCompletion = ref<'all' | 'completed' | 'incomplete'>('all');
 const problemKeyword = ref('');
+const problemPage = ref(1);
+const problemPageSize = 10;
+const problemTotal = ref(0);
+const problemSource = ref('');
+const problemDifficulty = ref('');
+const problemTag = ref('');
+const problemMetadata = ref<ProblemMetadata | null>(null);
+const problemMetadataLoading = ref(false);
 const joinCodeExpiresAt = ref('');
 const importMode = ref<'excel' | 'text'>('excel');
 const excelRows = ref<ExcelStudentRow[]>([]);
 const excelDragging = ref(false);
 const excelImporting = ref(false);
 const excelInput = ref<HTMLInputElement | null>(null);
-const classMenuOpen = ref(false);
-const classSwitcher = ref<HTMLElement | null>(null);
 const sidebarCollapsed = useStorage('swufe-oj:class-sidebar-collapsed-v1', true);
 
 const selectedClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value));
@@ -95,12 +130,52 @@ const approvedMembers = computed(() => members.value.filter((member) => member.s
 const totalMembers = computed(() => classes.value.reduce((sum, item) => sum + (item.memberCount || 0), 0));
 const activeCodes = computed(() => classes.value.filter((item) => item.joinCode && item.joinCodeExpiresAt && new Date(item.joinCodeExpiresAt) > new Date()).length);
 const invalidExcelRows = computed(() => excelRows.value.filter((row) => !row.valid));
+const problemTotalPages = computed(() => Math.max(1, Math.ceil(problemTotal.value / problemPageSize)));
+const problemTagOptions = computed(() => [
+  { value: '', label: '全部标签' },
+  ...(problemMetadata.value?.tags || []).map((item) => ({ value: item.name, label: `${item.name} (${item.count})` })),
+]);
+const problemSourceOptions = computed(() => [
+  { value: '', label: '全部来源' },
+  ...(problemMetadata.value?.sources || []).map((item) => ({
+    value: item.source,
+    label: item.source === 'LOCAL' ? '原创' : item.source,
+  })),
+]);
+const selectedProblemIds = computed(() => new Set(selectedProblems.value.map((item) => item.id)));
+const currentPageFullySelected = computed(() => isCurrentPageSelected(selectedProblems.value, problemResults.value));
+const passConditionOptions = [
+  { value: 'ALL', label: '全部题目通过' },
+  { value: 'COUNT:1', label: '至少通过 1 题' },
+  { value: 'PERCENT:50', label: '完成 50%' },
+  { value: 'PERCENT:80', label: '完成 80%' },
+];
+const reportStatusOptions = [
+  { value: '', label: '全部状态' },
+  { value: 'NOT_STARTED', label: '未开始' },
+  { value: 'IN_PROGRESS', label: '进行中' },
+  { value: 'COMPLETED', label: '已完成' },
+  { value: 'LATE', label: '已补交' },
+  { value: 'EXPIRED', label: '已截止' },
+  { value: 'SETTLED', label: '已结算' },
+];
+const reportCompletionOptions = [
+  { value: 'all', label: '完成度不限' },
+  { value: 'completed', label: '仅已完成' },
+  { value: 'incomplete', label: '仅未完成' },
+];
+const reportAssignmentOptions = computed(() => [
+  { value: '', label: '选择作业' },
+  ...assignments.value.map((item) => ({
+    value: item.id,
+    label: `${item.title}（${item._count?.problems || item.problems?.length || 0} 题 / ${item._count?.students || 0} 人）`,
+  })),
+]);
+let problemSearchRequest = 0;
 
 onMounted(() => {
   void loadClasses();
-  document.addEventListener('pointerdown', closeClassMenuOnOutside);
 });
-onBeforeUnmount(() => document.removeEventListener('pointerdown', closeClassMenuOnOutside));
 
 function showMessage(text: string) { msg.value = text; }
 function defaultJoinCodeExpiry() {
@@ -114,34 +189,33 @@ function parseIdentifiers(text: string) { return text.split(/[\n,，\s]+/).map((
 function classStatus(status: string) {
   return status === 'APPROVED' ? '已启用' : status === 'PENDING' ? '待管理员审核' : '未启用';
 }
-function closeClassMenuOnOutside(event: PointerEvent) {
-  if (!classSwitcher.value?.contains(event.target as Node)) classMenuOpen.value = false;
-}
-async function selectClassFromMenu(id: string) {
-  classMenuOpen.value = false;
-  if (id === selectedClassId.value) return;
-  selectedClassId.value = id;
+async function selectClass(id: string) {
+  if (id !== selectedClassId.value) selectedClassId.value = id;
   await loadClassData();
 }
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
-    ACCEPTED: '已通过', WRONG_ANSWER: '答案错误', TIME_LIMIT_EXCEEDED: '超时',
+    ACCEPTED: '已通过', LATE_ACCEPTED: '补交通过', WRONG_ANSWER: '答案错误', TIME_LIMIT_EXCEEDED: '超时',
     MEMORY_LIMIT_EXCEEDED: '超内存', COMPILE_ERROR: '编译错误', RUNTIME_ERROR: '运行错误',
     QUEUING: '排队中', JUDGING: '评测中', PENDING: '等待中', NOT_SUBMITTED: '未提交',
+    NOT_STARTED: '未开始', EXPIRED: '已截止', COMPLETED: '已完成', LATE: '已补交',
+    IN_PROGRESS: '进行中', SETTLED: '已结算',
   };
   return labels[status] || status;
 }
 function statusClass(status: string) {
-  if (status === 'ACCEPTED') return 'ok';
-  if (status === 'NOT_SUBMITTED') return 'muted';
-  if (['QUEUING', 'JUDGING', 'PENDING'].includes(status)) return 'pending';
+  if (status === 'ACCEPTED' || status === 'COMPLETED' || status === 'SETTLED') return 'ok';
+  if (status === 'LATE_ACCEPTED' || status === 'LATE') return 'pending';
+  if (status === 'NOT_SUBMITTED' || status === 'NOT_STARTED' || status === 'EXPIRED') return 'muted';
+  if (['QUEUING', 'JUDGING', 'PENDING', 'IN_PROGRESS'].includes(status)) return 'pending';
   return 'bad';
 }
-function formatImportMessage(data: { added: number; skipped: number; notFound?: string[]; alreadyInClass?: string[]; duplicatedInput?: string[] }) {
+function formatImportMessage(data: { added: number; skipped: number; notFound?: string[]; alreadyInClass?: string[]; duplicatedInput?: string[]; invalidRole?: string[] }) {
   const parts = [`导入完成：成功 ${data.added} 人，跳过 ${data.skipped} 人`];
   if (data.notFound?.length) parts.push(`未找到：${data.notFound.join('、')}`);
   if (data.alreadyInClass?.length) parts.push(`已在班级：${data.alreadyInClass.join('、')}`);
   if (data.duplicatedInput?.length) parts.push(`重复输入：${data.duplicatedInput.join('、')}`);
+  if (data.invalidRole?.length) parts.push(`非学生账号：${data.invalidRole.join('、')}`);
   return parts.join('；');
 }
 
@@ -172,6 +246,10 @@ async function chooseClass(id: string, panel: WorkspacePanel = 'access') {
 function openPanel(panel: WorkspacePanel) {
   if (panel !== 'overview' && !selectedClassId.value) return showMessage('请先创建或选择一个班级');
   activePanel.value = panel;
+  if (panel === 'assignment') {
+    void loadProblemMetadata();
+    void searchProblems(1);
+  }
 }
 async function createClass() {
   const name = newClassName.value.trim();
@@ -307,26 +385,91 @@ async function reviewMember(member: ClassMember, status: 'APPROVED' | 'REJECTED'
   } catch (e: any) { showMessage('审核失败：' + (e.response?.data?.message || e.message)); }
   finally { reviewingUserId.value = ''; }
 }
-async function searchProblems() {
+function problemSourceLabel(problem: ProblemItem) {
+  const source = problem.sourceInfo?.platform || problem.source || 'LOCAL';
+  return source === 'LOCAL' ? '原创' : source;
+}
+function problemDifficultyLabel(problem: ProblemItem) {
+  return pointDifficultyShortLabel(problem.difficulty || '');
+}
+async function loadProblemMetadata() {
+  problemMetadataLoading.value = true;
+  try {
+    const { data } = await api.get<ProblemMetadata>('/api/problems/metadata');
+    problemMetadata.value = data;
+  } catch (e: any) {
+    showMessage('加载题库筛选项失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    problemMetadataLoading.value = false;
+  }
+}
+async function searchProblems(page = problemPage.value) {
+  const requestId = ++problemSearchRequest;
   problemSearching.value = true;
   try {
-    const { data } = await api.get('/api/problems', { params: { keyword: problemKeyword.value.trim(), pageSize: 20, status: 'PUBLISHED' } });
+    const params: Record<string, string | number> = {
+      page,
+      pageSize: problemPageSize,
+      status: 'PUBLISHED',
+    };
+    if (problemKeyword.value.trim()) params.keyword = problemKeyword.value.trim();
+    if (problemSource.value) params.source = problemSource.value;
+    if (problemDifficulty.value) params.difficulty = problemDifficulty.value;
+    if (problemTag.value) params.tag = problemTag.value;
+    const { data } = await api.get<ProblemResponse>('/api/problems', { params });
+    if (requestId !== problemSearchRequest) return;
     problemResults.value = data.items || [];
-  } catch (e: any) { showMessage('搜索题目失败：' + (e.response?.data?.message || e.message)); }
-  finally { problemSearching.value = false; }
+    problemTotal.value = data.total || 0;
+    problemPage.value = Math.min(data.page || page, Math.max(1, Math.ceil(problemTotal.value / problemPageSize)));
+  } catch (e: any) {
+    if (requestId === problemSearchRequest) showMessage('加载题目失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    if (requestId === problemSearchRequest) problemSearching.value = false;
+  }
 }
-function addProblem(problem: ProblemItem) { if (!selectedProblems.value.some((item) => item.id === problem.id)) selectedProblems.value.push(problem); }
+function resetProblemPage() {
+  problemPage.value = 1;
+  void searchProblems(1);
+}
+function selectProblemDifficulty(value: string) {
+  problemDifficulty.value = value;
+  resetProblemPage();
+}
+function toggleAssignmentProblem(problem: ProblemItem) {
+  selectedProblems.value = toggleProblem(selectedProblems.value, problem);
+}
+function toggleCurrentProblemPage() {
+  selectedProblems.value = setCurrentPageSelected(
+    selectedProblems.value,
+    problemResults.value,
+    !currentPageFullySelected.value,
+  );
+}
 function removeProblem(problemId: string) { selectedProblems.value = selectedProblems.value.filter((item) => item.id !== problemId); }
+function clearSelectedProblems() { selectedProblems.value = []; }
 async function createAssignment() {
   if (!assignmentTitle.value.trim()) return showMessage('请输入作业标题');
   if (!selectedProblems.value.length) return showMessage('请至少选择一道题目');
   try {
     await api.post('/api/teacher/assignments', {
-      classId: selectedClassId.value, title: assignmentTitle.value.trim(), description: assignmentDescription.value.trim(),
+      classId: selectedClassId.value,
+      title: assignmentTitle.value.trim(),
+      description: assignmentDescription.value.trim(),
       endTime: assignmentEndTime.value ? new Date(assignmentEndTime.value).toISOString() : undefined,
       problemIds: selectedProblems.value.map((item) => item.id),
+      allowLate: assignmentAllowLate.value,
+      latePenalty: Number(assignmentLatePenalty.value) || 0,
+      passCondition: assignmentPassCondition.value || 'ALL',
+      countExternalAc: assignmentCountExternalAc.value,
     });
-    assignmentTitle.value = ''; assignmentDescription.value = ''; assignmentEndTime.value = ''; selectedProblems.value = [];
+    assignmentTitle.value = '';
+    assignmentDescription.value = '';
+    assignmentEndTime.value = '';
+    assignmentAllowLate.value = false;
+    assignmentLatePenalty.value = 0;
+    assignmentPassCondition.value = 'ALL';
+    assignmentCountExternalAc.value = false;
+    selectedProblems.value = [];
     showMessage('作业已发布'); await loadAssignments();
   } catch (e: any) { showMessage('发布作业失败：' + (e.response?.data?.message || e.message)); }
 }
@@ -338,11 +481,63 @@ async function loadAssignments() {
   finally { assignmentsLoading.value = false; }
 }
 async function loadReport(assignmentId = selectedAssignmentId.value) {
-  if (!assignmentId) return;
-  selectedAssignmentId.value = assignmentId; reportLoading.value = true;
-  try { const { data } = await api.get(`/api/teacher/assignments/${assignmentId}/report`); report.value = data; }
+  if (!assignmentId) {
+    report.value = null;
+    return;
+  }
+  selectedAssignmentId.value = assignmentId;
+  reportLoading.value = true;
+  try {
+    const { data } = await api.get(`/api/teacher/assignments/${assignmentId}/report`, {
+      params: {
+        keyword: reportKeyword.value || undefined,
+        status: reportStatus.value || undefined,
+        completion: reportCompletion.value === 'all' ? undefined : reportCompletion.value,
+      },
+    });
+    report.value = data;
+  }
   catch (e: any) { showMessage('加载作业情况失败：' + (e.response?.data?.message || e.message)); }
   finally { reportLoading.value = false; }
+}
+function onReportAssignmentChange(value: string) {
+  selectedAssignmentId.value = value;
+  if (value) void loadReport(value);
+  else report.value = null;
+}
+async function exportReportCsv() {
+  if (!selectedAssignmentId.value) return showMessage('请先选择作业');
+  try {
+    const { data } = await api.get(`/api/teacher/assignments/${selectedAssignmentId.value}/report.csv`, {
+      params: {
+        keyword: reportKeyword.value || undefined,
+        status: reportStatus.value || undefined,
+        completion: reportCompletion.value === 'all' ? undefined : reportCompletion.value,
+      },
+      responseType: 'blob',
+    });
+    const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `assignment-${selectedAssignmentId.value}-report.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showMessage('CSV 已开始下载');
+  } catch (e: any) {
+    showMessage('导出失败：' + (e.response?.data?.message || e.message));
+  }
+}
+async function settleCurrentAssignment() {
+  if (!selectedAssignmentId.value) return;
+  if (!window.confirm('确认结算该作业？结算后自动进度更新将锁定。')) return;
+  try {
+    await api.post(`/api/teacher/assignments/${selectedAssignmentId.value}/settle`);
+    showMessage('作业已结算');
+    await loadReport();
+  } catch (e: any) {
+    showMessage('结算失败：' + (e.response?.data?.message || e.message));
+  }
 }
 </script>
 
@@ -358,23 +553,17 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
         </button>
       </nav>
       <div class="sidebar-divider"></div>
-      <div ref="classSwitcher" class="class-switcher" @keydown.esc="classMenuOpen = false">
+      <section class="class-list-section" aria-label="当前班级">
         <span class="class-switcher-label">当前班级</span>
-        <button class="class-switcher-trigger" type="button" aria-haspopup="listbox" :aria-expanded="classMenuOpen" @click="classMenuOpen = !classMenuOpen" @keydown.down.prevent="classMenuOpen = true">
-          <i>{{ selectedClass?.name?.slice(0, 1) || '?' }}</i>
-          <span><strong>{{ selectedClass?.name || '选择班级' }}</strong><small>{{ selectedClass ? `${selectedClass.memberCount || 0} 名学生` : '从班级列表中选择' }}</small></span>
-          <ChevronDown :size="15" :class="{ rotated: classMenuOpen }" />
-        </button>
-        <div v-if="classMenuOpen" class="class-switcher-menu" role="listbox" aria-label="选择班级">
-          <p v-if="!classes.length">暂无可选班级</p>
-          <button v-for="item in classes" :key="item.id" type="button" role="option" :aria-selected="selectedClassId === item.id" :class="{ selected: selectedClassId === item.id }" @click="selectClassFromMenu(item.id)">
+        <div v-if="classes.length" class="class-list" role="list">
+          <button v-for="item in classes" :key="item.id" type="button" role="listitem" class="class-list-item" :class="{ selected: selectedClassId === item.id }" :title="sidebarCollapsed ? item.name : undefined" @click="selectClass(item.id)">
             <i>{{ item.name.slice(0, 1) }}</i>
-            <span><strong>{{ item.name }}</strong><small><b :class="item.status.toLowerCase()"></b>{{ classStatus(item.status) }} · {{ item.memberCount || 0 }} 人</small></span>
+            <span><strong>{{ item.name }}</strong><small>{{ item.memberCount || 0 }} 名学生</small></span>
             <Check v-if="selectedClassId === item.id" :size="15" />
           </button>
         </div>
-      </div>
-      <button class="sidebar-overview" @click="activePanel = 'overview'"><LayoutDashboard :size="16" />查看全部班级</button>
+        <p v-else class="class-list-empty">暂无可选班级</p>
+      </section>
     </aside>
 
     <main class="workspace-main">
@@ -460,13 +649,200 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 
         <section v-else-if="activePanel === 'assignment'" class="content-view">
           <div class="view-heading"><div><p>ASSIGNMENT BUILDER</p><h2>发布作业</h2><span>从题库选择题目并设置截止时间。</span></div><span class="selection-count">已选 {{ selectedProblems.length }} 题</span></div>
-          <section class="surface assignment-builder"><div class="form-grid"><label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label><label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label></div><label>作业说明<textarea v-model="assignmentDescription" rows="3" placeholder="可选"></textarea></label><div class="problem-search"><Search :size="17" /><input v-model="problemKeyword" placeholder="搜索题目标题或编号" @keyup.enter="searchProblems"><button :disabled="problemSearching" @click="searchProblems">搜索</button></div><div v-if="problemResults.length" class="problem-results"><button v-for="problem in problemResults" :key="problem.id" @click="addProblem(problem)"><span>{{ problem.title }}</span><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }} · 加入</small></button></div><div class="selected-problems"><p>已选题目</p><div v-if="selectedProblems.length"><span v-for="problem in selectedProblems" :key="problem.id">{{ problem.title }}<button title="移除" @click="removeProblem(problem.id)"><X :size="14" /></button></span></div><div v-else class="surface-empty compact">还没有选择题目</div></div><footer class="builder-footer"><span>发布后将同步到当前正式成员</span><button class="primary-command" :disabled="!selectedProblems.length" @click="createAssignment"><BookOpenCheck :size="16" />发布作业</button></footer></section>
+          <section class="surface assignment-builder">
+            <div class="form-grid">
+              <label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label>
+              <label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label>
+            </div>
+            <div class="assignment-rules-panel" aria-label="作业规则">
+              <div class="rules-heading">
+                <strong>完成规则</strong>
+                <span>与题库筛选组件同一套交互，发布后可再修改</span>
+              </div>
+              <div class="assignment-rules-grid">
+                <label class="rule-field">
+                  <span>通过条件</span>
+                  <FilterSelect v-model="assignmentPassCondition" :options="passConditionOptions" label="通过条件" />
+                </label>
+                <label class="rule-field">
+                  <span>迟交扣分 (%)</span>
+                  <input
+                    v-model.number="assignmentLatePenalty"
+                    type="number"
+                    min="0"
+                    max="100"
+                    :disabled="!assignmentAllowLate"
+                    placeholder="0"
+                  >
+                </label>
+              </div>
+              <div class="rule-toggles" role="group" aria-label="作业开关">
+                <button
+                  type="button"
+                  class="rule-toggle"
+                  :class="{ active: assignmentAllowLate }"
+                  :aria-pressed="assignmentAllowLate"
+                  @click="assignmentAllowLate = !assignmentAllowLate"
+                >
+                  允许补交
+                </button>
+                <button
+                  type="button"
+                  class="rule-toggle"
+                  :class="{ active: assignmentCountExternalAc }"
+                  :aria-pressed="assignmentCountExternalAc"
+                  @click="assignmentCountExternalAc = !assignmentCountExternalAc"
+                >
+                  外部 OJ AC 计入
+                </button>
+              </div>
+            </div>
+            <label>作业说明<textarea v-model="assignmentDescription" rows="3" placeholder="可选"></textarea></label>
+
+            <div class="assignment-workspace">
+              <section class="problem-bank" aria-label="题库选题">
+                <header class="problem-bank-heading">
+                  <div><strong>题库</strong><span>筛选后可批量加入当前作业</span></div>
+                  <span>{{ problemSearching ? '正在加载' : `共 ${problemTotal} 题` }}</span>
+                </header>
+                <div class="problem-filter-row">
+                  <label class="problem-keyword"><Search :size="16" /><input v-model="problemKeyword" placeholder="搜索题目标题、编号" @keyup.enter="resetProblemPage"></label>
+                  <FilterSelect v-model="problemSource" :options="problemSourceOptions" label="按来源筛选" @update:model-value="resetProblemPage" />
+                  <FilterSelect v-model="problemTag" :options="problemTagOptions" label="按标签筛选" @update:model-value="resetProblemPage" />
+                </div>
+                <div class="difficulty-filter" role="group" aria-label="按难度筛选">
+                  <button type="button" :class="{ active: !problemDifficulty }" :aria-pressed="!problemDifficulty" @click="selectProblemDifficulty('')">全部难度</button>
+                  <button v-for="item in pointDifficultyOptions" :key="item.value" type="button" :class="{ active: problemDifficulty === item.value }" :aria-pressed="problemDifficulty === item.value" @click="selectProblemDifficulty(item.value)">{{ item.level }}</button>
+                </div>
+
+                <div v-if="problemSearching" class="assignment-empty">正在加载题库...</div>
+                <template v-else>
+                  <div v-if="problemResults.length" class="assignment-table-wrap">
+                    <table class="assignment-table">
+                      <thead><tr><th><input type="checkbox" :checked="currentPageFullySelected" :aria-label="currentPageFullySelected ? '取消选择当前页' : '选择当前页'" @change="toggleCurrentProblemPage"></th><th>题目</th><th>来源</th><th>难度</th><th>标签</th></tr></thead>
+                      <tbody>
+                        <tr v-for="problem in problemResults" :key="problem.id" class="assignment-selectable-row" :class="{ selected: selectedProblemIds.has(problem.id) }" tabindex="0" :aria-label="`选择题目 ${problem.title}`" @click="toggleAssignmentProblem(problem)" @keydown.enter.prevent="toggleAssignmentProblem(problem)" @keydown.space.prevent="toggleAssignmentProblem(problem)">
+                          <td><input type="checkbox" :checked="selectedProblemIds.has(problem.id)" :aria-label="`选择题目 ${problem.title}`" @click.stop @change="toggleAssignmentProblem(problem)"></td>
+                          <td><strong>{{ problem.title }}</strong><small v-if="problem.sourceInfo?.remoteProblemId">{{ problem.sourceInfo.remoteProblemId }}</small></td>
+                          <td>{{ problemSourceLabel(problem) }}</td>
+                          <td><span class="problem-difficulty">{{ problemDifficultyLabel(problem) }}</span></td>
+                          <td><span v-for="tag in problem.tags.slice(0, 2)" :key="tag.name" class="assignment-tag">{{ tag.name }}</span><span v-if="problem.tags.length > 2" class="assignment-tag">+{{ problem.tags.length - 2 }}</span></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <label v-if="problemResults.length" class="assignment-mobile-page-toggle">
+                    <input type="checkbox" :checked="currentPageFullySelected" :aria-label="currentPageFullySelected ? '取消选择当前页' : '选择当前页'" @change="toggleCurrentProblemPage">
+                    <span>{{ currentPageFullySelected ? '取消选择当前页' : '选择当前页全部题目' }}</span>
+                  </label>
+                  <div v-if="problemResults.length" class="assignment-mobile-list">
+                    <label v-for="problem in problemResults" :key="problem.id" class="assignment-mobile-item" :class="{ selected: selectedProblemIds.has(problem.id) }">
+                      <input type="checkbox" :checked="selectedProblemIds.has(problem.id)" :aria-label="`选择题目 ${problem.title}`" @change="toggleAssignmentProblem(problem)">
+                      <span><strong>{{ problem.title }}</strong><small>{{ problemSourceLabel(problem) }} · {{ problemDifficultyLabel(problem) }}</small><em><i v-for="tag in problem.tags.slice(0, 2)" :key="tag.name">{{ tag.name }}</i></em></span>
+                    </label>
+                  </div>
+                  <div v-if="!problemResults.length" class="assignment-empty">没有符合筛选条件的题目</div>
+                </template>
+                <footer class="assignment-pagination">
+                  <button type="button" :disabled="problemPage <= 1 || problemSearching" @click="searchProblems(problemPage - 1)">上一页</button>
+                  <span>第 {{ problemPage }} / {{ problemTotalPages }} 页</span>
+                  <button type="button" :disabled="problemPage >= problemTotalPages || problemSearching" @click="searchProblems(problemPage + 1)">下一页</button>
+                </footer>
+              </section>
+
+              <aside class="assignment-problem-set" aria-label="作业题单">
+                <header><div><strong>作业题单</strong><span>已选 {{ selectedProblems.length }} 题</span></div><button v-if="selectedProblems.length" type="button" class="clear-problem-set" @click="clearSelectedProblems">清空</button></header>
+                <div v-if="selectedProblems.length" class="problem-set-list">
+                  <article v-for="problem in selectedProblems" :key="problem.id">
+                    <div><strong>{{ problem.title }}</strong><span>{{ problemSourceLabel(problem) }} · {{ problemDifficultyLabel(problem) }}</span></div>
+                    <button type="button" title="移除题目" :aria-label="`移除题目 ${problem.title}`" @click="removeProblem(problem.id)"><X :size="15" /></button>
+                  </article>
+                </div>
+                <div v-else class="problem-set-empty">从左侧题库勾选题目</div>
+                <footer class="builder-footer"><span>发布后同步至当前正式成员</span><button class="primary-command" :disabled="!selectedProblems.length" @click="createAssignment"><BookOpenCheck :size="16" />发布作业</button></footer>
+              </aside>
+            </div>
+          </section>
         </section>
 
         <section v-else class="content-view">
-          <div class="view-heading"><div><p>ASSIGNMENT REPORT</p><h2>作业报告</h2><span>按学生与题目查看完成情况。</span></div></div>
-          <div class="report-toolbar"><select v-model="selectedAssignmentId"><option value="">选择作业</option><option v-for="item in assignments" :key="item.id" :value="item.id">{{ item.title }}（{{ item._count?.problems || item.problems?.length || 0 }} 题 / {{ item._count?.students || 0 }} 人）</option></select><button class="primary-command" :disabled="!selectedAssignmentId || reportLoading" @click="loadReport()"><BarChart3 :size="16" />生成报告</button></div>
-          <section v-if="report" class="surface report-surface"><div class="report-summary"><div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div><div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div><div><strong>{{ report.assignment.title }}</strong><span>当前作业</span></div></div><div class="report-table"><table><thead><tr><th>学生</th><th>完成</th><th v-for="problem in report.problems" :key="problem.id">{{ problem.title }}</th></tr></thead><tbody><tr v-for="student in report.students" :key="student.user.id"><td>{{ student.user.nickname || student.user.username }}</td><td>{{ student.solvedCount }}/{{ student.totalProblems }}</td><td v-for="problem in student.problems" :key="problem.problemId"><span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span><small v-if="problem.attempts">{{ problem.attempts }} 次</small></td></tr></tbody></table></div></section><div v-else class="empty-state">选择一个作业查看完成情况</div>
+          <div class="view-heading">
+            <div>
+              <p>ASSIGNMENT REPORT</p>
+              <h2>作业报告</h2>
+              <span>按学生与题目查看完成情况，支持筛选与导出。</span>
+            </div>
+            <div class="report-actions">
+              <button class="secondary-command" :disabled="!selectedAssignmentId" @click="exportReportCsv"><Download :size="16" />导出 CSV</button>
+              <button class="secondary-command" :disabled="!selectedAssignmentId" @click="settleCurrentAssignment">结算作业</button>
+              <button class="primary-command" :disabled="!selectedAssignmentId || reportLoading" @click="loadReport()"><BarChart3 :size="16" />{{ reportLoading ? '生成中' : '生成报告' }}</button>
+            </div>
+          </div>
+
+          <section class="surface report-filter-surface">
+            <div class="report-filter-row">
+              <label class="rule-field report-assignment-field">
+                <span>作业</span>
+                <FilterSelect
+                  :model-value="selectedAssignmentId"
+                  :options="reportAssignmentOptions"
+                  label="选择作业"
+                  @update:model-value="onReportAssignmentChange"
+                />
+              </label>
+              <label class="problem-keyword report-search">
+                <Search :size="16" />
+                <input v-model="reportKeyword" placeholder="搜索学生用户名或昵称" @keyup.enter="loadReport()">
+              </label>
+              <FilterSelect v-model="reportStatus" :options="reportStatusOptions" label="按状态筛选" />
+              <FilterSelect
+                v-model="reportCompletion"
+                :options="reportCompletionOptions"
+                label="按完成度筛选"
+              />
+            </div>
+          </section>
+
+          <section v-if="report" class="surface report-surface">
+            <div class="report-summary">
+              <div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div>
+              <div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div>
+              <div><strong>{{ report.summary.filteredCount ?? report.students.length }}</strong><span>当前筛选</span></div>
+              <div><strong>{{ report.assignment.title }}</strong><span>当前作业</span></div>
+            </div>
+            <div v-if="!report.students.length" class="surface-empty">没有符合筛选条件的学生</div>
+            <div v-else class="report-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>学生</th>
+                    <th>状态</th>
+                    <th>完成</th>
+                    <th>得分</th>
+                    <th v-for="problem in report.problems" :key="problem.id">{{ problem.title }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="student in report.students" :key="student.user.id">
+                    <td>
+                      <span class="member-name">
+                        <i>{{ (student.user.nickname || student.user.username).slice(0, 1).toUpperCase() }}</i>
+                        {{ student.user.nickname || student.user.username }}
+                      </span>
+                    </td>
+                    <td><span class="judge-state" :class="statusClass(student.status || '')">{{ student.statusLabel || statusLabel(student.status || '') }}</span></td>
+                    <td>{{ student.solvedCount }}/{{ student.totalProblems }}</td>
+                    <td>{{ student.score ?? 0 }}</td>
+                    <td v-for="problem in student.problems" :key="problem.problemId">
+                      <span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span>
+                      <small v-if="problem.attempts">{{ problem.attempts }} 次</small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <div v-else class="empty-state">选择一个作业查看完成情况</div>
         </section>
       </template>
     </main>
@@ -474,19 +850,56 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 </template>
 
 <style scoped>
-.teacher-workspace { --navy:#173b66; --blue:#2469ad; --pale:#eaf3fc; --ink:#203147; --muted:#728196; --line:#dfe7ef; display:flex; min-height:calc(100vh - 56px); color:var(--ink); background:#f3f5f7; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
+.teacher-workspace { --navy:#173b66; --blue:#2469ad; --pale:#eaf3fc; --ink:#203147; --muted:#728196; --line:#dfe7ef; --surface:#fff; --surface-low:#f7fbff; --outline:#cbd9e6; --primary:#2469ad; --primary-strong:#174f84; --primary-container:#e7efff; display:flex; min-height:calc(100vh - 56px); color:var(--ink); background:#f3f5f7; font-family:'Manrope Variable','Noto Sans SC Variable',sans-serif; }
 .workspace-sidebar { position:sticky; top:56px; width:264px; height:calc(100vh - 56px); flex:0 0 264px; padding:22px 14px; border-right:1px solid var(--line); background:#f8fbfe; }
 .sidebar-brand { display:flex; align-items:center; gap:10px; padding:0 7px 18px; }.sidebar-brand>span { display:grid; width:38px; height:38px; place-items:center; border-radius:8px; color:#fff; background:var(--navy); }.sidebar-brand div { display:grid; gap:2px; }.sidebar-brand strong { font-size:14px; }.sidebar-brand small,.workspace-nav small { color:#8b98a9; font-size:10px; }.sidebar-label { margin:7px 9px; color:#8a98a8; font-size:10px; font-weight:900; }
 .workspace-nav { display:grid; gap:4px; }.workspace-nav button { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:9px; width:100%; min-height:48px; padding:7px 10px; border:0; border-radius:7px; color:#607187; text-align:left; background:transparent; cursor:pointer; }.workspace-nav button:hover { color:#1f5d94; background:#edf5fc; }.workspace-nav button.active { color:#fff; background:var(--navy); box-shadow:0 6px 14px rgba(23,59,102,.18); }.workspace-nav button span { display:grid; gap:2px; }.workspace-nav button strong { font-size:12px; }.workspace-nav button.active small { color:#cfdef0; }.workspace-nav b { display:grid; min-width:21px; height:20px; place-items:center; border-radius:6px; color:#8a5b00; background:#fff0bd; font-size:10px; }.sidebar-divider { height:1px; margin:16px 5px; background:var(--line); }.class-switcher { position:relative; display:grid; gap:7px; margin:0 7px; color:#718095; font-size:10px; font-weight:900; }.class-switcher-label { padding-left:2px; }.class-switcher-trigger { display:grid; grid-template-columns:32px minmax(0,1fr) 16px; min-height:50px; align-items:center; gap:8px; width:100%; padding:7px 8px; border:1px solid #cfdae5; border-radius:7px; color:#314a63; text-align:left; background:#fff; font:inherit; cursor:pointer; box-shadow:0 3px 8px rgba(23,59,102,.04); }.class-switcher-trigger:hover,.class-switcher-trigger[aria-expanded="true"] { border-color:#7fa9ce; box-shadow:0 0 0 3px rgba(36,105,173,.08); }.class-switcher-trigger i,.class-switcher-menu button>i { display:grid; width:32px; height:32px; place-items:center; border-radius:6px; color:#fff; background:#2469ad; font-size:12px; font-style:normal; font-weight:900; }.class-switcher-trigger>span,.class-switcher-menu button>span { display:grid; gap:2px; min-width:0; }.class-switcher-trigger strong,.class-switcher-menu strong { overflow:hidden; color:#30465d; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }.class-switcher-trigger small,.class-switcher-menu small { color:#8492a2; font-size:9px; font-weight:650; }.class-switcher-trigger>svg { transition:transform .16s; }.class-switcher-trigger>svg.rotated { transform:rotate(180deg); }.class-switcher-menu { position:absolute; z-index:20; top:calc(100% + 6px); left:0; display:grid; width:100%; max-height:250px; padding:5px; overflow-y:auto; border:1px solid #cfdae5; border-radius:7px; background:#fff; box-shadow:0 14px 30px rgba(23,59,102,.18); }.class-switcher-menu>p { margin:0; padding:14px 8px; color:#8a97a6; text-align:center; }.class-switcher-menu button { display:grid; grid-template-columns:32px minmax(0,1fr) 16px; align-items:center; gap:8px; width:100%; min-height:47px; padding:6px; border:0; border-radius:5px; color:#36506a; text-align:left; background:transparent; font:inherit; cursor:pointer; }.class-switcher-menu button:hover { background:#edf5fc; }.class-switcher-menu button.selected { background:#e5f1fc; }.class-switcher-menu button>i { color:#245f94; background:#dcecf9; }.class-switcher-menu small { display:flex; align-items:center; gap:4px; }.class-switcher-menu small b { width:6px; height:6px; border-radius:50%; background:#9aa6b3; }.class-switcher-menu small b.approved { background:#2b9a6d; }.class-switcher-menu small b.pending { background:#d69a27; }.class-switcher-menu small b.rejected { background:#c86159; }.class-switcher-menu button>svg { color:#2469ad; }.sidebar-overview { display:flex; align-items:center; gap:7px; width:calc(100% - 14px); margin:9px 7px 0; padding:8px 9px; border:0; color:#286195; background:transparent; font-weight:800; cursor:pointer; }
 .workspace-main { min-width:0; flex:1; padding:26px 30px 64px; }.workspace-hero,.workspace-main>section,.workspace-main>.message-bar,.workspace-main>.empty-state { width:min(1160px,100%); margin-right:auto; margin-left:auto; }.workspace-hero { display:flex; min-height:158px; align-items:center; justify-content:space-between; gap:24px; padding:28px 34px; border-radius:8px; color:#fff; background:var(--navy); box-shadow:0 14px 32px rgba(23,59,102,.16); }.workspace-hero p,.view-heading p { margin:0 0 6px; color:#8fc2ec; font-size:10px; font-weight:900; }.workspace-hero h1 { margin:0; font-size:34px; letter-spacing:0; }.workspace-hero>div>span { display:block; margin-top:9px; color:#d8e7f5; font-size:13px; }.hero-facts { display:flex; border:1px solid rgba(255,255,255,.18); border-radius:8px; }.hero-facts div { display:grid; min-width:90px; gap:3px; padding:13px 16px; text-align:center; }.hero-facts div+div { border-left:1px solid rgba(255,255,255,.16); }.hero-facts strong { font-size:23px; }.hero-facts small { color:#bcd0e5; font-size:10px; }
 .message-bar { position:relative; display:flex; align-items:center; justify-content:space-between; margin-top:15px; padding:10px 12px; border:1px solid #bad5ed; border-radius:6px; color:#245b8b; background:#edf7ff; font-size:13px; }.message-bar button { display:grid; width:26px; height:26px; place-items:center; border:0; color:inherit; background:transparent; cursor:pointer; }.overview-view,.content-view { margin-top:22px; }.view-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin-bottom:16px; }.view-heading h2 { margin:0; font-size:25px; letter-spacing:0; }.view-heading>div>span { color:var(--muted); font-size:12px; }.create-class { display:flex; gap:8px; }.create-class input { width:250px; height:40px; padding:0 11px; border:1px solid #cad6e2; border-radius:6px; }.create-class button,.primary-command,.secondary-command,.danger-command { display:inline-flex; min-height:38px; align-items:center; justify-content:center; gap:7px; padding:0 13px; border-radius:6px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }.create-class button,.primary-command { border:0; color:#fff; background:var(--blue); }.secondary-command { border:1px solid #cbd9e6; color:#315c84; background:#fff; }.danger-command { width:38px; padding:0; border:1px solid #e8c4c0; color:#a13f37; background:#fff; }.primary-command:disabled,.secondary-command:disabled { opacity:.5; cursor:default; }
 .class-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }.class-card { display:flex; min-height:222px; flex-direction:column; padding:18px; border:1px solid var(--line); border-radius:8px; color:var(--ink); text-align:left; background:#fff; cursor:pointer; transition:transform .18s,border-color .18s,box-shadow .18s; }.class-card:hover,.class-card.selected { border-color:#8eb8da; transform:translateY(-3px); box-shadow:0 12px 24px rgba(23,59,102,.09); }.class-card-top { display:flex; align-items:center; justify-content:space-between; }.class-initial { display:grid; width:42px; height:42px; place-items:center; border-radius:8px; color:#1c5e96; background:#dcecf9; font-size:18px; font-weight:900; }.class-state { padding:4px 7px; border-radius:5px; font-size:10px; font-weight:900; }.class-state.approved { color:#197050; background:#e4f5ec; }.class-state.pending { color:#916100; background:#fff2c8; }.class-state.rejected { color:#a34841; background:#fdecea; }.class-card h3 { margin:16px 0 5px; font-size:17px; }.class-card>p { margin:0; color:var(--muted); font-size:12px; }.class-meta { display:grid; gap:7px; margin-top:17px; color:#6d7c8e; font-size:11px; }.class-meta span { display:flex; align-items:center; gap:6px; }.class-card footer { display:flex; align-items:center; justify-content:space-between; margin-top:auto; padding-top:16px; color:#24669f; border-top:1px solid #edf1f5; font-size:12px; font-weight:900; }
-.access-grid { display:grid; grid-template-columns:.8fr 1.2fr; gap:16px; }.surface { padding:19px; border:1px solid var(--line); border-radius:8px; background:#fff; box-shadow:0 7px 20px rgba(23,59,102,.04); }.surface-title { display:flex; align-items:center; gap:10px; }.surface-title>span { display:grid; width:36px; height:36px; place-items:center; border-radius:7px; color:#215d91; background:#e4f0fb; }.surface-title h3 { margin:0; font-size:15px; }.surface-title p { margin:3px 0 0; color:var(--muted); font-size:11px; }.code-value { margin:24px 0 8px; color:#174f84; font-family:Consolas,monospace; font-size:31px; font-weight:900; letter-spacing:3px; }.code-value.inactive { color:#8a97a6; font-family:inherit; font-size:24px; letter-spacing:0; }.code-expiry { display:flex; align-items:center; gap:6px; margin:0 0 19px; color:#738196; font-size:11px; }.code-surface label,.assignment-builder label { display:grid; gap:6px; color:#57687b; font-size:11px; font-weight:850; }.code-surface input,.assignment-builder input,.assignment-builder textarea,.import-surface textarea,.report-toolbar select { width:100%; padding:9px 10px; border:1px solid #ced9e4; border-radius:6px; color:#293d54; background:#fff; font:inherit; }.button-row { display:flex; gap:8px; margin-top:13px; }.application-list { display:grid; gap:8px; margin-top:17px; }.application-list article { display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px; border:1px solid #e5ebf1; border-radius:7px; background:#fbfdff; }.student-avatar { display:grid; width:40px; height:40px; place-items:center; border-radius:50%; color:#235d92; background:#e3eef9; font-weight:900; }.application-list article>div { display:grid; gap:3px; min-width:0; }.application-list strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }.application-list small { color:#8491a1; font-size:10px; }.application-list footer { display:flex; gap:6px; }.application-list footer button { display:inline-flex; align-items:center; gap:4px; padding:6px 8px; border-radius:5px; background:#fff; font-size:11px; font-weight:850; cursor:pointer; }.approve { border:1px solid #b9ddca; color:#177245; }.reject { border:1px solid #ecc7c4; color:#a63b34; }
+.access-grid { display:grid; grid-template-columns:.8fr 1.2fr; gap:16px; }.surface { padding:19px; border:1px solid var(--line); border-radius:8px; background:#fff; box-shadow:0 7px 20px rgba(23,59,102,.04); }.surface-title { display:flex; align-items:center; gap:10px; }.surface-title>span { display:grid; width:36px; height:36px; place-items:center; border-radius:7px; color:#215d91; background:#e4f0fb; }.surface-title h3 { margin:0; font-size:15px; }.surface-title p { margin:3px 0 0; color:var(--muted); font-size:11px; }.code-value { margin:24px 0 8px; color:#174f84; font-family:Consolas,monospace; font-size:31px; font-weight:900; letter-spacing:3px; }.code-value.inactive { color:#8a97a6; font-family:inherit; font-size:24px; letter-spacing:0; }.code-expiry { display:flex; align-items:center; gap:6px; margin:0 0 19px; color:#738196; font-size:11px; }.code-surface label,.assignment-builder > label,.assignment-builder .form-grid > label { display:grid; gap:6px; color:#57687b; font-size:11px; font-weight:850; }.code-surface input,.assignment-builder .form-grid input,.assignment-builder > label > input,.assignment-builder > label > textarea,.import-surface textarea { width:100%; padding:9px 10px; border:1px solid #ced9e4; border-radius:8px; color:#293d54; background:#fff; font:inherit; }.button-row { display:flex; gap:8px; margin-top:13px; }.application-list { display:grid; gap:8px; margin-top:17px; }.application-list article { display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px; border:1px solid #e5ebf1; border-radius:7px; background:#fbfdff; }.student-avatar { display:grid; width:40px; height:40px; place-items:center; border-radius:50%; color:#235d92; background:#e3eef9; font-weight:900; }.application-list article>div { display:grid; gap:3px; min-width:0; }.application-list strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }.application-list small { color:#8491a1; font-size:10px; }.application-list footer { display:flex; gap:6px; }.application-list footer button { display:inline-flex; align-items:center; gap:4px; padding:6px 8px; border-radius:5px; background:#fff; font-size:11px; font-weight:850; cursor:pointer; }.approve { border:1px solid #b9ddca; color:#177245; }.reject { border:1px solid #ecc7c4; color:#a63b34; }
 .surface-empty,.empty-state { display:grid; min-height:130px; place-items:center; align-content:center; gap:7px; color:#8794a3; text-align:center; font-size:12px; }.empty-state { min-height:260px; }.surface-empty.compact { min-height:50px; }.table-surface { padding:0; overflow:hidden; }.table-surface table,.report-table table { width:100%; border-collapse:collapse; }.table-surface th,.table-surface td,.report-table th,.report-table td { padding:12px 15px; text-align:left; border-bottom:1px solid #edf1f5; font-size:12px; }.table-surface th,.report-table th { color:#6f7d8d; background:#f7f9fb; font-size:10px; }.member-name { display:flex; align-items:center; gap:9px; font-weight:800; }.member-name i { display:grid; width:31px; height:31px; place-items:center; border-radius:50%; color:#245f94; background:#e5f0fb; font-style:normal; }.table-action { display:grid; width:32px; height:32px; place-items:center; margin-left:auto; border:0; border-radius:6px; color:#a3433b; background:#fff1ef; cursor:pointer; }.narrow-view { max-width:820px; margin-right:auto!important; margin-left:auto!important; }.import-mode { display:inline-grid; grid-template-columns:1fr 1fr; gap:3px; margin-bottom:10px; padding:3px; border:1px solid #d7e1eb; border-radius:7px; background:#e9eef3; }.import-mode button { display:inline-flex; min-width:130px; height:36px; align-items:center; justify-content:center; gap:7px; border:0; border-radius:5px; color:#66778b; background:transparent; font:inherit; font-size:11px; font-weight:850; cursor:pointer; }.import-mode button.active { color:#184f82; background:#fff; box-shadow:0 2px 6px rgba(23,59,102,.1); }.import-surface textarea { min-height:220px; margin-top:20px; resize:vertical; }.import-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; }.template-command { flex:0 0 auto; }.format-strip { display:grid; grid-template-columns:repeat(4,1fr); margin-top:18px; border:1px solid #dce6ef; border-radius:7px; overflow:hidden; }.format-strip span { display:grid; gap:2px; padding:9px 11px; color:#738195; background:#f8fbfd; font-size:9px; }.format-strip span+span { border-left:1px solid #dce6ef; }.format-strip b { color:#365a7d; font-size:11px; }.file-input { position:absolute; width:1px; height:1px; overflow:hidden; opacity:0; pointer-events:none; }.excel-dropzone { display:grid; width:100%; min-height:158px; place-items:center; align-content:center; gap:7px; margin-top:14px; border:1px dashed #91b5d5; border-radius:7px; color:#52708d; background:#f4f9fd; font:inherit; cursor:pointer; transition:border-color .15s,background .15s,transform .15s; }.excel-dropzone:hover,.excel-dropzone.dragging { border-color:#2469ad; background:#e9f4fc; transform:translateY(-1px); }.excel-dropzone>span { display:grid; width:45px; height:45px; place-items:center; border-radius:50%; color:#fff; background:#2469ad; }.excel-dropzone strong { color:#294b6c; font-size:13px; }.excel-dropzone small { color:#8090a1; font-size:10px; }.excel-preview { margin-top:15px; border:1px solid #dce5ed; border-radius:7px; overflow:hidden; }.preview-summary { display:flex; align-items:center; gap:10px; padding:10px 12px; color:#68788b; background:#f7f9fb; font-size:10px; }.preview-summary strong { margin-right:auto; color:#304a64; font-size:12px; }.preview-summary span { padding:3px 6px; border-radius:4px; background:#e9eef3; }.preview-summary .preview-valid { color:#17704e; background:#e4f5ec; }.preview-summary .preview-error { color:#a43d36; background:#fdecea; }.preview-table-wrap { overflow-x:auto; }.preview-table-wrap table { width:100%; min-width:700px; border-collapse:collapse; }.preview-table-wrap th,.preview-table-wrap td { padding:9px 10px; border-top:1px solid #edf1f5; text-align:left; white-space:nowrap; font-size:10px; }.preview-table-wrap th { color:#718093; background:#fbfcfd; font-size:9px; }.preview-table-wrap tr.invalid td { background:#fff8f7; }.row-valid { color:#17704e; }.row-error { color:#a43d36; font-weight:750; }.preview-more { margin:0; padding:8px 12px; border-top:1px solid #edf1f5; color:#778698; background:#fbfcfd; font-size:10px; }.import-footer,.builder-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; color:#7b8999; font-size:11px; }
 .selection-count { padding:5px 9px; border-radius:5px; color:#225f96; background:#e5f1fc; font-size:11px; font-weight:900; }.form-grid { display:grid; grid-template-columns:1fr 260px; gap:12px; }.assignment-builder>label { margin-top:13px; }.assignment-builder textarea { resize:vertical; }.problem-search { display:grid; grid-template-columns:20px minmax(0,1fr) auto; align-items:center; gap:7px; margin-top:16px; padding:7px 7px 7px 10px; border:1px solid #cfdbe6; border-radius:7px; color:#7c8998; }.problem-search input { border:0; outline:0; }.problem-search button { height:32px; padding:0 12px; border:0; border-radius:5px; color:#fff; background:var(--navy); font-weight:800; cursor:pointer; }.problem-results { max-height:220px; margin-top:8px; overflow:auto; border:1px solid #d8e5f0; }.problem-results button { display:flex; width:100%; justify-content:space-between; gap:12px; padding:9px 11px; border:0; border-bottom:1px solid #eaf0f5; color:#314a63; text-align:left; background:#f8fbfe; cursor:pointer; }.problem-results small { color:#24669f; }.selected-problems { margin-top:17px; }.selected-problems>p { color:#586b7f; font-size:11px; font-weight:900; }.selected-problems>div { display:flex; flex-wrap:wrap; gap:7px; }.selected-problems span { display:inline-flex; align-items:center; gap:6px; padding:6px 8px; border:1px solid #cfe0ef; border-radius:6px; color:#315b81; background:#f3f8fd; font-size:11px; }.selected-problems span button { display:grid; place-items:center; border:0; color:#8b4a43; background:transparent; cursor:pointer; }
-.report-toolbar { display:flex; gap:9px; margin-bottom:14px; }.report-toolbar select { flex:1; max-width:620px; }.report-surface { padding:0; overflow:hidden; }.report-summary { display:grid; grid-template-columns:180px 130px minmax(0,1fr); gap:1px; background:#dce5ed; }.report-summary div { display:grid; gap:3px; padding:15px 17px; background:#f8fbfe; }.report-summary strong { color:#214f79; font-size:16px; }.report-summary span { color:#7e8b9a; font-size:10px; }.report-table { overflow:auto; }.report-table table { min-width:900px; }.judge-state { display:inline-block; padding:3px 6px; border-radius:5px; font-size:10px; }.judge-state.ok { color:#17704e; background:#e5f5ec; }.judge-state.bad { color:#a43d36; background:#fdecea; }.judge-state.pending { color:#8a6200; background:#fff2c9; }.judge-state.muted { color:#748293; background:#edf1f5; }.report-table td small { display:block; margin-top:3px; color:#8995a3; font-size:9px; }
-@media(max-width:980px){.teacher-workspace{display:block}.workspace-sidebar{position:static;width:auto;height:auto;padding:12px}.sidebar-brand,.sidebar-label,.sidebar-divider,.class-switcher,.sidebar-overview{display:none}.workspace-nav{grid-template-columns:repeat(3,1fr)}.workspace-nav button{grid-template-columns:20px 1fr}.workspace-nav button small,.workspace-nav button b{display:none}.workspace-main{padding:18px 16px 48px}.class-grid{grid-template-columns:repeat(2,1fr)}.access-grid{grid-template-columns:1fr}}
-@media(max-width:620px){.workspace-nav{grid-template-columns:repeat(2,1fr)}.workspace-hero{align-items:flex-start;flex-direction:column;padding:22px}.workspace-hero h1{font-size:28px}.hero-facts{width:100%}.hero-facts div{min-width:0;flex:1}.view-heading,.create-class,.report-toolbar,.import-footer,.builder-footer,.import-heading{align-items:stretch;flex-direction:column}.create-class input{width:100%}.class-grid{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.application-list article{grid-template-columns:40px 1fr}.application-list footer{grid-column:1/-1}.report-summary{grid-template-columns:1fr}.import-mode{display:grid}.import-mode button{min-width:0}.format-strip{grid-template-columns:1fr 1fr}.format-strip span:nth-child(3){border-left:0;border-top:1px solid #dce6ef}.format-strip span:nth-child(4){border-top:1px solid #dce6ef}.excel-dropzone{min-height:140px;padding:18px}.preview-summary{align-items:flex-start;flex-wrap:wrap}.preview-summary strong{width:100%;margin:0}.preview-table-wrap table{min-width:0;table-layout:fixed}.preview-table-wrap th,.preview-table-wrap td{padding:8px 5px;white-space:normal;overflow-wrap:anywhere}.preview-table-wrap th:nth-child(1){width:26px}.preview-table-wrap th:nth-child(2){width:70px}.preview-table-wrap th:nth-child(3){width:52px}.preview-table-wrap th:nth-child(4),.preview-table-wrap td:nth-child(4),.preview-table-wrap th:nth-child(5),.preview-table-wrap td:nth-child(5){display:none}}
+.report-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+.report-filter-surface { margin-bottom:14px; padding:16px 18px; }
+.report-filter-row { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(180px,1fr) minmax(130px,.7fr) minmax(130px,.7fr); gap:10px; align-items:end; }
+.report-search { width:100%; height:44px; }
+.report-assignment-field { min-width:0; }
+.report-filter-row :deep(.filter-select),
+.rule-field :deep(.filter-select) { width:100%; }
+.report-filter-row :deep(.filter-select__trigger),
+.rule-field :deep(.filter-select__trigger) { width:100%; min-height:44px; }
+.teacher-workspace :deep(.filter-select__menu) { border-radius:10px; box-shadow:0 12px 30px rgba(23,59,102,.14),0 2px 7px rgba(23,59,102,.07); }
+.teacher-workspace :deep(.filter-select__option) { min-height:40px; border-radius:7px; color:#314a63; }
+.teacher-workspace :deep(.filter-select__option.is-selected) { color:#1f5eff; background:#e7efff; }
+.report-surface { padding:0; overflow:hidden; }
+.report-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:#dce5ed; }
+.report-summary div { display:grid; gap:3px; padding:15px 17px; background:#f8fbfe; }
+.report-summary strong { color:#214f79; font-size:16px; }
+.report-summary span { color:#7e8b9a; font-size:10px; }
+.report-table { overflow:auto; }
+.report-table table { min-width:900px; }
+.judge-state { display:inline-block; padding:3px 6px; border-radius:5px; font-size:10px; font-weight:800; }
+.judge-state.ok { color:#17704e; background:#e5f5ec; }
+.judge-state.bad { color:#a43d36; background:#fdecea; }
+.judge-state.pending { color:#8a6200; background:#fff2c9; }
+.judge-state.muted { color:#748293; background:#edf1f5; }
+.report-table td small { display:block; margin-top:3px; color:#8995a3; font-size:9px; }
+.assignment-rules-panel { margin-top:14px; padding:14px 15px; border:1px solid #dce5ed; border-radius:10px; background:#f8fbfd; }
+.rules-heading { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.rules-heading strong { color:#29475f; font-size:12px; }
+.rules-heading span { color:#7c8998; font-size:10px; }
+.assignment-rules-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+.rule-field { display:grid !important; gap:6px; min-width:0; color:#57687b; font-size:11px; font-weight:850; }
+.rule-field > span { color:#57687b; }
+.rule-field input { width:100%; height:44px; padding:0 10px; border:1px solid #ced9e4; border-radius:8px; color:#293d54; background:#fff; font:inherit; }
+.rule-field input:disabled { color:#9aa7b6; background:#f3f6f9; }
+.rule-field input:focus { border-color:#81a9d0; outline:0; box-shadow:0 0 0 3px rgba(36,105,173,.09); }
+.rule-toggles { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.rule-toggle { min-height:34px; padding:0 12px; border:1px solid #d7e1eb; border-radius:7px; color:#62768b; background:#fff; font:inherit; font-size:11px; font-weight:800; cursor:pointer; }
+.rule-toggle:hover,.rule-toggle.active { border-color:#a9c7e2; color:#1f5eff; background:#e7efff; }
+@media(max-width:980px){.teacher-workspace{display:block}.workspace-sidebar{position:static;width:auto;height:auto;padding:12px}.sidebar-brand,.sidebar-label,.sidebar-divider,.class-switcher,.sidebar-overview{display:none}.workspace-nav{grid-template-columns:repeat(3,1fr)}.workspace-nav button{grid-template-columns:20px 1fr}.workspace-nav button small,.workspace-nav button b{display:none}.workspace-main{padding:18px 16px 48px}.class-grid{grid-template-columns:repeat(2,1fr)}.access-grid{grid-template-columns:1fr}.report-filter-row{grid-template-columns:1fr 1fr}.report-assignment-field,.report-search{grid-column:1/-1}}
+@media(max-width:620px){.workspace-nav{grid-template-columns:repeat(2,1fr)}.workspace-hero{align-items:flex-start;flex-direction:column;padding:22px}.workspace-hero h1{font-size:28px}.hero-facts{width:100%}.hero-facts div{min-width:0;flex:1}.view-heading,.create-class,.report-actions,.import-footer,.builder-footer,.import-heading{align-items:stretch;flex-direction:column}.report-actions .primary-command,.report-actions .secondary-command{width:100%}.create-class input{width:100%}.class-grid{grid-template-columns:1fr}.form-grid,.assignment-rules-grid,.report-filter-row{grid-template-columns:1fr}.application-list article{grid-template-columns:40px 1fr}.application-list footer{grid-column:1/-1}.report-summary{grid-template-columns:1fr}.import-mode{display:grid}.import-mode button{min-width:0}.format-strip{grid-template-columns:1fr 1fr}.format-strip span:nth-child(3){border-left:0;border-top:1px solid #dce6ef}.format-strip span:nth-child(4){border-top:1px solid #dce6ef}.excel-dropzone{min-height:140px;padding:18px}.preview-summary{align-items:flex-start;flex-wrap:wrap}.preview-summary strong{width:100%;margin:0}.preview-table-wrap table{min-width:0;table-layout:fixed}.preview-table-wrap th,.preview-table-wrap td{padding:8px 5px;white-space:normal;overflow-wrap:anywhere}.preview-table-wrap th:nth-child(1){width:26px}.preview-table-wrap th:nth-child(2){width:70px}.preview-table-wrap th:nth-child(3){width:52px}.preview-table-wrap th:nth-child(4),.preview-table-wrap td:nth-child(4),.preview-table-wrap th:nth-child(5),.preview-table-wrap td:nth-child(5){display:none}}
 /* Teacher tools use the same white hero and pale-blue selected state as the problem library. */
 .sidebar-brand > span {
   background: #e7efff;
@@ -518,4 +931,146 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 .hero-facts div + div { border-left-color: #e4ebf3; }
 .hero-facts strong { color: #1f5eff; }
 .hero-facts small { color: #728092; }
+
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.class-list-section {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 7px;
+  margin: 0 7px;
+  color: #718095;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.class-list {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 4px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.class-list-item {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 16px;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #314a63;
+  text-align: left;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.class-list-item:hover { background: #edf5fc; }
+.class-list-item.selected { border-color: #c9dcf0; color: #1f5eff; background: #e7efff; }
+.class-list-item > i { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: #245f94; background: #dcecf9; font-size: 12px; font-style: normal; font-weight: 900; }
+.class-list-item.selected > i { color: #fff; background: #1f5eff; }
+.class-list-item > span { display: grid; min-width: 0; gap: 2px; }
+.class-list-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.class-list-item small { color: #8492a2; font-size: 9px; font-weight: 650; }
+.class-list-item > svg { color: #1f5eff; }
+.class-list-empty { margin: 0; padding: 12px 6px; color: #8492a2; text-align: center; }
+
+.assignment-builder { padding: 22px; }
+.assignment-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 272px; align-items: start; gap: 18px; margin-top: 18px; }
+.problem-bank { min-width: 0; }
+.problem-bank-heading,.assignment-problem-set > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.problem-bank-heading > div,.assignment-problem-set > header > div { display: grid; gap: 3px; }
+.problem-bank-heading strong,.assignment-problem-set strong { color: #29475f; font-size: 13px; }
+.problem-bank-heading span,.assignment-problem-set header span { color: #7c8998; font-size: 10px; }
+.problem-bank-heading > span { flex: 0 0 auto; padding: 4px 7px; border-radius: 999px; color: #245f94; background: #edf5fc; font-size: 10px; font-weight: 800; }
+.problem-filter-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(130px, .62fr) minmax(130px, .62fr); gap: 8px; margin-top: 13px; }
+.problem-keyword { display: flex !important; height: 44px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #ced9e4; border-radius: 8px; color: #778697; background: #fff; }
+.problem-keyword:focus-within { border-color: #81a9d0; box-shadow: 0 0 0 3px rgba(36, 105, 173, .09); }
+.problem-keyword input { min-width: 0; height: auto; padding: 0; border: 0; outline: 0; }
+.difficulty-filter { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.difficulty-filter button { min-width: 34px; height: 30px; padding: 0 8px; border: 1px solid #d7e1eb; border-radius: 7px; color: #62768b; background: #fff; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.difficulty-filter button:hover,.difficulty-filter button.active { border-color: #a9c7e2; color: #1f5eff; background: #e7efff; }
+.assignment-table-wrap { margin-top: 12px; overflow: auto; border: 1px solid #dce5ed; border-radius: 10px; }
+.assignment-table { width: 100%; min-width: 660px; border-collapse: collapse; }
+.assignment-table th,.assignment-table td { padding: 10px 11px; border-bottom: 1px solid #eaf0f5; color: #53677b; text-align: left; font-size: 11px; }
+.assignment-table th { color: #718094; background: #f8fafc; font-size: 10px; }
+.assignment-table th:first-child,.assignment-table td:first-child { width: 32px; text-align: center; }
+.assignment-table tbody tr { transition: background .14s; }
+.assignment-selectable-row { cursor: pointer; }
+.assignment-table tbody tr:hover { background: #f7fbff; }
+.assignment-table tbody tr.selected { background: #eef5ff; }
+.assignment-selectable-row:focus-visible { position: relative; outline: 2px solid #1f5eff; outline-offset: -2px; }
+.assignment-table td strong { display: block; color: #304a64; font-size: 12px; overflow-wrap: anywhere; }
+.assignment-table td small { display: block; margin-top: 3px; color: #8794a2; font-size: 9px; }
+.problem-difficulty { display: inline-flex; padding: 3px 5px; border-radius: 5px; color: #365d85; background: #edf4fa; font-size: 9px; white-space: nowrap; }
+.assignment-tag { display: inline-block; max-width: 100px; margin: 2px 3px 2px 0; overflow: hidden; padding: 3px 5px; border-radius: 5px; color: #55708a; text-overflow: ellipsis; white-space: nowrap; background: #f0f3f6; font-size: 9px; }
+.assignment-empty { display: grid; min-height: 160px; place-items: center; margin-top: 12px; border: 1px dashed #cfdce8; border-radius: 10px; color: #8492a1; font-size: 12px; }
+.assignment-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; color: #738297; font-size: 10px; }
+.assignment-pagination button { min-height: 32px; padding: 0 10px; border: 1px solid #d4e0eb; border-radius: 7px; color: #315f88; background: #fff; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.assignment-pagination button:disabled { opacity: .48; cursor: default; }
+.assignment-problem-set { position: sticky; top: 76px; padding-left: 16px; border-left: 1px solid #dce5ed; }
+.clear-problem-set { border: 0; color: #a43d36; background: transparent; font: inherit; font-size: 10px; font-weight: 850; cursor: pointer; }
+.problem-set-list { display: grid; gap: 7px; max-height: 360px; margin-top: 13px; overflow-y: auto; }
+.problem-set-list article { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 7px; padding: 9px 8px 9px 10px; border-left: 2px solid #9cc8f0; background: #f7fbff; }
+.problem-set-list article > div { display: grid; min-width: 0; gap: 3px; }
+.problem-set-list article strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.problem-set-list article span { overflow: hidden; color: #8290a0; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.problem-set-list article button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 7px; color: #a3433b; background: #fff1ef; cursor: pointer; }
+.problem-set-empty { display: grid; min-height: 144px; place-items: center; margin-top: 13px; border: 1px dashed #d1dce6; color: #8a97a5; text-align: center; font-size: 11px; }
+.assignment-problem-set .builder-footer { align-items: stretch; flex-direction: column; margin-top: 14px; }
+.assignment-problem-set .builder-footer .primary-command { width: 100%; }
+.assignment-mobile-list,.assignment-builder .assignment-mobile-page-toggle { display: none; }
+
+.teacher-workspace.sidebar-collapsed .class-list-section { display: block; margin: 0; }
+.teacher-workspace.sidebar-collapsed .class-list-section .class-switcher-label { display: none; }
+.teacher-workspace.sidebar-collapsed .class-list { gap: 5px; overflow-y: auto; }
+.teacher-workspace.sidebar-collapsed .class-list-item { grid-template-columns: 1fr; justify-items: center; padding: 7px 0; }
+.teacher-workspace.sidebar-collapsed .class-list-item > span,.teacher-workspace.sidebar-collapsed .class-list-item > svg { display: none; }
+
+@media(max-width:980px) {
+  .workspace-sidebar { display: block; overflow: visible; }
+  .teacher-workspace.sidebar-collapsed .workspace-sidebar { width: auto; flex-basis: auto; padding: 12px; }
+  .class-list-section { display: block; margin: 10px 4px 0; }
+  .class-switcher-label { display: none; }
+  .class-list { display: flex; width: max-content; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 0 2px 2px; }
+  .class-list-item { width: 142px; min-height: 42px; flex: 0 0 142px; }
+  .teacher-workspace.sidebar-collapsed .class-list-section { display: block; }
+  .teacher-workspace.sidebar-collapsed .class-list { display: flex; overflow-x: auto; }
+  .teacher-workspace.sidebar-collapsed .class-list-item { grid-template-columns: 32px minmax(0, 1fr) 16px; justify-items: stretch; padding: 6px 8px; }
+  .teacher-workspace.sidebar-collapsed .class-list-item > span,.teacher-workspace.sidebar-collapsed .class-list-item > svg { display: grid; }
+  .assignment-workspace { grid-template-columns: 1fr; }
+  .assignment-problem-set { position: static; padding-top: 16px; padding-left: 0; border-top: 1px solid #dce5ed; border-left: 0; }
+  .assignment-problem-set .builder-footer { align-items: center; flex-direction: row; }
+  .assignment-problem-set .builder-footer .primary-command { width: auto; }
+}
+
+@media(max-width:620px) {
+  .assignment-builder { padding: 16px; }
+  .problem-filter-row { grid-template-columns: 1fr; }
+  .difficulty-filter button { min-width: 38px; min-height: 36px; }
+  .assignment-table-wrap { display: none; }
+  .assignment-builder .assignment-mobile-page-toggle { display: inline-flex; width: fit-content; min-height: 38px; align-items: center; gap: 8px; margin-top: 12px; padding: 0 10px; border: 1px solid #d5e2ed; border-radius: 8px; color: #315f88; background: #f7fbff; font-size: 11px; font-weight: 800; }
+  .assignment-mobile-list { display: grid; gap: 7px; margin-top: 12px; }
+  .assignment-mobile-item { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 9px; padding: 11px; border: 1px solid #dce5ed; border-radius: 10px; background: #fff; }
+  .assignment-mobile-item.selected { border-color: #a9c7e2; background: #eef5ff; }
+  .assignment-mobile-item > span { display: grid; min-width: 0; gap: 4px; }
+  .assignment-mobile-item strong { overflow-wrap: anywhere; color: #304a64; font-size: 12px; }
+  .assignment-mobile-item small { color: #7b8998; font-size: 10px; }
+  .assignment-mobile-item em { display: flex; flex-wrap: wrap; gap: 4px; font-style: normal; }
+  .assignment-mobile-item i { padding: 2px 5px; border-radius: 4px; color: #58718a; background: #f0f3f6; font-size: 9px; font-style: normal; }
+  .assignment-pagination { justify-content: space-between; }
+  .assignment-problem-set .builder-footer { align-items: stretch; flex-direction: column; }
+  .assignment-problem-set .builder-footer .primary-command { width: 100%; }
+}
 </style>

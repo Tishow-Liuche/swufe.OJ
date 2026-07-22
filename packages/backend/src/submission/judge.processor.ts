@@ -1,9 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NativeJudgeService } from '../judge/native-judge.service';
 import { LearningService } from '../learning/learning.service';
+import { AssignmentProgressService } from '../teacher/assignment-progress.service';
 
 interface JudgeJob {
   submissionId: string;
@@ -40,6 +41,7 @@ export class JudgeProcessor extends WorkerHost {
     private prisma: PrismaService,
     private judge: NativeJudgeService,
     private learning: LearningService,
+    @Optional() private assignmentProgress?: AssignmentProgressService,
   ) {
     super();
   }
@@ -154,6 +156,7 @@ export class JudgeProcessor extends WorkerHost {
       if (compileResult.fileId) this.judge.deleteFile(compileResult.fileId).catch(() => {});
       if (checkerCompileResult?.fileId) this.judge.deleteFile(checkerCompileResult.fileId).catch(() => {});
 
+      const judgedAt = new Date();
       await this.prisma.submission.update({
         where: { id: data.submissionId },
         data: {
@@ -161,11 +164,24 @@ export class JudgeProcessor extends WorkerHost {
           score: finalScore,
           timeUsed: maxTime,
           memoryUsed: maxMemory,
-          judgedAt: new Date(),
+          judgedAt,
         },
       });
       await this.finishTask(data.submissionId);
       await this.learning.recordSubmissionResult(data.submissionId, finalStatus);
+      if (finalStatus === 'ACCEPTED' && this.assignmentProgress) {
+        const submission = await this.prisma.submission.findUnique({
+          where: { id: data.submissionId },
+          select: { userId: true, problemId: true },
+        });
+        if (submission) {
+          await this.assignmentProgress.onLocalAccepted(
+            submission.userId,
+            submission.problemId,
+            judgedAt,
+          );
+        }
+      }
       this.logger.log(`Submission ${data.submissionId}: ${finalStatus} (${finalScore}分)`);
       return { status: finalStatus, score: finalScore };
     } catch (error: any) {

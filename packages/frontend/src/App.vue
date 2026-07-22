@@ -113,7 +113,7 @@ async function logout() {
           <router-link :to="protectedNavigation('/leaderboard')">排行榜</router-link>
           <router-link :to="protectedNavigation('/contests')">比赛</router-link>
           <router-link :to="protectedNavigation('/problem-lists')">学习</router-link>
-          <router-link to="/community">社区</router-link>
+          <router-link :to="protectedNavigation('/community')">社区</router-link>
           <router-link v-if="auth.isTeacher()" to="/teacher/classes">班级</router-link>
           <router-link v-if="auth.isStudent()" to="/classes">班级</router-link>
         </nav>
@@ -171,7 +171,7 @@ async function logout() {
         <router-link :to="protectedNavigation('/leaderboard')" @click="closeMobileMenu">排行榜</router-link>
         <router-link :to="protectedNavigation('/contests')" @click="closeMobileMenu">比赛</router-link>
         <router-link :to="protectedNavigation('/problem-lists')" @click="closeMobileMenu">学习</router-link>
-        <router-link to="/community" @click="closeMobileMenu">社区</router-link>
+        <router-link :to="protectedNavigation('/community')" @click="closeMobileMenu">社区</router-link>
         <router-link v-if="auth.isTeacher()" to="/teacher/classes" @click="closeMobileMenu">班级</router-link>
         <router-link v-if="auth.isStudent()" to="/classes" @click="closeMobileMenu">班级</router-link>
         <button type="button" @click="openSearch"><Search :size="17" />搜索题目</button>

@@ -13,6 +13,7 @@ import { CodeforcesModule } from '../codeforces/cf.module';
 import { LuoguModule } from '../luogu/luogu.module';
 import { LearningModule } from '../learning/learning.module';
 import { QojModule } from '../qoj/qoj.module';
+import { TeacherModule } from '../teacher/teacher.module';
 
 export function createRedisConnectionOptions(c: ConfigService) {
   const port = Number(c.getOrThrow<string>('REDIS_PORT'));
@@ -29,7 +30,7 @@ export function createRedisConnectionOptions(c: ConfigService) {
 
 @Module({
   imports: [
-    JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule, QojModule,
+    JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule, QojModule, TeacherModule,
     BullModule.registerQueueAsync({
       name: 'judge', imports: [ConfigModule], inject: [ConfigService],
       useFactory: (c: ConfigService) => {

@@ -86,10 +86,22 @@ export class UserController {
     return this.userService.listMyClasses(req.user.id);
   }
 
+  @Get('assignments')
+  @UseGuards(AuthGuard('jwt'))
+  listMyAssignments(@Req() req: any) {
+    return this.userService.listMyAssignments(req.user.id);
+  }
+
   @Post('classes/join')
   @UseGuards(AuthGuard('jwt'))
   applyToClass(@Req() req: any, @Body('joinCode') joinCode: string) {
     return this.userService.applyToClass(req.user.id, joinCode);
+  }
+
+  @Get('classes/:classId/assignments')
+  @UseGuards(AuthGuard('jwt'))
+  getClassAssignments(@Req() req: any, @Param('classId') classId: string) {
+    return this.userService.getClassAssignments(req.user.id, classId);
   }
 
   @Get('stats')

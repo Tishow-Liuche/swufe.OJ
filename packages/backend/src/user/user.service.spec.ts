@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { UserService } from './user.service';
 import * as bcrypt from 'bcryptjs';
 
@@ -13,6 +13,7 @@ describe('UserService profile settings', () => {
       user: {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
+        findMany: jest.fn(),
         update: jest.fn(),
       },
       userSession: {
@@ -39,11 +40,17 @@ describe('UserService profile settings', () => {
       class: {
         findUnique: jest.fn(),
       },
+      assignment: {
+        findMany: jest.fn(),
+      },
       classMember: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+      },
+      assignmentStudent: {
+        findMany: jest.fn(),
       },
       $transaction: jest.fn(async (operations: any[]) => Promise.all(operations)),
     };
@@ -107,6 +114,34 @@ describe('UserService profile settings', () => {
       select: expect.objectContaining({ mustChangePassword: true }),
     }));
     expect(result).toMatchObject({ mustChangePassword: true });
+  });
+
+  it('includes the approved member count in each student class record', async () => {
+    prisma.classMember.findMany.mockResolvedValue([{
+      id: 'membership-1',
+      status: 'APPROVED',
+      reviewNote: null,
+      joinedAt: new Date('2026-07-22T08:00:00.000Z'),
+      reviewedAt: new Date('2026-07-22T09:00:00.000Z'),
+      class: {
+        id: 'class-1', name: '算法训练一班', teacherId: 'teacher-1', status: 'APPROVED', course: null,
+        _count: { members: 36 },
+      },
+    }]);
+    prisma.user.findMany.mockResolvedValue([{ id: 'teacher-1', username: 'teacher', nickname: '王老师' }]);
+
+    const result = await service.listMyClasses('student-1');
+
+    expect(prisma.classMember.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        class: expect.objectContaining({
+          select: expect.objectContaining({
+            _count: { select: { members: { where: { status: 'APPROVED' } } } },
+          }),
+        }),
+      }),
+    }));
+    expect(result[0].class._count.members).toBe(36);
   });
 
   it('rejects duplicate email when another user already owns it', async () => {
@@ -318,6 +353,165 @@ describe('UserService profile settings', () => {
 
     await expect(service.applyToClass('u1', 'ABCD2345')).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.classMember.create).not.toHaveBeenCalled();
+  });
+
+  it('does not expose class assignments to a member who is not approved', async () => {
+    prisma.classMember.findUnique.mockResolvedValue({ status: 'PENDING' });
+
+    await expect(service.getClassAssignments('student-1', 'class-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.assignment.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns only the student class assignments with completion during each assignment window', async () => {
+    prisma.classMember.findUnique.mockResolvedValue({ status: 'APPROVED' });
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', name: '算法训练一班' });
+    prisma.assignment.findMany.mockResolvedValue([
+      {
+        id: 'assignment-1',
+        classId: 'class-1',
+        title: '第一周作业',
+        description: '基础练习',
+        startTime: new Date('2026-07-21T00:00:00.000Z'),
+        endTime: new Date('2026-07-30T00:00:00.000Z'),
+        allowLate: false,
+        latePenalty: 0,
+        passCondition: null,
+        countExternalAc: false,
+        createdAt: new Date('2026-07-20T00:00:00.000Z'),
+        problems: [
+          { problemId: 'problem-1', order: 1, score: 100, problem: { id: 'problem-1', title: 'A+B', source: 'LOCAL', difficulty: '入门' } },
+          { problemId: 'problem-2', order: 2, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: '简单' } },
+        ],
+      },
+      {
+        id: 'assignment-2',
+        classId: 'class-1',
+        title: '限时练习',
+        description: null,
+        startTime: new Date('2026-07-21T00:00:00.000Z'),
+        endTime: new Date('2026-07-23T00:00:00.000Z'),
+        allowLate: false,
+        latePenalty: 0,
+        passCondition: null,
+        countExternalAc: false,
+        createdAt: new Date('2026-07-20T00:00:00.000Z'),
+        problems: [
+          { problemId: 'problem-2', order: 1, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: '简单' } },
+        ],
+      },
+    ]);
+    prisma.assignmentStudent = {
+      createMany: jest.fn().mockResolvedValue({ count: 2 }),
+      findUnique: jest.fn()
+        .mockResolvedValueOnce({ status: 'COMPLETED', score: 200, submittedAt: new Date('2026-07-22T10:00:00.000Z'), completedAt: new Date('2026-07-25T10:00:00.000Z') })
+        .mockResolvedValueOnce({ status: 'EXPIRED', score: 0, submittedAt: null, completedAt: null }),
+    };
+    const assignmentProgress = {
+      recomputeStudent: jest.fn().mockResolvedValue(null),
+      calculate: jest.fn()
+        .mockResolvedValueOnce({
+          status: 'COMPLETED',
+          solvedCount: 2,
+          totalProblems: 2,
+          requiredCount: 2,
+          completed: true,
+          late: false,
+          score: 200,
+          maxScore: 200,
+          submittedAt: new Date('2026-07-22T10:00:00.000Z'),
+          completedAt: new Date('2026-07-25T10:00:00.000Z'),
+          problems: [
+            { problemId: 'problem-1', solved: true, late: false, earnedScore: 100 },
+            { problemId: 'problem-2', solved: true, late: false, earnedScore: 100 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          status: 'EXPIRED',
+          solvedCount: 0,
+          totalProblems: 1,
+          requiredCount: 1,
+          completed: false,
+          late: false,
+          score: 0,
+          maxScore: 100,
+          submittedAt: null,
+          completedAt: null,
+          problems: [
+            { problemId: 'problem-2', solved: false, late: false, earnedScore: 0 },
+          ],
+        }),
+    };
+    service = new UserService(prisma, fileUpload, cfAcceptedSync, assignmentProgress as any);
+
+    const result = await service.getClassAssignments('student-1', 'class-1');
+
+    expect(prisma.classMember.findUnique).toHaveBeenCalledWith({
+      where: { classId_userId: { classId: 'class-1', userId: 'student-1' } },
+      select: { status: true },
+    });
+    expect(result.class).toEqual({ id: 'class-1', name: '算法训练一班' });
+    expect(result.assignments).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'assignment-1',
+        progress: expect.objectContaining({ solvedCount: 2, totalProblems: 2, completed: true, status: 'COMPLETED' }),
+      }),
+      expect.objectContaining({
+        id: 'assignment-2',
+        progress: expect.objectContaining({ solvedCount: 0, totalProblems: 1, completed: false, status: 'EXPIRED' }),
+      }),
+    ]));
+  });
+
+  it('uses the configured solved-count requirement when listing current student assignments', async () => {
+    prisma.classMember.findMany.mockResolvedValue([{
+      classId: 'class-1',
+      status: 'APPROVED',
+      class: {
+        id: 'class-1', name: '算法训练一班', teacherId: 'teacher-1', status: 'APPROVED', course: null,
+      },
+    }]);
+    prisma.assignment.findMany.mockResolvedValue([{
+      id: 'assignment-1',
+      classId: 'class-1',
+      title: '第一周作业',
+      description: '基础题训练',
+      startTime: new Date('2026-07-20T00:00:00.000Z'),
+      endTime: new Date('2026-07-30T00:00:00.000Z'),
+      passCondition: 'COUNT:1',
+      createdAt: new Date('2026-07-19T00:00:00.000Z'),
+      problems: [
+        { order: 1, score: 100, problem: { id: 'problem-1', title: 'A+B', source: 'LOCAL', difficulty: 'POINT_0', sourceInfo: null } },
+        { order: 2, score: 100, problem: { id: 'problem-2', title: '排序', source: 'LOCAL', difficulty: 'POINT_1', sourceInfo: null } },
+      ],
+    }]);
+    prisma.assignmentStudent.findMany.mockResolvedValue([{
+      assignmentId: 'assignment-1', status: 'IN_PROGRESS', score: 100, submittedAt: null, completedAt: null,
+    }]);
+    prisma.user.findMany.mockResolvedValue([{ id: 'teacher-1', username: 'teacher', nickname: '王老师' }]);
+    prisma.submission.findMany.mockResolvedValue([{
+      id: 'submission-1', problemId: 'problem-1', status: 'ACCEPTED', score: 100,
+      timeUsed: 12, memoryUsed: 256, createdAt: new Date('2026-07-21T00:00:00.000Z'),
+    }]);
+
+    const result = await service.listMyAssignments('student-1');
+
+    expect(prisma.classMember.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'student-1', status: 'APPROVED' },
+    }));
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'assignment-1',
+      class: { id: 'class-1', name: '算法训练一班' },
+      teacher: { id: 'teacher-1', username: 'teacher', nickname: '王老师' },
+      progress: { total: 2, solved: 1, requiredCount: 1, completed: true },
+      enrollmentStatus: 'COMPLETED',
+    });
+    expect(result.items[0].problems[0]).toMatchObject({
+      id: 'problem-1', status: 'ACCEPTED', attempts: 1, bestSubmissionId: 'submission-1',
+    });
+    expect(result.items[0].problems[1]).toMatchObject({
+      id: 'problem-2', status: 'NOT_SUBMITTED', attempts: 0,
+    });
   });
 
   it('requires the current password when changing password from settings', async () => {
