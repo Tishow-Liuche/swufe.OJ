@@ -241,7 +241,6 @@ onMounted(async () => {
     <!-- 页脚 -->
     <footer class="footer">
       <p>SWUFE Singularity OJ · 西财奇点OJ · 多源 OJ 教学与竞赛平台</p>
-      <p class="footer-tech">Vue 3 + NestJS + PostgreSQL + go-judge</p>
     </footer>
   </div>
 </template>
@@ -1103,7 +1102,6 @@ onMounted(async () => {
 
 /* Footer */
 .footer { text-align: center; padding: 40px 20px; color: #999; font-size: 13px; border-top: 1px solid #f0f0f0; }
-.footer-tech { font-size: 11px; color: #bbb; margin-top: 4px; }
 
 @media (max-width: 900px) {
   .hero-shell {
