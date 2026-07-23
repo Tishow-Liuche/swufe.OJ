@@ -74,7 +74,7 @@ const settingsError = ref('');
 const avatarInput = ref<HTMLInputElement | null>(null);
 const avatarUploading = ref(false);
 const avatarError = ref('');
-const profileForm = reactive({ nickname: '', email: '', phone: '' });
+const profileForm = reactive({ nickname: '', email: '', phone: '', studentId: '' });
 const accountForm = reactive({ codeforcesHandle: '', luoguHandle: '' });
 const cfSyncing = ref(false);
 const passwordForm = reactive({ currentPassword: '', password: '', confirmPassword: '' });
@@ -132,6 +132,7 @@ function fillSettings(data: any) {
   profileForm.nickname = p.nickname || '';
   profileForm.email = p.email || '';
   profileForm.phone = p.phone || '';
+  profileForm.studentId = p.studentId || '';
   accountForm.codeforcesHandle = data.externalAccounts?.codeforcesHandle || '';
   accountForm.luoguHandle = data.externalAccounts?.luoguHandle || '';
   awards.value = data.awards || [];
@@ -154,9 +155,22 @@ async function loadSettings() {
 
 async function saveProfile() {
   settingsError.value = '';
+  if (profile.value?.role === 'STUDENT' && profileForm.studentId && !/^\d{8}$/.test(profileForm.studentId)) {
+    settingsError.value = '学号必须为 8 位数字';
+    return;
+  }
   try {
-    const { data } = await api.patch('/api/user/profile', profileForm);
+    const payload: Record<string, string> = {
+      nickname: profileForm.nickname,
+      email: profileForm.email,
+      phone: profileForm.phone,
+    };
+    if (profile.value?.role === 'STUDENT' && profileForm.studentId.trim()) {
+      payload.studentId = profileForm.studentId.trim();
+    }
+    const { data } = await api.patch('/api/user/profile', payload);
     profile.value = { ...profile.value, ...data };
+    await auth.fetchProfile();
   } catch (e: any) {
     settingsError.value = e.response?.data?.message || '保存基础资料失败';
   }
@@ -604,6 +618,7 @@ void [
         <article class="profile-panel">
           <div class="panel-title"><h2>基础资料</h2><UserRound :size="18" /></div>
           <label>昵称<input v-model="profileForm.nickname" placeholder="设置展示昵称" /></label>
+          <label v-if="profile.role === 'STUDENT'">学号<input v-model="profileForm.studentId" inputmode="numeric" maxlength="8" placeholder="绑定 8 位数字学号" /></label>
           <label>邮箱<input v-model="profileForm.email" type="email" placeholder="绑定邮箱" /></label>
           <label>电话<input v-model="profileForm.phone" placeholder="绑定电话号码" /></label>
           <button class="primary-btn" @click="saveProfile"><Save :size="16" />保存基础资料</button>

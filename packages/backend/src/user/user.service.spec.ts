@@ -100,6 +100,45 @@ describe('UserService profile settings', () => {
     expect(result.email).toBe('alice@example.com');
   });
 
+  it('updates and returns the bound student ID for a student profile', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'STUDENT' });
+    prisma.user.findFirst.mockResolvedValue(null);
+    prisma.user.update.mockResolvedValue({
+      id: 'u1',
+      username: 'alice',
+      email: 'alice@example.com',
+      phone: '13800138000',
+      nickname: 'Alice',
+      avatar: null,
+      role: 'STUDENT',
+      school: null,
+      studentId: '42411036',
+    });
+
+    const result = await service.updateProfile('u1', {
+      studentId: ' 42411036 ',
+    } as any);
+
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: { studentId: '42411036', id: { not: 'u1' } },
+      select: { id: true },
+    });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { studentId: '42411036' },
+      select: expect.objectContaining({ studentId: true }),
+    });
+    expect(result.studentId).toBe('42411036');
+  });
+
+  it('rejects an invalid student ID while updating the profile', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'STUDENT' });
+
+    await expect(
+      service.updateProfile('u1', { studentId: '4241' } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('includes the mandatory-password-change state in the authenticated profile', async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'u1', username: 'alice', email: 'alice@example.com', avatar: null,

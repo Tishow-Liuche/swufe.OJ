@@ -2,6 +2,76 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 
 describe('AuthService refresh sessions', () => {
+  it('stores an 8-digit student ID when a student registers', async () => {
+    const prisma: any = {
+      user: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockResolvedValue({ authVersion: 0, mustChangePassword: false }),
+        create: jest.fn().mockResolvedValue({
+          id: 'u1',
+          role: 'STUDENT',
+          requestedRole: 'STUDENT',
+          teacherApplicationStatus: 'NOT_REQUIRED',
+        }),
+      },
+      userSession: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const jwt: any = { sign: jest.fn().mockReturnValue('access-token') };
+    const config: any = { get: jest.fn().mockReturnValue('7d') };
+    const service = new AuthService(prisma, jwt, config);
+
+    await service.register({
+      username: 'alice',
+      email: 'alice@example.com',
+      password: 'Passw0rd1',
+      school: 'SWUFE',
+      college: 'Computer School',
+      requestedRole: 'STUDENT',
+      studentId: '42411036',
+    } as any);
+
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { username: { equals: 'alice', mode: 'insensitive' } },
+          { email: { equals: 'alice@example.com', mode: 'insensitive' } },
+          { studentId: '42411036' },
+        ],
+      },
+      select: { username: true, email: true, studentId: true },
+    });
+    expect(prisma.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ studentId: '42411036' }),
+    });
+  });
+
+  it('rejects a student registration when the student ID is already bound', async () => {
+    const prisma: any = {
+      user: {
+        findFirst: jest.fn().mockResolvedValue({
+          username: 'other',
+          email: 'other@example.com',
+          studentId: '42411036',
+        }),
+      },
+    };
+    const jwt: any = { sign: jest.fn() };
+    const config: any = { get: jest.fn() };
+    const service = new AuthService(prisma, jwt, config);
+
+    await expect(service.register({
+      username: 'alice',
+      email: 'alice@example.com',
+      password: 'Passw0rd1',
+      school: 'SWUFE',
+      college: 'Computer School',
+      requestedRole: 'STUDENT',
+      studentId: '42411036',
+    } as any)).rejects.toMatchObject({
+      message: '该学号已绑定其他账号',
+    });
+  });
+
   it('stores only a SHA-256 hash of a newly issued refresh token', async () => {
     const password = await bcrypt.hash('Passw0rd1', 4);
     const prisma: any = {

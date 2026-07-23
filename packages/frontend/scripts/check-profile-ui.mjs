@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(resolve(__dirname, '../src/views/Profile.vue'), 'utf8');
+const loginSource = readFileSync(resolve(__dirname, '../src/views/Login.vue'), 'utf8');
 const appSource = readFileSync(resolve(__dirname, '../src/App.vue'), 'utf8');
 
 for (const token of ['profile-hero', '学习概览', '难度分布', '账号设置', 'ICPC / CCPC 奖项认定']) {
@@ -32,9 +33,22 @@ for (const token of [
   'avatar-input',
   '/api/user/avatar',
   'uploadAvatar',
+  'profileForm.studentId',
+  '/^\\d{8}$/.test(profileForm.studentId)',
+  'payload.studentId = profileForm.studentId.trim()',
 ]) {
   if (!source.includes(token)) {
     throw new Error(`Profile UI is missing required token: ${token}`);
+  }
+}
+
+for (const token of [
+  'id="register-student-id"',
+  'v-model="registerForm.studentId"',
+  'autocomplete="off"',
+]) {
+  if (!loginSource.includes(token)) {
+    throw new Error(`Register UI is missing required token: ${token}`);
   }
 }
 

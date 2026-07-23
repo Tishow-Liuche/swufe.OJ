@@ -83,6 +83,7 @@ type PageToken = number | 'start-ellipsis' | 'end-ellipsis';
 const difficultyOptions = [
   { value: '', label: '全部' },
   ...pointDifficultyOptions.map((item) => ({ value: item.value, label: item.shortLabel })),
+  { value: 'UNRATED', label: '未评定难度' },
 ];
 
 const sourceOptions = [
@@ -183,7 +184,9 @@ const difficultyDistribution = computed(() => difficultyOptions.slice(1)
   .map((option) => ({
     ...option,
     count: (metadata.value?.difficulties || [])
-      .filter((item) => normalizePointDifficulty(item.difficulty) === option.value)
+      .filter((item) => option.value === 'UNRATED'
+        ? item.difficulty === null
+        : normalizePointDifficulty(item.difficulty) === option.value)
       .reduce((sum, item) => sum + item.count, 0),
   }))
   .filter((option) => option.count > 0));
@@ -373,10 +376,12 @@ function handleProblemRowClick(event: MouseEvent, problemId: string) {
 }
 
 function difficultyShortLabel(value: string | null) {
+  if (value === 'UNRATED') return '未评定难度';
   return pointDifficultyShortLabel(value);
 }
 
 function difficultyClass(value: string | null) {
+  if (value === 'UNRATED') return 'unrated';
   return pointDifficultyClass(value);
 }
 
