@@ -7,7 +7,8 @@ COPY packages/backend/package*.json ./
 RUN npm ci
 
 COPY packages/backend ./
-RUN npx prisma generate --schema=prisma/schema.prisma && npm run build
+# Azure's small VM makes Node choose a sub-512 MB default heap during image builds.
+RUN npx prisma generate --schema=prisma/schema.prisma && NODE_OPTIONS=--max-old-space-size=768 npm run build
 
 
 FROM node:22-alpine AS frontend-build
