@@ -1,0 +1,2 @@
+# Deployment artifacts must retain Unix line endings when archived on Windows.
+scripts/*.sh text eol=lf
