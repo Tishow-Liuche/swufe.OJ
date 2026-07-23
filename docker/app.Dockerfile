@@ -1,5 +1,7 @@
 FROM node:22-alpine AS backend-build
 
+RUN apk add --no-cache openssl
+
 WORKDIR /app/backend
 COPY packages/backend/package*.json ./
 RUN npm ci
@@ -19,6 +21,8 @@ RUN npm run build
 
 
 FROM node:22-alpine AS runtime
+
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 ENV NODE_ENV=production
