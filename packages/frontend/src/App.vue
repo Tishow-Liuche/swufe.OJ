@@ -107,7 +107,10 @@ async function logout() {
   <div class="app-shell">
     <header class="app-header" :class="{ 'home-header': isHomeRoute }">
       <div class="header-left">
-        <router-link to="/" class="logo" aria-label="SWUFE Singularity OJ 首页">SWUFE Singularity OJ</router-link>
+        <router-link to="/" class="logo" aria-label="SWUFE Singularity OJ 首页">
+          <img class="logo-seal" src="/swufe-seal.png" width="30" height="30" alt="" />
+          <span class="logo-text">SWUFE Singularity OJ</span>
+        </router-link>
         <nav class="desktop-nav" aria-label="主导航">
           <router-link :to="protectedNavigation('/problems')">题库</router-link>
           <router-link :to="protectedNavigation('/leaderboard')">排行榜</router-link>
@@ -274,6 +277,9 @@ body {
 
 .logo {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   margin-right: 8px;
   color: #69c6ff;
   font-size: 19px;
@@ -283,7 +289,21 @@ body {
   white-space: nowrap;
 }
 
-.logo::after {
+.logo-seal {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(33, 100, 220, 0.12);
+}
+
+.logo-text {
+  position: relative;
+}
+
+.logo-text::after {
   position: absolute;
   top: 1px;
   right: -7px;

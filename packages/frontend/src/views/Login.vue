@@ -184,7 +184,9 @@ async function submit() {
   <div class="auth-page">
     <div class="auth-frame">
       <router-link to="/" class="auth-brand" aria-label="返回 SWUFE Singularity OJ 首页">
-        <span class="brand-mark"><BookOpenCheck :size="22" aria-hidden="true" /></span>
+        <span class="brand-mark">
+          <img class="brand-seal" src="/swufe-seal.png" width="34" height="34" alt="" />
+        </span>
         <span>
           <strong>SWUFE Singularity OJ</strong>
           <small>西财奇点OJ · 校园算法训练平台</small>
@@ -510,6 +512,16 @@ async function submit() {
   width: 40px;
   height: 40px;
   border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #d7e2f5;
+}
+
+.brand-seal {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  display: block;
 }
 
 .auth-brand > span:last-child {
