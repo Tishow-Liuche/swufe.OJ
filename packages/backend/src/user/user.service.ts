@@ -764,6 +764,9 @@ export class UserService {
     ];
     const assignmentStartTimes = assignments.map((assignment) => assignment.startTime.getTime());
     const assignmentEndTimes = assignments.map((assignment) => assignment.endTime.getTime());
+    // When any assignment allows late submit, do not cap the query by endTime,
+    // otherwise post-deadline ACs are dropped and still show as 未提交.
+    const anyAllowLate = assignments.some((assignment) => assignment.allowLate);
     const submissions = problemIds.length
       ? await this.prisma.submission.findMany({
           where: {
@@ -771,7 +774,7 @@ export class UserService {
             problemId: { in: problemIds },
             createdAt: {
               gte: new Date(Math.min(...assignmentStartTimes)),
-              lte: new Date(Math.max(...assignmentEndTimes)),
+              ...(anyAllowLate ? {} : { lte: new Date(Math.max(...assignmentEndTimes)) }),
             },
           },
           select: {
@@ -798,9 +801,12 @@ export class UserService {
       let solved = 0;
       let latestAcceptedAt: Date | null = null;
       const problems = assignment.problems.map((item) => {
-        const attempts = (submissionsByProblem.get(item.problem.id) || []).filter((submission) =>
-          submission.createdAt >= assignment.startTime && submission.createdAt <= assignment.endTime,
-        );
+        const attempts = (submissionsByProblem.get(item.problem.id) || []).filter((submission) => {
+          if (submission.createdAt < assignment.startTime) return false;
+          // Within window always counts; after end only when teacher allows late.
+          if (submission.createdAt <= assignment.endTime) return true;
+          return Boolean(assignment.allowLate);
+        });
         const accepted = attempts.find((submission) => submission.status === 'ACCEPTED');
         const best = accepted || attempts[0];
         if (accepted) {
@@ -808,6 +814,10 @@ export class UserService {
           if (!latestAcceptedAt || accepted.createdAt > latestAcceptedAt) {
             latestAcceptedAt = accepted.createdAt;
           }
+        }
+        let displayStatus = best ? best.status : 'NOT_SUBMITTED';
+        if (accepted) {
+          displayStatus = accepted.createdAt > assignment.endTime ? 'LATE_ACCEPTED' : 'ACCEPTED';
         }
         return {
           id: item.problem.id,
@@ -817,13 +827,14 @@ export class UserService {
           sourceInfo: item.problem.sourceInfo,
           order: item.order,
           score: item.score,
-          status: best ? best.status : 'NOT_SUBMITTED',
+          status: displayStatus,
           attempts: attempts.length,
           bestSubmissionId: best?.id || null,
           bestScore: best?.score ?? 0,
           timeUsed: best?.timeUsed ?? null,
           memoryUsed: best?.memoryUsed ?? null,
           submittedAt: best?.createdAt ?? null,
+          late: Boolean(accepted && accepted.createdAt > assignment.endTime),
         };
       });
       const cls = classById.get(assignment.classId);
@@ -834,9 +845,11 @@ export class UserService {
         || (requiredCount > 0 && solved >= requiredCount);
       const lifecycle = now < assignment.startTime
         ? 'NOT_STARTED'
-        : now > assignment.endTime
-          ? 'ENDED'
-          : 'ACTIVE';
+        : now <= assignment.endTime
+          ? 'ACTIVE'
+          : assignment.allowLate
+            ? 'LATE_OPEN'
+            : 'ENDED';
       return {
         id: assignment.id,
         classId: assignment.classId,
@@ -844,8 +857,15 @@ export class UserService {
         description: assignment.description,
         startTime: assignment.startTime,
         endTime: assignment.endTime,
+        allowLate: Boolean(assignment.allowLate),
         lifecycle,
-        enrollmentStatus: completed ? 'COMPLETED' : enrollment?.status || 'PENDING',
+        enrollmentStatus: completed
+          ? (enrollment?.status === 'SETTLED'
+            ? 'SETTLED'
+            : enrollment?.status === 'LATE' || (latestAcceptedAt && latestAcceptedAt > assignment.endTime)
+              ? 'LATE'
+              : 'COMPLETED')
+          : enrollment?.status || 'PENDING',
         submittedAt: enrollment?.submittedAt || null,
         completedAt: enrollment?.completedAt || (completed ? latestAcceptedAt : null),
         class: cls ? {

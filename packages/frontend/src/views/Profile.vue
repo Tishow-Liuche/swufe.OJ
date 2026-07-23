@@ -431,6 +431,20 @@ function hasMetric(value: unknown) {
   return value !== null && value !== undefined;
 }
 
+/** In-progress judge statuses should not display a provisional 0 score. */
+const JUDGING_STATUSES = new Set([
+  'PENDING', 'QUEUING', 'COMPILING', 'RUNNING', 'JUDGING', 'SUBMITTING',
+]);
+
+function isJudgingStatus(status?: string | null) {
+  return Boolean(status && JUDGING_STATUSES.has(status));
+}
+
+function shouldShowScore(status?: string | null, score?: unknown) {
+  if (isJudgingStatus(status)) return false;
+  return score !== undefined && score !== null;
+}
+
 function formatMemoryKb(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? `${(n / 1024).toFixed(1)}MB` : '-';
@@ -594,7 +608,7 @@ void [
             <span class="sub-title">{{ sub.problem?.title || '-' }}</span>
             <span class="sub-meta">{{ sub.language }}</span>
             <span class="sub-time" v-if="hasMetric(sub.timeUsed) || hasMetric(sub.memoryUsed)">{{ hasMetric(sub.timeUsed) ? `${sub.timeUsed}ms` : '-' }} / {{ hasMetric(sub.memoryUsed) ? formatMemoryKb(sub.memoryUsed) : '-' }}</span>
-            <span class="sub-time" v-else>{{ sub.score }} 分</span>
+            <span class="sub-time" v-else-if="shouldShowScore(sub.status, sub.score)">{{ sub.score }} 分</span>
           </button>
         </div>
         <div v-else class="empty-state">暂无提交记录。</div>
@@ -679,7 +693,7 @@ void [
             <div class="detail-meta">
               <span v-if="selectedSubmission.problem"><b>题目：</b>{{ selectedSubmission.problem.title }}</span>
               <span><b>状态：</b>{{ statusLabels[selectedSubmission.status] || selectedSubmission.status }}</span>
-              <span><b>得分：</b>{{ selectedSubmission.score }}</span>
+              <span v-if="shouldShowScore(selectedSubmission.status, selectedSubmission.score)"><b>得分：</b>{{ selectedSubmission.score }}</span>
               <span v-if="hasMetric(selectedSubmission.timeUsed)"><b>用时：</b>{{ selectedSubmission.timeUsed }}ms</span>
               <span v-if="hasMetric(selectedSubmission.memoryUsed)"><b>内存：</b>{{ formatMemoryKb(selectedSubmission.memoryUsed) }}</span>
               <span><b>语言：</b>{{ selectedSubmission.language }}</span>

@@ -602,6 +602,7 @@ describe('UserService profile settings', () => {
       description: '基础题训练',
       startTime: new Date('2026-07-20T00:00:00.000Z'),
       endTime: new Date('2026-07-30T00:00:00.000Z'),
+      allowLate: false,
       passCondition: 'COUNT:1',
       createdAt: new Date('2026-07-19T00:00:00.000Z'),
       problems: [
@@ -637,6 +638,74 @@ describe('UserService profile settings', () => {
     expect(result.items[0].problems[1]).toMatchObject({
       id: 'problem-2', status: 'NOT_SUBMITTED', attempts: 0,
     });
+  });
+
+  it('counts late accepted submissions when the teacher allows makeup after deadline', async () => {
+    prisma.classMember.findMany.mockResolvedValue([{
+      classId: 'class-1',
+      status: 'APPROVED',
+      class: {
+        id: 'class-1', name: '算法训练一班', teacherId: 'teacher-1', status: 'APPROVED', course: null,
+      },
+    }]);
+    prisma.assignment.findMany.mockResolvedValue([{
+      id: 'assignment-1',
+      classId: 'class-1',
+      title: '可补交作业',
+      description: null,
+      startTime: new Date('2026-07-01T00:00:00.000Z'),
+      endTime: new Date('2026-07-10T00:00:00.000Z'),
+      allowLate: true,
+      passCondition: 'ALL',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      problems: [
+        { order: 1, score: 100, problem: { id: 'problem-1', title: 'A+B', source: 'LOCAL', difficulty: 'POINT_0', sourceInfo: null } },
+      ],
+    }]);
+    prisma.assignmentStudent.findMany.mockResolvedValue([{
+      assignmentId: 'assignment-1', status: 'LATE', score: 100,
+      submittedAt: new Date('2026-07-12T00:00:00.000Z'),
+      completedAt: new Date('2026-07-12T00:00:00.000Z'),
+    }]);
+    prisma.user.findMany.mockResolvedValue([{ id: 'teacher-1', username: 'teacher', nickname: '王老师' }]);
+    prisma.submission.findMany.mockResolvedValue([{
+      id: 'submission-late',
+      problemId: 'problem-1',
+      status: 'ACCEPTED',
+      score: 100,
+      timeUsed: 10,
+      memoryUsed: 128,
+      // After endTime — must still count when allowLate=true
+      createdAt: new Date('2026-07-12T08:00:00.000Z'),
+    }]);
+
+    const result = await service.listMyAssignments('student-1');
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'assignment-1',
+      allowLate: true,
+      lifecycle: 'LATE_OPEN',
+      enrollmentStatus: 'LATE',
+      progress: { total: 1, solved: 1, requiredCount: 1, completed: true },
+    });
+    expect(result.items[0].problems[0]).toMatchObject({
+      id: 'problem-1',
+      status: 'LATE_ACCEPTED',
+      attempts: 1,
+      bestSubmissionId: 'submission-late',
+      late: true,
+    });
+    // Query must not hard-cap by endTime when any assignment allows late.
+    expect(prisma.submission.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        createdAt: expect.objectContaining({
+          gte: expect.any(Date),
+        }),
+      }),
+    }));
+    const createdAtFilter = prisma.submission.findMany.mock.calls[0][0].where.createdAt;
+    expect(createdAtFilter.lte).toBeUndefined();
   });
 
   it('requires the current password when changing password from settings', async () => {

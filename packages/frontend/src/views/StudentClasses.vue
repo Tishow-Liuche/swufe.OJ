@@ -51,7 +51,8 @@ interface Assignment {
   description?: string | null;
   startTime: string;
   endTime: string;
-  lifecycle: 'NOT_STARTED' | 'ACTIVE' | 'ENDED';
+  allowLate?: boolean;
+  lifecycle: 'NOT_STARTED' | 'ACTIVE' | 'ENDED' | 'LATE_OPEN';
   enrollmentStatus: string;
   class: { id: string; name: string; course?: { name: string } | null };
   teacher?: { username: string; nickname?: string | null } | null;
@@ -96,7 +97,7 @@ const assignmentFilterCounts = computed(() => {
   const list = selectedAssignments.value;
   return {
     all: list.length,
-    active: list.filter((item) => item.lifecycle === 'ACTIVE' && !item.progress.completed).length,
+    active: list.filter((item) => (item.lifecycle === 'ACTIVE' || item.lifecycle === 'LATE_OPEN') && !item.progress.completed).length,
     not_started: list.filter((item) => item.lifecycle === 'NOT_STARTED' && !item.progress.completed).length,
     ended: list.filter((item) => item.lifecycle === 'ENDED' && !item.progress.completed).length,
     requirement_met: list.filter((item) => isRequirementMetOnly(item)).length,
@@ -107,7 +108,7 @@ const filteredSelectedAssignments = computed(() => {
   const list = selectedAssignments.value;
   switch (assignmentFilter.value) {
     case 'active':
-      return list.filter((item) => item.lifecycle === 'ACTIVE' && !item.progress.completed);
+      return list.filter((item) => (item.lifecycle === 'ACTIVE' || item.lifecycle === 'LATE_OPEN') && !item.progress.completed);
     case 'not_started':
       return list.filter((item) => item.lifecycle === 'NOT_STARTED' && !item.progress.completed);
     case 'ended':
@@ -147,29 +148,36 @@ function assignmentStateText(item: Assignment) {
   if (isFullyCompleted(item)) return '全部完成';
   if (item.lifecycle === 'NOT_STARTED') return '未开始';
   if (item.lifecycle === 'ENDED') return '已截止';
+  if (item.lifecycle === 'LATE_OPEN') return '可补交';
   return '进行中';
 }
 
 function assignmentStateClass(item: Assignment) {
   if (isRequirementMetOnly(item)) return 'requirement-met';
   if (isFullyCompleted(item)) return 'done';
+  if (item.lifecycle === 'LATE_OPEN') return 'active';
   return item.lifecycle.toLowerCase().replace('_', '-');
 }
 
 function problemStatusText(status: string) {
   if (status === 'ACCEPTED') return 'AC';
+  if (status === 'LATE_ACCEPTED') return '补交通过';
   if (status === 'NOT_SUBMITTED') return '未提交';
   if (status === 'WRONG_ANSWER') return 'WA';
   if (status === 'TIME_LIMIT_EXCEEDED') return 'TLE';
   if (status === 'MEMORY_LIMIT_EXCEEDED') return 'MLE';
   if (status === 'RUNTIME_ERROR') return 'RE';
-  if (status === 'COMPILATION_ERROR') return 'CE';
+  if (status === 'COMPILATION_ERROR' || status === 'COMPILE_ERROR') return 'CE';
+  if (status === 'COMPILING' || status === 'QUEUING' || status === 'JUDGING' || status === 'PENDING' || status === 'RUNNING') {
+    return status === 'COMPILING' ? '编译中' : status === 'RUNNING' ? '运行中' : status === 'QUEUING' ? '排队中' : '评测中';
+  }
   return status.replace(/_/g, ' ');
 }
 
 function problemStatusClass(status: string) {
-  if (status === 'ACCEPTED') return 'accepted';
+  if (status === 'ACCEPTED' || status === 'LATE_ACCEPTED') return 'accepted';
   if (status === 'NOT_SUBMITTED') return 'empty';
+  if (['COMPILING', 'QUEUING', 'JUDGING', 'PENDING', 'RUNNING', 'SUBMITTING'].includes(status)) return 'pending';
   return 'wrong';
 }
 

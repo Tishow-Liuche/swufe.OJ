@@ -97,6 +97,20 @@ function hasMetric(value: unknown) {
   return value !== null && value !== undefined;
 }
 
+/** In-progress judge statuses should not display a provisional 0 score. */
+const JUDGING_STATUSES = new Set([
+  'PENDING', 'QUEUING', 'COMPILING', 'RUNNING', 'JUDGING', 'SUBMITTING',
+]);
+
+function isJudgingStatus(status?: string | null) {
+  return Boolean(status && JUDGING_STATUSES.has(status));
+}
+
+function shouldShowScore(status?: string | null, score?: unknown) {
+  if (isJudgingStatus(status)) return false;
+  return score !== undefined && score !== null;
+}
+
 function formatMemoryKb(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? (n / 1024).toFixed(1) + 'MB' : '-';
@@ -600,7 +614,7 @@ async function submitFeedback() {
                 <span class="result-badge" :style="{ background: statusColors[result.status] || '#95a5a6' }">
                   {{ statusLabels[result.status] || result.status }}
                 </span>
-                <span v-if="result.score !== undefined" class="result-score">{{ result.score }} 分</span>
+                <span v-if="shouldShowScore(result.status, result.score)" class="result-score">{{ result.score }} 分</span>
                 <span v-if="hasMetric(result.timeUsed) || hasMetric(result.memoryUsed)" class="result-info">
                   <template v-if="hasMetric(result.timeUsed)">{{ result.timeUsed }} ms</template>
                   <template v-if="hasMetric(result.timeUsed) && hasMetric(result.memoryUsed)"> · </template>

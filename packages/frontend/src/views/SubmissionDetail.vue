@@ -17,7 +17,10 @@ onMounted(async () => {
     <h2>提交详情</h2>
     <p>题目: {{ submission.problem.title }}</p>
     <p>状态: <strong>{{ submission.status }}</strong></p>
-    <p>得分: {{ submission.score }} | 用时: {{ submission.timeUsed }}ms | 内存: {{ submission.memoryUsed }}KB</p>
+    <p>
+      <template v-if="submission.score != null && !['PENDING','QUEUING','COMPILING','RUNNING','JUDGING','SUBMITTING'].includes(submission.status)">得分: {{ submission.score }} | </template>
+      用时: {{ submission.timeUsed ?? '-' }}ms | 内存: {{ submission.memoryUsed ?? '-' }}KB
+    </p>
     <p v-if="submission.compileMessage" class="compile-msg">{{ submission.compileMessage }}</p>
 
     <h3>源代码</h3>
