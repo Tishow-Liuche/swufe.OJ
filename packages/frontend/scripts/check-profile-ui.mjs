@@ -34,6 +34,8 @@ for (const token of [
   '/api/user/avatar',
   'uploadAvatar',
   'profileForm.studentId',
+  'isStudentAccount',
+  'student-id-pill',
   '/^\\d{8}$/.test(profileForm.studentId)',
   'payload.studentId = profileForm.studentId.trim()',
 ]) {
