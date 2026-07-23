@@ -510,7 +510,6 @@ async function submitFeedback() {
           <ArrowLeft :size="16" />
           返回比赛选题
         </RouterLink>
-        <span class="contest-mode-hint">比赛模式 · 仅题面与提交</span>
       </div>
       <header class="problem-header" :class="{ 'contest-header': isContestMode }">
         <div class="problem-title-row">
@@ -1228,7 +1227,6 @@ async function submitFeedback() {
 .contest-mode-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
   padding: 10px 14px;
@@ -1246,12 +1244,6 @@ async function submitFeedback() {
   text-decoration: none;
 }
 .contest-back-link:hover { color: #124772; text-decoration: underline; }
-.contest-mode-hint {
-  color: #6b8198;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
 .problem-header.contest-header {
   padding-bottom: 14px;
 }
