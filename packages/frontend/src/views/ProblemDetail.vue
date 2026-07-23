@@ -258,6 +258,21 @@ function openExternalUrl(url?: string): boolean {
   return !!opened;
 }
 
+function getSwufeOjApiBase() {
+  return globalThis.location?.origin || 'http://127.0.0.1:3000';
+}
+
+function withSwufeOjApiParam(url?: string) {
+  if (!url) return url;
+  try {
+    const next = new URL(url);
+    next.searchParams.set('swufeOjApi', getSwufeOjApiBase());
+    return next.toString();
+  } catch {
+    return url;
+  }
+}
+
 function retryOpenCf() {
   cfOpenBlocked.value = !openExternalUrl(cfData.value?.url);
 }
@@ -306,7 +321,7 @@ async function submitCode() {
       const isLuogu = data.mode === 'LUOGU';
       const isQoj = data.mode === 'QOJ';
       cfData.value = {
-        url: isQoj ? data.qojSubmitUrl : (isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl),
+        url: withSwufeOjApiParam(isQoj ? data.qojSubmitUrl : (isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl)),
         platform: isQoj ? 'QOJ' : (isLuogu ? '洛谷' : 'Codeforces'),
         language: isQoj
           ? (qojLangNames[language.value] || language.value)

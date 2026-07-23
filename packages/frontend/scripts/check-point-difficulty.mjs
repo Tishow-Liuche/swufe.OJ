@@ -25,4 +25,8 @@ assert(problemList.includes('tagSearchKeyword'), 'Problem library tag panel must
 assert(problemList.includes('visibleTagCounts'), 'Problem library tag panel must render tags filtered by the keyword search.');
 assert(problemList.includes('没有匹配标签'), 'Problem library tag panel must show an empty state when no tags match.');
 
+assert(problemList.includes("value: 'UNRATED'"), 'Problem library difficulty filter must include an unrated option.');
+assert(problemList.includes("label: '未评定难度'"), 'Problem library difficulty filter must label unrated problems as 未评定难度.');
+assert(problemList.includes('item.difficulty === null'), 'Problem library difficulty distribution must count null difficulty as unrated.');
+
 console.log('Point difficulty UI checks passed.');

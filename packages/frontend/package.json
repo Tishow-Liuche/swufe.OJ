@@ -9,6 +9,7 @@
     "test:markdown": "node scripts/check-markdown-renderer.mjs",
     "test:cf-helper": "node scripts/check-cf-helper.mjs",
     "test:luogu-helper": "node scripts/check-luogu-helper.mjs",
+    "test:oj-helpers": "node scripts/check-oj-helper-installer.mjs",
     "test:leaderboard": "node scripts/check-leaderboard-frame.mjs",
     "test:contest-creator": "node scripts/check-contest-creator.mjs",
     "test:contest-live-board": "node scripts/check-contest-live-board.mjs",

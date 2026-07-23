@@ -17,6 +17,7 @@ type ProfileUpdateInput = {
   avatar?: string | null;
   email?: string;
   phone?: string | null;
+  studentId?: string | null;
 };
 
 type ExternalAccountUpdateInput = {
@@ -54,7 +55,7 @@ export class UserService {
       where: { id: userId },
       select: {
         id: true, username: true, email: true, nickname: true,
-        avatar: true, phone: true, role: true, school: true, requestedRole: true,
+        avatar: true, phone: true, role: true, school: true, studentId: true, requestedRole: true,
         teacherApplicationStatus: true, mustChangePassword: true, createdAt: true,
       },
     });
@@ -93,6 +94,22 @@ export class UserService {
     if (data.nickname !== undefined) updateData.nickname = this.cleanOptional(data.nickname);
     if (data.avatar !== undefined) updateData.avatar = this.cleanOptional(data.avatar);
     if (data.phone !== undefined) updateData.phone = this.cleanOptional(data.phone);
+    if (data.studentId !== undefined) {
+      const current = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true },
+      });
+      if (!current) throw new NotFoundException('用户不存在');
+      if (current.role !== 'STUDENT') throw new BadRequestException('仅学生账号可以绑定学号');
+      const studentId = String(data.studentId || '').trim();
+      if (!/^\d{8}$/.test(studentId)) throw new BadRequestException('学号必须为 8 位数字');
+      const existing = await this.prisma.user.findFirst({
+        where: { studentId, id: { not: userId } },
+        select: { id: true },
+      });
+      if (existing) throw new BadRequestException('该学号已绑定其他账号');
+      updateData.studentId = studentId;
+    }
     if (data.email !== undefined) {
       const email = data.email.trim().toLowerCase();
       if (!email) throw new BadRequestException('邮箱不能为空');
@@ -111,7 +128,7 @@ export class UserService {
       where: { id: userId }, data: updateData,
       select: {
         id: true, username: true, email: true, phone: true,
-        nickname: true, avatar: true, role: true, school: true,
+        nickname: true, avatar: true, role: true, school: true, studentId: true,
       },
     });
     return this.withDisplayAvatar(profile);

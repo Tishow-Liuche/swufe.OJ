@@ -37,6 +37,12 @@ export class RegisterDto {
   @ValidateIf((dto) => dto.requestedRole === 'STUDENT')
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @IsString()
+  @Matches(/^\d{8}$/, { message: '学号必须为 8 位数字' })
+  studentId?: string;
+
+  @ValidateIf((dto) => dto.requestedRole === 'STUDENT')
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
   @MinLength(2, { message: '请选择或填写所在学院' })
   @MaxLength(80, { message: '学院名称最多 80 个字符' })
   college?: string;

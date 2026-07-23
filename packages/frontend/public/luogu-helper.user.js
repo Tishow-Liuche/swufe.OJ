@@ -1,11 +1,9 @@
 // ==UserScript==
-// @name         OJ Luogu Helper
+// @name         SWUFE Singularity OJ - Luogu Auto Submit Helper
 // @namespace    https://oj.example.com
 // @version      1.4
-// @description  自动填表 + 自动提交 + 回传洛谷结果 + 自动关闭洛谷标签页
+// @description  Auto fill code, auto submit to Luogu, report result back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
-// @downloadURL  http://localhost:5173/luogu-helper.user.js
-// @updateURL    http://localhost:5173/luogu-helper.user.js
 // @match        https://www.luogu.com.cn/*
 // @match        https://luogu.com.cn/*
 // @grant        GM_xmlhttpRequest
@@ -14,6 +12,7 @@
 // @grant        GM_deleteValue
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      *
 // @run-at       document-end
 // @noframes
 // ==/UserScript==
@@ -21,7 +20,9 @@
 (function() {
 'use strict';
 
-var API = 'http://127.0.0.1:3000';
+var DEFAULT_API = 'http://127.0.0.1:3000';
+var API_BASE_KEY = 'swufe_oj_api_base';
+var API = resolveApiBase();
 var HELPER_VERSION = '1.4';
 var STATE_KEY = 'swufe_luogu_auto_state';
 var SUBMIT_ONCE_KEY_PREFIX = 'swufe_luogu_submit_once_';
@@ -30,6 +31,24 @@ var LOGIN_REQUIRED_KEY = 'swufe_luogu_login_required_at';
 function gv(k, d) { return GM_getValue(k, d != null ? d : ''); }
 function sv(k, v) { GM_setValue(k, v); }
 function dv(k) { GM_deleteValue(k); }
+
+function normalizeApiBase(value) {
+  var text = String(value || '').trim().replace(/\/+$/, '');
+  return /^https?:\/\//i.test(text) ? text : '';
+}
+
+function resolveApiBase() {
+  var fromUrl = '';
+  try {
+    fromUrl = new URLSearchParams(location.search).get('swufeOjApi') || '';
+  } catch (_) {}
+  var normalized = normalizeApiBase(fromUrl);
+  if (normalized) {
+    sv(API_BASE_KEY, normalized);
+    return normalized;
+  }
+  return normalizeApiBase(gv(API_BASE_KEY, '')) || DEFAULT_API;
+}
 
 function loadState() {
   try { return JSON.parse(gv(STATE_KEY, '{}') || '{}'); }
