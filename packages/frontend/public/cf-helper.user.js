@@ -1,11 +1,9 @@
 // ==UserScript==
-// @name         OJ CF Helper
+// @name         SWUFE Singularity OJ - Codeforces Auto Submit Helper
 // @namespace    https://oj.example.com
 // @version      7.3
-// @description  自动填表 + 自动提交 + 回传 SID + 自动关闭 Codeforces 标签页
+// @description  Auto fill code, auto submit to Codeforces, report SID back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
-// @downloadURL  http://localhost:5173/cf-helper.user.js
-// @updateURL    http://localhost:5173/cf-helper.user.js
 // @match        https://codeforces.com/*
 // @match        https://www.codeforces.com/*
 // @grant        GM_xmlhttpRequest
@@ -15,6 +13,7 @@
 // @connect      127.0.0.1
 // @connect      localhost
 // @connect      codeforces.com
+// @connect      *
 // @run-at       document-end
 // @noframes
 // ==/UserScript==
@@ -22,7 +21,9 @@
 (function() {
 'use strict';
 
-var API = 'http://127.0.0.1:3000';
+var DEFAULT_API = 'http://127.0.0.1:3000';
+var API_BASE_KEY = 'swufe_oj_api_base';
+var API = resolveApiBase();
 var HELPER_VERSION = '7.3';
 var L = { cpp: '54', c: '43', python: '31', java: '60' };
 var STATE_KEY = 'swufe_cf_auto_state';
@@ -31,6 +32,24 @@ var LOGIN_REQUIRED_KEY = 'swufe_cf_login_required_at';
 function gv(k, d) { return GM_getValue(k, d != null ? d : 0); }
 function sv(k, v) { GM_setValue(k, v); }
 function dv(k) { GM_deleteValue(k); }
+
+function normalizeApiBase(value) {
+  var text = String(value || '').trim().replace(/\/+$/, '');
+  return /^https?:\/\//i.test(text) ? text : '';
+}
+
+function resolveApiBase() {
+  var fromUrl = '';
+  try {
+    fromUrl = new URLSearchParams(location.search).get('swufeOjApi') || '';
+  } catch (_) {}
+  var normalized = normalizeApiBase(fromUrl);
+  if (normalized) {
+    sv(API_BASE_KEY, normalized);
+    return normalized;
+  }
+  return normalizeApiBase(gv(API_BASE_KEY, '')) || DEFAULT_API;
+}
 
 function loadState() {
   try { return JSON.parse(gv(STATE_KEY, '{}') || '{}'); }
@@ -69,7 +88,7 @@ function banner(text, bg) {
 
 function diagnostic(text) {
   console.log('[CF-Helper v' + HELPER_VERSION + '] ' + text);
-  banner('OJ CF Helper ' + HELPER_VERSION + ' active — ' + text, '#3498db');
+  banner('SWUFE OJ Codeforces Helper v' + HELPER_VERSION + ': ' + text, '#3498db');
 }
 
 function apiRequest(method, url, data, cb) {

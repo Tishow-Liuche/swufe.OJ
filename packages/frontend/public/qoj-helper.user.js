@@ -1,11 +1,9 @@
 // ==UserScript==
-// @name         OJ QOJ Helper
+// @name         SWUFE Singularity OJ - QOJ Auto Submit Helper
 // @namespace    https://oj.example.com
 // @version      2.3
-// @description  Auto submit QOJ from SWUFE OJ and report result back
+// @description  Auto fill code, auto submit to QOJ, report result back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
-// @downloadURL  http://localhost:5173/qoj-helper.user.js
-// @updateURL    http://localhost:5173/qoj-helper.user.js
 // @match        https://qoj.ac/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -13,6 +11,7 @@
 // @grant        GM_deleteValue
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      *
 // @run-at       document-end
 // @noframes
 // ==/UserScript==
@@ -20,7 +19,9 @@
 (function () {
   'use strict';
 
-  var API = 'http://127.0.0.1:3000';
+  var DEFAULT_API = 'http://127.0.0.1:3000';
+  var API_BASE_KEY = 'swufe_oj_api_base';
+  var API = resolveApiBase();
   var STATE_KEY = 'swufe_qoj_auto_state';
   var SUBMIT_ONCE_KEY_PREFIX = 'swufe_qoj_submit_once_';
   var SUBMIT_BUTTON_SELECTOR = '#button-submit-answer';
@@ -38,6 +39,24 @@
 
   function dv(key) {
     GM_deleteValue(key);
+  }
+
+  function normalizeApiBase(value) {
+    var text = String(value || '').trim().replace(/\/+$/, '');
+    return /^https?:\/\//i.test(text) ? text : '';
+  }
+
+  function resolveApiBase() {
+    var fromUrl = '';
+    try {
+      fromUrl = new URLSearchParams(location.search).get('swufeOjApi') || '';
+    } catch (_) {}
+    var normalized = normalizeApiBase(fromUrl);
+    if (normalized) {
+      sv(API_BASE_KEY, normalized);
+      return normalized;
+    }
+    return normalizeApiBase(gv(API_BASE_KEY, '')) || DEFAULT_API;
   }
 
   function loadState() {
