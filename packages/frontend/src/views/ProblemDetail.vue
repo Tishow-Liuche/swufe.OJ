@@ -280,7 +280,13 @@ function withSwufeOjApiParam(url?: string) {
   if (!url) return url;
   try {
     const next = new URL(url);
-    next.searchParams.set('swufeOjApi', getSwufeOjApiBase());
+    const apiBase = getSwufeOjApiBase();
+    next.searchParams.set('swufeOjApi', apiBase);
+    // Keep hash fragment (e.g. #submit) while also embedding the API base so
+    // Tampermonkey helpers can recover it even if query params are stripped.
+    const hashBase = (next.hash || '#submit').replace(/([?&]swufeOjApi=)[^&]*/g, '').replace(/[?&]$/, '');
+    const joiner = hashBase.includes('?') ? '&' : '?';
+    next.hash = `${hashBase || '#submit'}${joiner}swufeOjApi=${encodeURIComponent(apiBase)}`;
     return next.toString();
   } catch {
     return url;
@@ -344,7 +350,9 @@ async function submitCode() {
         submissionId: data.submissionId,
       };
       cfDialog.value = true;
-      cfAutoMessage.value = '正在打开 ' + cfData.value.platform + ' 并自动提交。完成后标签页会自动关闭，结果会回到这里。';
+      cfAutoMessage.value = isLuogu
+        ? '正在打开洛谷。请确认已安装并启用「SWUFE Singularity OJ - Luogu Auto Submit Helper」；页面顶部应出现蓝色 Helper 横幅，随后自动填代码并提交。若只有跳转没有横幅，请先安装 Helper。'
+        : ('正在打开 ' + cfData.value.platform + ' 并自动提交。完成后标签页会自动关闭，结果会回到这里。');
       copyCfCode();
       cfOpenBlocked.value = !openExternalUrl(cfData.value.url);
       startPolling(data.submissionId);
@@ -673,7 +681,16 @@ async function submitFeedback() {
           </div>
           <div class="cf-step">
             <span class="cf-step-num">2</span>
-            <span class="cf-step-text">辅助脚本会自动填入代码并点击 Submit</span>
+            <span class="cf-step-text">
+              辅助脚本会自动填入代码并点击 Submit
+              <a
+                v-if="cfData?.platform === '洛谷'"
+                href="/install-oj-helpers.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                style="margin-left:6px;color:#1d5a96;font-weight:700;text-decoration:underline"
+              >安装 / 更新 Luogu Helper</a>
+            </span>
           </div>
           <div class="cf-step">
             <span class="cf-step-num">3</span>
