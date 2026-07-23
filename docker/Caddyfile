@@ -3,7 +3,7 @@
 
   # Presigned MinIO object URLs use the public OJ domain. Keep the S3 bucket
   # path on the object store while every other request reaches the Nest app.
-  @objects path /oj-testdata/*
+  @objects path /oj-testdata /oj-testdata/*
   handle @objects {
     reverse_proxy minio:9000
   }

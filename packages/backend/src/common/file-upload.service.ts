@@ -1,35 +1,51 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as Minio from 'minio';
 import * as crypto from 'crypto';
 import * as path from 'path';
 
 @Injectable()
-export class FileUploadService {
+export class FileUploadService implements OnModuleInit {
   private readonly logger = new Logger(FileUploadService.name);
-  private client: Minio.Client;
+  private storageClient: Minio.Client;
+  private publicClient: Minio.Client;
   private bucket: string;
 
   constructor(private config: ConfigService) {
-    this.client = new Minio.Client({
-      endPoint: config.getOrThrow<string>('S3_ENDPOINT'),
-      port: Number(config.getOrThrow<string>('S3_PORT')),
-      useSSL: config.get('S3_USE_SSL', 'false') === 'true',
-      accessKey: config.getOrThrow<string>('S3_ACCESS_KEY'),
-      secretKey: config.getOrThrow<string>('S3_SECRET_KEY'),
+    const endpoint = config.getOrThrow<string>('S3_ENDPOINT');
+    const port = Number(config.getOrThrow<string>('S3_PORT'));
+    const useSSL = config.get('S3_USE_SSL', 'false') === 'true';
+    const accessKey = config.getOrThrow<string>('S3_ACCESS_KEY');
+    const secretKey = config.getOrThrow<string>('S3_SECRET_KEY');
+    const region = config.get('S3_REGION', 'us-east-1');
+
+    this.storageClient = new Minio.Client({
+      endPoint: endpoint,
+      port,
+      useSSL,
+      accessKey,
+      secretKey,
+      region,
+    });
+    this.publicClient = new Minio.Client({
+      endPoint: config.get('S3_PUBLIC_ENDPOINT', endpoint),
+      port: Number(config.get('S3_PUBLIC_PORT', String(port))),
+      useSSL: config.get('S3_PUBLIC_USE_SSL', String(useSSL)) === 'true',
+      accessKey,
+      secretKey,
+      region,
     });
     this.bucket = config.getOrThrow<string>('S3_BUCKET');
-    this.ensureBucket();
+  }
+
+  async onModuleInit() {
+    await this.ensureBucket();
   }
 
   private async ensureBucket() {
-    try {
-      const exists = await this.client.bucketExists(this.bucket);
-      if (!exists) await this.client.makeBucket(this.bucket);
-      this.logger.log(`Bucket "${this.bucket}" ready`);
-    } catch (e) {
-      this.logger.warn(`MinIO init warning: ${(e as any).message}`);
-    }
+    const exists = await this.storageClient.bucketExists(this.bucket);
+    if (!exists) await this.storageClient.makeBucket(this.bucket);
+    this.logger.log(`Bucket "${this.bucket}" ready`);
   }
 
   /** 上传文件到 MinIO，返回文件路径 */
@@ -37,7 +53,7 @@ export class FileUploadService {
     const ext = path.extname(file.originalname);
     const key = `${prefix}/${crypto.randomUUID()}${ext}`;
 
-    await this.client.putObject(this.bucket, key, file.buffer, file.size, {
+    await this.storageClient.putObject(this.bucket, key, file.buffer, file.size, {
       'Content-Type': file.mimetype,
       'x-amz-meta-original-name': Buffer.from(file.originalname, 'latin1').toString('utf8'),
     });
@@ -65,7 +81,7 @@ export class FileUploadService {
     await this.validateZip(file);
 
     const key = `testdata/${problemId}/${crypto.randomUUID()}.zip`;
-    await this.client.putObject(this.bucket, key, file.buffer, file.size, {
+    await this.storageClient.putObject(this.bucket, key, file.buffer, file.size, {
       'Content-Type': 'application/zip',
       'x-amz-meta-original-name': file.originalname,
     });
@@ -80,13 +96,13 @@ export class FileUploadService {
   /** 获取文件下载签名 URL（5 分钟有效） */
   async getPresignedUrl(s3Path: string): Promise<string> {
     const { bucket, key } = this.parseS3Path(s3Path);
-    return this.client.presignedGetObject(bucket, key, 5 * 60);
+    return this.publicClient.presignedGetObject(bucket, key, 5 * 60);
   }
 
   /** 删除文件 */
   async deleteFile(s3Path: string) {
     const { bucket, key } = this.parseS3Path(s3Path);
-    await this.client.removeObject(bucket, key);
+    await this.storageClient.removeObject(bucket, key);
   }
 
   /** 上传 Markdown 中的图片 */

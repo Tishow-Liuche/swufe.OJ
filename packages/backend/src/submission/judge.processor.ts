@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { NativeJudgeService } from '../judge/native-judge.service';
+import { JudgeService } from '../judge/judge.service';
 import { LearningService } from '../learning/learning.service';
 import { AssignmentProgressService } from '../teacher/assignment-progress.service';
 
@@ -39,7 +39,7 @@ export class JudgeProcessor extends WorkerHost {
 
   constructor(
     private prisma: PrismaService,
-    private judge: NativeJudgeService,
+    private judge: JudgeService,
     private learning: LearningService,
     @Optional() private assignmentProgress?: AssignmentProgressService,
   ) {
@@ -198,28 +198,18 @@ export class JudgeProcessor extends WorkerHost {
     testCase: ProblemTestCaseForJudge,
     data: JudgeJob,
   ) {
-    const runWithFiles = (this.judge as any).runWithFiles?.bind(this.judge);
-    const checkerResult: RunResult = runWithFiles
-      ? await runWithFiles(
-          checker.language || 'python',
-          userOutput,
-          data.timeLimit,
-          data.memoryLimit,
-          checkerCompileResult.fileId,
-          checker.sourceCode || '',
-          {
-            input: testCase.input,
-            output: testCase.expectedOutput || '',
-            user_output: userOutput,
-          },
-        )
-      : await this.judge.run(
+    const checkerResult: RunResult = await this.judge.runWithFiles(
       checker.language || 'python',
       userOutput,
       data.timeLimit,
       data.memoryLimit,
       checkerCompileResult.fileId,
       checker.sourceCode || '',
+      {
+        input: testCase.input,
+        output: testCase.expectedOutput || '',
+        user_output: userOutput,
+      },
     );
     return this.checkerAccepted(checkerResult) ? 'ACCEPTED' : 'WRONG_ANSWER';
   }

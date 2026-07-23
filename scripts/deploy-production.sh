@@ -74,12 +74,16 @@ JWT_ACCESS_SECRET=$(random_hex 48)
 JWT_REFRESH_SECRET=$(random_hex 48)
 JWT_ACCESS_EXPIRES=15m
 JWT_REFRESH_EXPIRES=7d
-S3_ENDPOINT=${oj_domain}
-S3_PORT=443
+S3_ENDPOINT=minio
+S3_PORT=9000
 S3_ACCESS_KEY=${minio_user}
 S3_SECRET_KEY=${minio_password}
 S3_BUCKET=oj-testdata
-S3_USE_SSL=true
+S3_USE_SSL=false
+S3_REGION=us-east-1
+S3_PUBLIC_ENDPOINT=${oj_domain}
+S3_PUBLIC_PORT=443
+S3_PUBLIC_USE_SSL=true
 GO_JUDGE_URL=http://go-judge:5050
 GO_JUDGE_AUTH_TOKEN=
 APP_PORT=3000
@@ -90,9 +94,13 @@ TRUST_PROXY=true
 SENTRY_DSN=
 EOF
 else
-  set_env S3_ENDPOINT "$oj_domain"
-  set_env S3_PORT 443
-  set_env S3_USE_SSL true
+  set_env S3_ENDPOINT minio
+  set_env S3_PORT 9000
+  set_env S3_USE_SSL false
+  set_env S3_REGION us-east-1
+  set_env S3_PUBLIC_ENDPOINT "$oj_domain"
+  set_env S3_PUBLIC_PORT 443
+  set_env S3_PUBLIC_USE_SSL true
   set_env COOKIE_SECURE true
   set_env TRUST_PROXY true
 fi
