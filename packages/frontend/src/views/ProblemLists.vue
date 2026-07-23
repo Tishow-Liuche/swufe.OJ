@@ -351,7 +351,17 @@ async function removeWrong(problemId: string) {
 
 onMounted(async () => {
   const requestedTab = String(route.query.tab || '');
-  if (['practice', 'plans', 'lists', 'library'].includes(requestedTab)) activeTab.value = requestedTab as Tab;
+  const requestedView = String(route.query.view || '');
+  if (['practice', 'plans', 'lists', 'library'].includes(requestedTab)) {
+    activeTab.value = requestedTab as Tab;
+  }
+  if (requestedTab === 'library' && ['summary', 'favorites', 'wrong'].includes(requestedView)) {
+    libraryView.value = requestedView as LibraryView;
+  } else if (requestedView === 'favorites' || requestedView === 'wrong') {
+    // Allow deep-links that only set view=favorites|wrong
+    activeTab.value = 'library';
+    libraryView.value = requestedView as LibraryView;
+  }
   await loadAll();
 });
 </script>

@@ -13,7 +13,6 @@ import {
   Layers3,
   ListFilter,
   ListTodo,
-  LockKeyhole,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -462,30 +461,29 @@ function requireLogin(redirect: string) {
             <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
           </button>
 
-          <button
-            v-if="!auth.isLoggedIn()"
-            type="button"
+          <router-link
+            v-if="auth.isLoggedIn()"
+            :to="{ path: '/problem-lists', query: { tab: 'library', view: 'favorites' } }"
             class="sidebar-link"
-            aria-label="登录后查看我的收藏"
-            :title="sidebarCollapsed ? '登录后查看我的收藏' : undefined"
-            @click="requireLogin('/profile')"
+            aria-label="我的收藏"
+            :title="sidebarCollapsed ? '我的收藏' : undefined"
           >
             <Star :size="18" aria-hidden="true" />
             <span class="sidebar-link-label">我的收藏</span>
             <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
-          </button>
+          </router-link>
 
           <button
             v-else
             type="button"
-            class="sidebar-link sidebar-link-disabled"
-            disabled
-            aria-label="我的收藏，数据接口尚未接入"
-            :title="sidebarCollapsed ? '我的收藏（尚未接入）' : '收藏数据接口尚未接入'"
+            class="sidebar-link"
+            aria-label="登录后查看我的收藏"
+            :title="sidebarCollapsed ? '登录后查看我的收藏' : undefined"
+            @click="requireLogin('/problem-lists?tab=library&view=favorites')"
           >
             <Star :size="18" aria-hidden="true" />
             <span class="sidebar-link-label">我的收藏</span>
-            <LockKeyhole class="sidebar-link-trailing" :size="15" aria-hidden="true" />
+            <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
           </button>
         </nav>
       </aside>
