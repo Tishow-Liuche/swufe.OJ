@@ -9,8 +9,6 @@ services:
     init: true
     env_file:
       - ${APP_ENV_FILE:-config/app.prod.env}
-    ports:
-      - "${HOST_PORT:-80}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,3 +24,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 45s
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: oj-caddy
+    restart: unless-stopped
+    env_file:
+      - ${PROXY_ENV_FILE:-config/proxy.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:

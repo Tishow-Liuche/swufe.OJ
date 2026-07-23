@@ -1,0 +1,14 @@
+{$OJ_DOMAIN} {
+  encode zstd gzip
+
+  # Presigned MinIO object URLs use the public OJ domain. Keep the S3 bucket
+  # path on the object store while every other request reaches the Nest app.
+  @objects path /oj-testdata/*
+  handle @objects {
+    reverse_proxy minio:9000
+  }
+
+  handle {
+    reverse_proxy backend:3000
+  }
+}
