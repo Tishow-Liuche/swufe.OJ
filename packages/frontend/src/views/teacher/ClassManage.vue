@@ -12,6 +12,7 @@ import api from '../../api/client';
 import FilterSelect from '../../components/FilterSelect.vue';
 import { pointDifficultyOptions, pointDifficultyShortLabel } from '../../utils/pointDifficulty';
 import { isCurrentPageSelected, setCurrentPageSelected, toggleProblem } from './assignment-selection';
+import { excelSafeFraction } from './excel-csv';
 
 type WorkspacePanel = 'overview' | 'access' | 'members' | 'import' | 'assignment' | 'report';
 interface ClassInfo {
@@ -692,7 +693,8 @@ function downloadCombinedReportCsv() {
       String(row.totalScore),
       ...row.byAssignment.flatMap((cell) => [
         cell.present ? cell.statusLabel : '无数据',
-        cell.present ? `${cell.solvedCount}/${cell.totalProblems}` : '-',
+        // Excel treats bare 1/2 as a date; force text via ="1/2".
+        cell.present ? excelSafeFraction(cell.solvedCount, cell.totalProblems) : '-',
         cell.present ? String(cell.score) : '-',
       ]),
     ]);
