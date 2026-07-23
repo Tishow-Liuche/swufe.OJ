@@ -488,6 +488,12 @@ export class TeacherService {
     return updated;
   }
 
+  async deleteAssignment(teacherId: string, assignmentId: string) {
+    await this.requireOwnedAssignment(teacherId, assignmentId);
+    await this.prisma.assignment.delete({ where: { id: assignmentId } });
+    return { ok: true, id: assignmentId };
+  }
+
   async getClassAssignments(teacherId: string, classId: string) {
     const cls = await this.prisma.class.findUnique({ where: { id: classId } });
     if (!cls) throw new NotFoundException('班级不存在');
@@ -498,7 +504,18 @@ export class TeacherService {
       include: {
         problems: {
           orderBy: { order: 'asc' },
-          include: { problem: { select: { id: true, title: true, source: true, difficulty: true } } },
+          include: {
+            problem: {
+              select: {
+                id: true,
+                title: true,
+                source: true,
+                difficulty: true,
+                sourceInfo: { select: { platform: true, remoteProblemId: true } },
+                tags: { select: { name: true }, take: 6 },
+              },
+            },
+          },
         },
         students: { select: { status: true, score: true, completedAt: true } },
         _count: { select: { students: true, problems: true } },

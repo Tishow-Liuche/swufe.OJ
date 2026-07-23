@@ -23,6 +23,7 @@ describe('TeacherService', () => {
         findMany: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        delete: jest.fn(),
       },
       assignmentProblem: {
         createMany: jest.fn(),
@@ -275,6 +276,26 @@ describe('TeacherService', () => {
         link: '/classes/class-1/assignments?assignment=assignment-1',
       }),
     ]);
+  });
+
+  it('deletes an owned assignment', async () => {
+    prisma.assignment.findUnique.mockResolvedValue({ id: 'assignment-1', classId: 'class-1' });
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.assignment.delete.mockResolvedValue({ id: 'assignment-1' });
+
+    await expect(service.deleteAssignment('teacher-1', 'assignment-1')).resolves.toEqual({
+      ok: true,
+      id: 'assignment-1',
+    });
+    expect(prisma.assignment.delete).toHaveBeenCalledWith({ where: { id: 'assignment-1' } });
+  });
+
+  it('rejects deleting an assignment owned by another teacher', async () => {
+    prisma.assignment.findUnique.mockResolvedValue({ id: 'assignment-1', classId: 'class-1' });
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-2' });
+
+    await expect(service.deleteAssignment('teacher-1', 'assignment-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.assignment.delete).not.toHaveBeenCalled();
   });
 
   it('imports a fixed-format student row without requiring college', async () => {

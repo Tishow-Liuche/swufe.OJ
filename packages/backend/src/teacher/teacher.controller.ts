@@ -74,6 +74,11 @@ export class TeacherController {
     return this.teacherService.updateAssignment(req.user.id, id, data);
   }
 
+  @Delete('assignments/:id')
+  deleteAssignment(@Param('id') id: string, @Req() req: any) {
+    return this.teacherService.deleteAssignment(req.user.id, id);
+  }
+
   @Get('assignments/:id/report')
   getAssignmentReport(
     @Param('id') id: string,

@@ -14,7 +14,7 @@ import { pointDifficultyOptions, pointDifficultyShortLabel } from '../../utils/p
 import { isCurrentPageSelected, setCurrentPageSelected, toggleProblem } from './assignment-selection';
 import { excelSafeFraction } from './excel-csv';
 
-type WorkspacePanel = 'overview' | 'access' | 'members' | 'import' | 'assignment' | 'report';
+type WorkspacePanel = 'overview' | 'access' | 'members' | 'import' | 'assignment' | 'history' | 'report';
 interface ClassInfo {
   id: string; name: string; memberCount?: number; createdAt: string; status: string;
   joinCode?: string | null; joinCodeExpiresAt?: string | null;
@@ -36,9 +36,19 @@ interface ProblemMetadata {
   sources: Array<{ source: string; count: number }>;
 }
 interface AssignmentItem {
-  id: string; title: string; description?: string; startTime: string; endTime: string;
+  id: string;
+  title: string;
+  description?: string;
+  startTime: string;
+  endTime: string;
+  allowLate?: boolean;
+  latePenalty?: number;
+  passCondition?: string | null;
+  countExternalAc?: boolean;
+  lifecycle?: string;
   problems?: Array<{ problem: ProblemItem }>;
   _count?: { students: number; problems: number };
+  summary?: { studentCount: number; problemCount: number; completedStudents: number };
 }
 interface AssignmentReport {
   assignment: {
@@ -94,6 +104,7 @@ const panels = [
   { id: 'members' as const, label: '学生名单', detail: '正式成员', icon: UserCheck },
   { id: 'import' as const, label: '导入学生', detail: '批量加入', icon: UserPlus },
   { id: 'assignment' as const, label: '发布作业', detail: '从题库选题', icon: ClipboardList },
+  { id: 'history' as const, label: '历史作业', detail: '修改与删除', icon: Clock3 },
   { id: 'report' as const, label: '作业报告', detail: '完成情况', icon: BarChart3 },
 ];
 
@@ -125,6 +136,9 @@ const assignmentAllowLate = ref(false);
 const assignmentLatePenalty = ref(0);
 const assignmentPassCondition = ref('ALL');
 const assignmentCountExternalAc = ref(false);
+const editingAssignmentId = ref('');
+const assignmentSaving = ref(false);
+const deletingAssignmentId = ref('');
 const reportKeyword = ref('');
 const reportStatus = ref('');
 const reportCompletion = ref<'all' | 'completed' | 'incomplete'>('all');
@@ -359,6 +373,7 @@ async function loadClassData() {
   reports.value = [];
   selectedAssignmentIds.value = [];
   assignmentPickerOpen.value = false;
+  if (editingAssignmentId.value) resetAssignmentBuilder();
   joinCodeExpiresAt.value = selectedClass.value?.joinCodeExpiresAt
     ? (() => { const date = new Date(selectedClass.value!.joinCodeExpiresAt!); date.setMinutes(date.getMinutes() - date.getTimezoneOffset()); return date.toISOString().slice(0, 16); })()
     : defaultJoinCodeExpiry();
@@ -375,6 +390,9 @@ function openPanel(panel: WorkspacePanel) {
   if (panel === 'assignment') {
     void loadProblemMetadata();
     void searchProblems(1);
+  }
+  if (panel === 'history') {
+    void loadAssignments();
   }
 }
 async function createClass() {
@@ -573,31 +591,120 @@ function toggleCurrentProblemPage() {
 }
 function removeProblem(problemId: string) { selectedProblems.value = selectedProblems.value.filter((item) => item.id !== problemId); }
 function clearSelectedProblems() { selectedProblems.value = []; }
+
+function resetAssignmentBuilder() {
+  editingAssignmentId.value = '';
+  assignmentTitle.value = '';
+  assignmentDescription.value = '';
+  assignmentEndTime.value = '';
+  assignmentAllowLate.value = false;
+  assignmentLatePenalty.value = 0;
+  assignmentPassCondition.value = 'ALL';
+  assignmentCountExternalAc.value = false;
+  selectedProblems.value = [];
+}
+
+function toLocalDateTimeInput(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function assignmentLifecycleLabel(lifecycle?: string) {
+  const map: Record<string, string> = {
+    NOT_STARTED: '未开始',
+    IN_PROGRESS: '进行中',
+    CLOSED: '已截止',
+    LATE_OPEN: '补交中',
+  };
+  return map[lifecycle || ''] || lifecycle || '未知';
+}
+
+function beginCreateAssignment() {
+  resetAssignmentBuilder();
+  activePanel.value = 'assignment';
+  if (!problemResults.value.length) void searchProblems(1);
+}
+
+function startEditAssignment(item: AssignmentItem) {
+  editingAssignmentId.value = item.id;
+  assignmentTitle.value = item.title || '';
+  assignmentDescription.value = item.description || '';
+  assignmentEndTime.value = toLocalDateTimeInput(item.endTime);
+  assignmentAllowLate.value = Boolean(item.allowLate);
+  assignmentLatePenalty.value = Number(item.latePenalty) || 0;
+  assignmentPassCondition.value = item.passCondition || 'ALL';
+  assignmentCountExternalAc.value = Boolean(item.countExternalAc);
+  selectedProblems.value = (item.problems || [])
+    .map((entry) => entry.problem)
+    .filter((problem): problem is ProblemItem => Boolean(problem?.id));
+  activePanel.value = 'assignment';
+  if (!problemResults.value.length) void searchProblems(1);
+  showMessage(`正在编辑作业：${item.title}`);
+}
+
+function cancelEditAssignment() {
+  resetAssignmentBuilder();
+  showMessage('已取消编辑，可继续发布新作业');
+}
+
 async function createAssignment() {
   if (!assignmentTitle.value.trim()) return showMessage('请输入作业标题');
   if (!selectedProblems.value.length) return showMessage('请至少选择一道题目');
+  assignmentSaving.value = true;
   try {
-    await api.post('/api/teacher/assignments', {
-      classId: selectedClassId.value,
-      title: assignmentTitle.value.trim(),
-      description: assignmentDescription.value.trim(),
-      endTime: assignmentEndTime.value ? new Date(assignmentEndTime.value).toISOString() : undefined,
-      problemIds: selectedProblems.value.map((item) => item.id),
-      allowLate: assignmentAllowLate.value,
-      latePenalty: Number(assignmentLatePenalty.value) || 0,
-      passCondition: assignmentPassCondition.value || 'ALL',
-      countExternalAc: assignmentCountExternalAc.value,
-    });
-    assignmentTitle.value = '';
-    assignmentDescription.value = '';
-    assignmentEndTime.value = '';
-    assignmentAllowLate.value = false;
-    assignmentLatePenalty.value = 0;
-    assignmentPassCondition.value = 'ALL';
-    assignmentCountExternalAc.value = false;
-    selectedProblems.value = [];
-    showMessage('作业已发布'); await loadAssignments();
-  } catch (e: any) { showMessage('发布作业失败：' + (e.response?.data?.message || e.message)); }
+    if (editingAssignmentId.value) {
+      await api.patch(`/api/teacher/assignments/${editingAssignmentId.value}`, {
+        title: assignmentTitle.value.trim(),
+        description: assignmentDescription.value.trim(),
+        endTime: assignmentEndTime.value ? new Date(assignmentEndTime.value).toISOString() : undefined,
+        problemIds: selectedProblems.value.map((item) => item.id),
+        allowLate: assignmentAllowLate.value,
+        latePenalty: Number(assignmentLatePenalty.value) || 0,
+        passCondition: assignmentPassCondition.value || 'ALL',
+        countExternalAc: assignmentCountExternalAc.value,
+      });
+      showMessage('作业已更新');
+    } else {
+      await api.post('/api/teacher/assignments', {
+        classId: selectedClassId.value,
+        title: assignmentTitle.value.trim(),
+        description: assignmentDescription.value.trim(),
+        endTime: assignmentEndTime.value ? new Date(assignmentEndTime.value).toISOString() : undefined,
+        problemIds: selectedProblems.value.map((item) => item.id),
+        allowLate: assignmentAllowLate.value,
+        latePenalty: Number(assignmentLatePenalty.value) || 0,
+        passCondition: assignmentPassCondition.value || 'ALL',
+        countExternalAc: assignmentCountExternalAc.value,
+      });
+      showMessage('作业已发布');
+    }
+    resetAssignmentBuilder();
+    await loadAssignments();
+  } catch (e: any) {
+    showMessage((editingAssignmentId.value ? '更新作业失败：' : '发布作业失败：') + (e.response?.data?.message || e.message));
+  } finally {
+    assignmentSaving.value = false;
+  }
+}
+
+async function deleteAssignment(item: AssignmentItem) {
+  if (!window.confirm(`确定删除作业「${item.title}」吗？学生进度记录也会一并删除。`)) return;
+  deletingAssignmentId.value = item.id;
+  try {
+    await api.delete(`/api/teacher/assignments/${item.id}`);
+    if (editingAssignmentId.value === item.id) resetAssignmentBuilder();
+    selectedAssignmentIds.value = selectedAssignmentIds.value.filter((id) => id !== item.id);
+    reports.value = reports.value.filter((report) => report.assignment.id !== item.id);
+    showMessage('作业已删除');
+    await loadAssignments();
+  } catch (e: any) {
+    showMessage('删除作业失败：' + (e.response?.data?.message || e.message));
+  } finally {
+    deletingAssignmentId.value = '';
+  }
 }
 async function loadAssignments() {
   if (!selectedClassId.value) return;
@@ -864,8 +971,22 @@ async function settleCurrentAssignment() {
         </section>
 
         <section v-else-if="activePanel === 'assignment'" class="content-view">
-          <div class="view-heading"><div><p>ASSIGNMENT BUILDER</p><h2>发布作业</h2><span>从题库选择题目并设置截止时间。</span></div><span class="selection-count">已选 {{ selectedProblems.length }} 题</span></div>
+          <div class="view-heading">
+            <div>
+              <p>ASSIGNMENT BUILDER</p>
+              <h2>{{ editingAssignmentId ? '编辑作业' : '发布作业' }}</h2>
+              <span>{{ editingAssignmentId ? '可修改标题、规则、截止时间与题目列表。' : '从题库选择题目并设置截止时间。' }}</span>
+            </div>
+            <div class="report-actions">
+              <button v-if="editingAssignmentId" class="secondary-command" type="button" @click="cancelEditAssignment">取消编辑</button>
+              <button class="secondary-command" type="button" @click="activePanel = 'history'; void loadAssignments()">历史作业</button>
+              <span class="selection-count">已选 {{ selectedProblems.length }} 题</span>
+            </div>
+          </div>
           <section class="surface assignment-builder">
+            <div v-if="editingAssignmentId" class="edit-banner" role="status">
+              正在编辑已发布作业。保存后会按新规则重算学生进度（已结算状态除外）。
+            </div>
             <div class="form-grid">
               <label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label>
               <label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label>
@@ -975,8 +1096,92 @@ async function settleCurrentAssignment() {
                   </article>
                 </div>
                 <div v-else class="problem-set-empty">从左侧题库勾选题目</div>
-                <footer class="builder-footer"><span>发布后同步至当前正式成员</span><button class="primary-command" :disabled="!selectedProblems.length" @click="createAssignment"><BookOpenCheck :size="16" />发布作业</button></footer>
+                <footer class="builder-footer">
+                  <span>{{ editingAssignmentId ? '保存后将重算未结算学生的进度' : '发布后同步至当前正式成员' }}</span>
+                  <button
+                    class="primary-command"
+                    :disabled="!selectedProblems.length || assignmentSaving"
+                    @click="createAssignment"
+                  >
+                    <BookOpenCheck :size="16" />
+                    {{ assignmentSaving ? '保存中…' : (editingAssignmentId ? '保存修改' : '发布作业') }}
+                  </button>
+                </footer>
               </aside>
+            </div>
+          </section>
+        </section>
+
+        <section v-else-if="activePanel === 'history'" class="content-view">
+          <div class="view-heading">
+            <div>
+              <p>ASSIGNMENT HISTORY</p>
+              <h2>历史作业</h2>
+              <span>查看本班已发布作业，支持修改题目/规则或删除。</span>
+            </div>
+            <div class="report-actions">
+              <button class="secondary-command" type="button" :disabled="assignmentsLoading" @click="loadAssignments">
+                <RefreshCw :size="16" />刷新
+              </button>
+              <button class="primary-command" type="button" @click="beginCreateAssignment">
+                <Plus :size="16" />新建作业
+              </button>
+            </div>
+          </div>
+
+          <section class="surface history-surface">
+            <div v-if="assignmentsLoading" class="surface-empty">正在加载历史作业…</div>
+            <div v-else-if="!assignments.length" class="surface-empty">
+              当前班级还没有发布过作业。
+              <button class="primary-command" type="button" style="margin-top:12px" @click="beginCreateAssignment">去发布第一份作业</button>
+            </div>
+            <div v-else class="history-list">
+              <article v-for="item in assignments" :key="item.id" class="history-card">
+                <header>
+                  <div>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.description || '暂无作业说明' }}</p>
+                  </div>
+                  <span class="history-lifecycle" :class="(item.lifecycle || '').toLowerCase()">
+                    {{ assignmentLifecycleLabel(item.lifecycle) }}
+                  </span>
+                </header>
+                <div class="history-meta">
+                  <span>题目 {{ item.summary?.problemCount ?? item._count?.problems ?? item.problems?.length ?? 0 }} 道</span>
+                  <span>学生 {{ item.summary?.studentCount ?? item._count?.students ?? 0 }} 人</span>
+                  <span>完成 {{ item.summary?.completedStudents ?? 0 }} 人</span>
+                  <span>截止 {{ formatDate(item.endTime) }}</span>
+                  <span>{{ item.allowLate ? `允许补交 · 扣 ${item.latePenalty || 0}%` : '不允许补交' }}</span>
+                  <span>{{ item.countExternalAc ? '计入外部 AC' : '仅站内提交' }}</span>
+                </div>
+                <div v-if="item.problems?.length" class="history-problems">
+                  <span v-for="entry in item.problems.slice(0, 8)" :key="entry.problem?.id || entry.problem?.title">
+                    {{ entry.problem?.title || '题目' }}
+                  </span>
+                  <span v-if="(item.problems?.length || 0) > 8">+{{ (item.problems?.length || 0) - 8 }}</span>
+                </div>
+                <footer>
+                  <button class="secondary-command" type="button" @click="startEditAssignment(item)">
+                    修改
+                  </button>
+                  <button
+                    class="secondary-command"
+                    type="button"
+                    @click="selectedAssignmentIds = [item.id]; activePanel = 'report'; void loadReport([item.id])"
+                  >
+                    查看报告
+                  </button>
+                  <button
+                    class="danger-command"
+                    type="button"
+                    :disabled="deletingAssignmentId === item.id"
+                    @click="deleteAssignment(item)"
+                  >
+                    <Trash2 :size="15" />
+                    {{ deletingAssignmentId === item.id ? '删除中…' : '删除' }}
+                  </button>
+                </footer>
+              </article>
             </div>
           </section>
         </section>
@@ -1372,11 +1577,109 @@ async function settleCurrentAssignment() {
   .assignment-problem-set .builder-footer .primary-command { width: auto; }
 }
 
+.edit-banner {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #f0d9a8;
+  border-radius: 8px;
+  color: #8a5a10;
+  background: #fff8ea;
+  font-size: 12px;
+  font-weight: 700;
+}
+.history-surface { padding: 16px; }
+.history-list {
+  display: grid;
+  gap: 12px;
+}
+.history-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #dce5ed;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fff 0%, #f8fbfd 100%);
+}
+.history-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.history-card > header strong {
+  display: block;
+  color: #274860;
+  font-size: 15px;
+}
+.history-card > header p {
+  margin: 5px 0 0;
+  color: #708295;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.history-lifecycle {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #245f94;
+  background: #e8f2fb;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.history-lifecycle.in_progress { color: #0f766e; background: #e6f7f3; }
+.history-lifecycle.not_started { color: #6b7280; background: #f1f3f5; }
+.history-lifecycle.closed { color: #9a3412; background: #ffedd5; }
+.history-lifecycle.late_open { color: #92400e; background: #fef3c7; }
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.history-meta span {
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #526579;
+  background: #eef2f6;
+  font-size: 11px;
+  font-weight: 700;
+}
+.history-problems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.history-problems span {
+  max-width: 220px;
+  overflow: hidden;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #315f88;
+  background: #edf5fc;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-card > footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.history-card .danger-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 @media(max-width:620px) {
   .assignment-builder { padding: 16px; }
   .problem-filter-row { grid-template-columns: 1fr; }
   .difficulty-filter button { min-width: 38px; min-height: 36px; }
   .assignment-table-wrap { display: none; }
+  .history-card > header { flex-direction: column; }
+  .history-card > footer .secondary-command,
+  .history-card > footer .danger-command { width: 100%; justify-content: center; }
   .assignment-builder .assignment-mobile-page-toggle { display: inline-flex; width: fit-content; min-height: 38px; align-items: center; gap: 8px; margin-top: 12px; padding: 0 10px; border: 1px solid #d5e2ed; border-radius: 8px; color: #315f88; background: #f7fbff; font-size: 11px; font-weight: 800; }
   .assignment-mobile-list { display: grid; gap: 7px; margin-top: 12px; }
   .assignment-mobile-item { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 9px; padding: 11px; border: 1px solid #dce5ed; border-radius: 10px; background: #fff; }
