@@ -18,10 +18,18 @@ import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import api from '../api/client';
+import { resolveQuickStartProblem } from '../utils/quick-start';
 
 const router = useRouter();
 const auth = useAuthStore();
 const stats = ref({ problemCount: 0, submissionCount: 0, userCount: 0 });
+const openingQuickStart = ref('');
+const quickStartProblems = [
+  { number: '01', remoteProblemId: 'P1001', title: '入门题 P1001', description: 'A+B Problem — 第一个程序' },
+  { number: '02', remoteProblemId: 'P1007', title: '思维题 P1007', description: '独木桥 — 相遇转身等价直接穿过' },
+  { number: '03', remoteProblemId: 'P1003', title: '模拟题 P1003', description: '铺地毯 — NOIP 提高组真题' },
+];
 
 function openAuthenticated(path: string) {
   if (auth.isLoggedIn()) {
@@ -34,6 +42,26 @@ function openAuthenticated(path: string) {
 
 function openProblemLibrary() {
   openAuthenticated('/problems');
+}
+
+async function openQuickStartProblem(remoteProblemId: string) {
+  if (openingQuickStart.value) return;
+  openingQuickStart.value = remoteProblemId;
+  try {
+    const { data } = await api.get('/api/problems', {
+      params: { source: 'LUOGU', keyword: remoteProblemId, page: 1, pageSize: 100 },
+    });
+    const problem = resolveQuickStartProblem(data.items || [], remoteProblemId);
+    if (problem) {
+      await router.push(`/problems/${problem.id}`);
+      return;
+    }
+  } catch {
+    // Fall through to the searchable problem library.
+  } finally {
+    openingQuickStart.value = '';
+  }
+  await router.push({ path: '/problems', query: { source: 'LUOGU', keyword: remoteProblemId } });
 }
 
 onMounted(async () => {
@@ -186,34 +214,27 @@ onMounted(async () => {
     <section class="quick-links">
       <h2>快速开始</h2>
       <div class="quick-grid">
-        <div class="quick-item" @click="router.push('/problems/cmriknmx400054gvlv12udy5v')">
-          <span class="quick-num">01</span>
-          <div>
-            <strong>入门题 P1001</strong>
-            <p>A+B Problem — 第一个程序</p>
-          </div>
-        </div>
-        <div class="quick-item" @click="router.push('/problems/cmriknmya00104gvl9k1ll45d')">
-          <span class="quick-num">02</span>
-          <div>
-            <strong>思维题 P1007</strong>
-            <p>独木桥 — 相遇转身等价直接穿过</p>
-          </div>
-        </div>
-        <div class="quick-item" @click="router.push('/problems/cmriknmxh000f4gvl9d3id1dl')">
-          <span class="quick-num">03</span>
-          <div>
-            <strong>模拟题 P1003</strong>
-            <p>铺地毯 — NOIP 提高组真题</p>
-          </div>
-        </div>
-        <div class="quick-item" @click="router.push('/admin/create-problem')">
+        <button
+          v-for="item in quickStartProblems"
+          :key="item.remoteProblemId"
+          type="button"
+          class="quick-item"
+          :disabled="Boolean(openingQuickStart)"
+          @click="openQuickStartProblem(item.remoteProblemId)"
+        >
+          <span class="quick-num">{{ item.number }}</span>
+          <span>
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.description }}</p>
+          </span>
+        </button>
+        <button type="button" class="quick-item" @click="router.push('/admin/create-problem')">
           <span class="quick-num">＋</span>
-          <div>
+          <span>
             <strong>创建题目</strong>
             <p>录入原创题目到平台题库</p>
-          </div>
-        </div>
+          </span>
+        </button>
       </div>
     </section>
 
@@ -1066,10 +1087,12 @@ onMounted(async () => {
 .quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .quick-item {
   display: flex; align-items: center; gap: 14px; padding: 16px;
+  width: 100%; border: 0; text-align: left; font: inherit;
   background: #fff; border-radius: 10px; cursor: pointer;
   box-shadow: 0 1px 4px rgba(0,0,0,0.06); transition: all 0.2s;
 }
 .quick-item:hover { background: #f0f8ff; transform: translateX(4px); }
+.quick-item:disabled { cursor: wait; opacity: 0.72; transform: none; }
 .quick-num {
   width: 36px; height: 36px; border-radius: 8px; background: #e3f2fd;
   color: #1565c0; display: flex; align-items: center; justify-content: center;

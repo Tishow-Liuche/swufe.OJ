@@ -14,10 +14,14 @@ describe('UserService profile settings', () => {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn(),
         update: jest.fn(),
       },
       userSession: {
         deleteMany: jest.fn(),
+      },
+      helperDevice: {
+        updateMany: jest.fn(),
       },
       submission: {
         findMany: jest.fn(),
@@ -52,7 +56,9 @@ describe('UserService profile settings', () => {
       assignmentStudent: {
         findMany: jest.fn(),
       },
-      $transaction: jest.fn(async (operations: any[]) => Promise.all(operations)),
+      $transaction: jest.fn(async (operation: any) => (
+        typeof operation === 'function' ? operation(prisma) : Promise.all(operation)
+      )),
     };
     cfAcceptedSync = {
       syncUserAccepted: jest.fn(),
@@ -114,6 +120,23 @@ describe('UserService profile settings', () => {
       select: expect.objectContaining({ mustChangePassword: true }),
     }));
     expect(result).toMatchObject({ mustChangePassword: true });
+  });
+
+  it('reports a pending teacher applicant as a student in the authenticated profile', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'teacher-candidate', username: 'teacher-candidate', email: 'teacher@example.com', avatar: null,
+      phone: null, nickname: null, role: 'TEACHER', school: 'SWUFE',
+      requestedRole: 'TEACHER', teacherApplicationStatus: 'PENDING',
+      mustChangePassword: false, createdAt: new Date(),
+    });
+
+    const result = await service.getProfile('teacher-candidate');
+
+    expect(result).toMatchObject({
+      role: 'STUDENT',
+      requestedRole: 'TEACHER',
+      teacherApplicationStatus: 'PENDING',
+    });
   });
 
   it('includes the approved member count in each student class record', async () => {
@@ -360,6 +383,69 @@ describe('UserService profile settings', () => {
 
     await expect(service.getClassAssignments('student-1', 'class-1')).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.assignment.findMany).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit review before a pending teacher applicant can become a teacher', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'teacher-candidate',
+      role: 'STUDENT',
+      requestedRole: 'TEACHER',
+      teacherApplicationStatus: 'PENDING',
+      deletedAt: null,
+    });
+
+    await expect(service.setRole('admin-1', 'teacher-candidate', 'TEACHER'))
+      .rejects.toThrow('教师申请待审核');
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('does not allow an administrator to demote themself or the last active administrator', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'admin-1', role: 'ADMIN', teacherApplicationStatus: 'NOT_REQUIRED', deletedAt: null,
+    });
+
+    await expect(service.setRole('admin-1', 'admin-1', 'STUDENT'))
+      .rejects.toThrow('不能降低当前登录的管理员权限');
+
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'admin-2', role: 'ADMIN', teacherApplicationStatus: 'NOT_REQUIRED', deletedAt: null,
+    });
+    prisma.user.count.mockResolvedValue(1);
+    await expect(service.setRole('admin-1', 'admin-2', 'STUDENT'))
+      .rejects.toThrow('不能降低最后一个管理员账号的权限');
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('logically deletes a user, invalidates sessions, and keeps the user record for history', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'student-2', role: 'STUDENT', deletedAt: null });
+    prisma.userSession.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.helperDevice.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.update.mockResolvedValue({ id: 'student-2', username: 'student2', deletedAt: new Date() });
+
+    const result = await (service as any).deleteUser('admin-1', 'student-2');
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: 'Serializable' }),
+    );
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'student-2' },
+      data: expect.objectContaining({ authVersion: { increment: 1 } }),
+    }));
+    expect(prisma.helperDevice.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'student-2' },
+      data: { status: 'REVOKED' },
+    });
+    expect(result).toEqual(expect.objectContaining({ success: true, userId: 'student-2' }));
+  });
+
+  it('does not allow an administrator to delete themself or the last active administrator', async () => {
+    await expect((service as any).deleteUser('admin-1', 'admin-1')).rejects.toBeInstanceOf(BadRequestException);
+
+    prisma.user.findUnique.mockResolvedValue({ id: 'admin-2', role: 'ADMIN', deletedAt: null });
+    prisma.user.count.mockResolvedValue(1);
+    await expect((service as any).deleteUser('admin-1', 'admin-2')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('returns only the student class assignments with completion during each assignment window', async () => {

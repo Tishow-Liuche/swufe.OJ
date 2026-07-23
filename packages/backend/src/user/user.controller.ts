@@ -128,8 +128,15 @@ export class UserController {
   @Patch('admin/:id/role')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
-  setRole(@Param('id') id: string, @Body('role') role: string) {
-    return this.userService.setRole(id, role);
+  setRole(@Param('id') id: string, @Body('role') role: string, @Req() req: any) {
+    return this.userService.setRole(req.user.id, id, role);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  deleteUser(@Param('id') id: string, @Req() req: any) {
+    return this.userService.deleteUser(req.user.id, id);
   }
 
   @Post('password')

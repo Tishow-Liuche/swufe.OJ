@@ -6,6 +6,14 @@ import { randomBytes } from 'crypto';
 export class HelperService {
   constructor(private prisma: PrismaService) {}
 
+  async assertActiveUser(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, deletedAt: true },
+    });
+    if (!user || user.deletedAt) throw new ForbiddenException('账号已注销或不存在');
+  }
+
   // ===== 第三方平台 =====
   async getPlatforms() {
     return this.prisma.externalPlatform.findMany();
@@ -76,6 +84,7 @@ export class HelperService {
 
   // ===== Helper 设备 =====
   async registerDevice(userId: string, dto: { deviceName: string; browserName: string; extensionVersion: string }) {
+    await this.assertActiveUser(userId);
     return this.prisma.helperDevice.create({
       data: {
         userId, deviceName: dto.deviceName, browserName: dto.browserName,
@@ -85,10 +94,13 @@ export class HelperService {
   }
 
   async heartbeat(deviceId: string, userId: string) {
-    return this.prisma.helperDevice.updateMany({
-      where: { id: deviceId, userId },
+    await this.assertActiveUser(userId);
+    const result = await this.prisma.helperDevice.updateMany({
+      where: { id: deviceId, userId, status: { not: 'REVOKED' } },
       data: { status: 'ONLINE', lastSeenAt: new Date() },
     });
+    if (result.count === 0) throw new ForbiddenException('设备不存在或已撤销');
+    return result;
   }
 
   async getDevices(userId: string) {
@@ -125,6 +137,7 @@ export class HelperService {
 
   /** 获取下一个待处理任务（不自动分配，防止任务丢失） */
   async getNextTask(userId: string, deviceId: string) {
+    await this.assertActiveUser(userId);
     const now = new Date();
     const task = await this.prisma.remoteSubmissionTask.findFirst({
       where: {
@@ -167,6 +180,7 @@ export class HelperService {
     remoteSubmissionId: string; remoteUsername: string;
     submittedAt: string; remoteLanguage?: string;
   }) {
+    await this.assertActiveUser(userId);
     const task = await this.prisma.remoteSubmissionTask.findFirst({
       where: { id: taskId, userId },
     });
@@ -196,6 +210,11 @@ export class HelperService {
 
   /** Helper 报告失败 */
   async submitFailure(taskId: string, userId: string, data: { failureCode: string; failureMessage?: string }) {
+    await this.assertActiveUser(userId);
+    const task = await this.prisma.remoteSubmissionTask.findFirst({
+      where: { id: taskId, userId },
+    });
+    if (!task) throw new NotFoundException('任务不存在');
     await this.prisma.remoteSubmissionTask.update({
       where: { id: taskId },
       data: {
@@ -205,13 +224,10 @@ export class HelperService {
         updatedAt: new Date(),
       },
     });
-    const task = await this.prisma.remoteSubmissionTask.findUnique({ where: { id: taskId } });
-    if (task) {
-      await this.prisma.submission.update({
-        where: { id: task.submissionId },
-        data: { status: 'REMOTE_ERROR', compileMessage: data.failureMessage },
-      });
-    }
+    await this.prisma.submission.update({
+      where: { id: task.submissionId },
+      data: { status: 'REMOTE_ERROR', compileMessage: data.failureMessage },
+    });
     return { taskId, status: 'FAILED' };
   }
 

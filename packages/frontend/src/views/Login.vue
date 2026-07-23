@@ -88,12 +88,13 @@ const passwordChecks = computed(() => ({
 const passwordScore = computed(() => Object.values(passwordChecks.value).filter(Boolean).length);
 const passwordLabel = computed(() => ['尚未输入', '较弱', '可用', '安全'][passwordScore.value]);
 const passwordChangedNotice = computed(() => route.query.passwordChanged === '1');
+const campusAccountPattern = /^[\p{L}\p{N}_-]{1,20}$/u;
 const usernameHint = computed(() => {
   const username = registerForm.value.username;
   if (!username) return '';
   if (username.trim() !== username) return '用户名不能包含首尾空格';
-  if (username.length < 3 || username.length > 20) return '用户名长度需为 3–20 个字符';
-  if (!/^[A-Za-z0-9_-]+$/.test(username)) return '仅支持字母、数字、下划线和连字符';
+  if (username.length < 1 || username.length > 20) return '用户名长度需为 1–20 个字符';
+  if (!campusAccountPattern.test(username)) return '仅支持汉字、字母、数字、下划线和连字符';
   return '';
 });
 
@@ -103,7 +104,7 @@ const canSubmit = computed(() => {
     return Boolean(loginForm.value.account.trim() && loginForm.value.password);
   }
   return Boolean(
-    /^[A-Za-z0-9_-]{3,20}$/.test(registerForm.value.username.trim())
+    campusAccountPattern.test(registerForm.value.username.trim())
     && registerForm.value.email.trim()
     && resolvedSchool.value.length >= 2
     && (registerForm.value.requestedRole !== 'STUDENT' || resolvedCollege.value.length >= 2)
@@ -278,10 +279,9 @@ async function submit() {
                     v-model="registerForm.username"
                     type="text"
                     autocomplete="username"
-                    minlength="3"
+                    minlength="1"
                     maxlength="20"
-                    pattern="[A-Za-z0-9_-]+"
-                    placeholder="3-20 位字母、数字或 _ -"
+                    placeholder="1-20 位，支持汉字、字母、数字或 _ -"
                     required
                   />
                 </span>

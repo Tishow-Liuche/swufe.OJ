@@ -72,6 +72,7 @@ export class AuthService {
 
     const user = await this.prisma.user.findFirst({
       where: {
+        deletedAt: null,
         OR: [
           { username: { equals: account, mode: 'insensitive' } },
           { email: { equals: account, mode: 'insensitive' } },
@@ -141,9 +142,9 @@ export class AuthService {
   private async generateTokens(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { authVersion: true, mustChangePassword: true },
+      select: { authVersion: true, mustChangePassword: true, deletedAt: true },
     });
-    if (!user) throw new UnauthorizedException('账号不存在或已被删除');
+    if (!user || user.deletedAt) throw new UnauthorizedException('账号不存在或已被删除');
     const accessToken = this.jwt.sign({ sub: userId, ver: user.authVersion });
 
     const refreshToken = randomBytes(32).toString('hex');

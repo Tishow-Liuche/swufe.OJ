@@ -1,5 +1,6 @@
 ﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { FileUploadService } from '../common/file-upload.service';
 import { CfAcceptedSyncService } from '../codeforces/cf-accepted-sync.service';
 import * as bcrypt from 'bcryptjs';
@@ -57,7 +58,10 @@ export class UserService {
         teacherApplicationStatus: true, mustChangePassword: true, createdAt: true,
       },
     });
-    return this.withDisplayAvatar(profile);
+    const effectiveProfile = profile?.teacherApplicationStatus === 'PENDING'
+      ? { ...profile, role: 'STUDENT' }
+      : profile;
+    return this.withDisplayAvatar(effectiveProfile);
   }
 
   async getSettings(userId: string) {
@@ -904,6 +908,7 @@ export class UserService {
 
   async listUsers() {
     return this.prisma.user.findMany({
+      where: { deletedAt: null },
       select: {
         id: true, username: true, email: true, nickname: true,
         role: true, school: true, requestedRole: true,
@@ -914,20 +919,42 @@ export class UserService {
     });
   }
 
-  async setRole(userId: string, role: string) {
+  async setRole(adminId: string, userId: string, role: string) {
     if (!['STUDENT', 'TEACHER', 'ADMIN'].includes(role)) {
       throw new BadRequestException('无效的角色: ' + role);
     }
-    const applicationData = role === 'TEACHER'
-      ? { requestedRole: 'TEACHER', teacherApplicationStatus: 'APPROVED' }
-      : { requestedRole: 'STUDENT', teacherApplicationStatus: 'NOT_REQUIRED' };
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: { role, ...applicationData },
-      select: {
-        id: true, username: true, role: true, requestedRole: true,
-        teacherApplicationStatus: true,
-      },
+    return this.withSerializableTransaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true, teacherApplicationStatus: true, deletedAt: true },
+      });
+      if (!user || user.deletedAt) throw new NotFoundException('用户不存在');
+      if (user.teacherApplicationStatus === 'PENDING') {
+        throw new BadRequestException('教师申请待审核，请使用教师申请审核操作');
+      }
+      if (user.role === 'ADMIN' && role !== 'ADMIN') {
+        if (adminId === userId) {
+          throw new BadRequestException('不能降低当前登录的管理员权限');
+        }
+        const activeAdminCount = await tx.user.count({
+          where: { role: 'ADMIN', deletedAt: null },
+        });
+        if (activeAdminCount <= 1) {
+          throw new BadRequestException('不能降低最后一个管理员账号的权限');
+        }
+      }
+
+      const applicationData = role === 'TEACHER'
+        ? { requestedRole: 'TEACHER', teacherApplicationStatus: 'APPROVED' }
+        : { requestedRole: 'STUDENT', teacherApplicationStatus: 'NOT_REQUIRED' };
+      return tx.user.update({
+        where: { id: userId },
+        data: { role, ...applicationData },
+        select: {
+          id: true, username: true, role: true, requestedRole: true,
+          teacherApplicationStatus: true,
+        },
+      });
     });
   }
 
@@ -950,11 +977,14 @@ export class UserService {
     }
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { requestedRole: true },
+      select: { requestedRole: true, teacherApplicationStatus: true, deletedAt: true },
     });
-    if (!user) throw new NotFoundException('用户不存在');
+    if (!user || user.deletedAt) throw new NotFoundException('用户不存在');
     if (user.requestedRole !== 'TEACHER') {
       throw new BadRequestException('该用户没有提交教师身份申请');
+    }
+    if (user.teacherApplicationStatus !== 'PENDING') {
+      throw new BadRequestException('该教师申请不在待审核状态');
     }
     return this.prisma.user.update({
       where: { id: userId },
@@ -967,6 +997,61 @@ export class UserService {
         teacherApplicationStatus: true,
       },
     });
+  }
+
+  async deleteUser(adminId: string, userId: string) {
+    if (adminId === userId) {
+      throw new BadRequestException('不能删除当前登录的管理员账号');
+    }
+    return this.withSerializableTransaction(async (tx) => {
+      const target = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, username: true, role: true, deletedAt: true },
+      });
+      if (!target || target.deletedAt) throw new NotFoundException('用户不存在');
+
+      if (target.role === 'ADMIN') {
+        const activeAdminCount = await tx.user.count({
+          where: { role: 'ADMIN', deletedAt: null },
+        });
+        if (activeAdminCount <= 1) {
+          throw new BadRequestException('不能删除最后一个管理员账号');
+        }
+      }
+
+      await tx.userSession.deleteMany({ where: { userId } });
+      await tx.helperDevice.updateMany({
+        where: { userId },
+        data: { status: 'REVOKED' },
+      });
+      const deletedUser = await tx.user.update({
+        where: { id: userId },
+        data: { deletedAt: new Date(), authVersion: { increment: 1 } },
+        select: { id: true, username: true, deletedAt: true },
+      });
+      return { success: true, userId: deletedUser.id, username: deletedUser.username };
+    });
+  }
+
+  private async withSerializableTransaction<T>(
+    operation: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+      } catch (error) {
+        const isSerializationConflict = (
+          typeof error === 'object'
+          && error !== null
+          && 'code' in error
+          && error.code === 'P2034'
+        );
+        if (!isSerializationConflict || attempt === 2) throw error;
+      }
+    }
+    throw new Error('无法完成管理员权限变更');
   }
 
   async changeOwnPassword(userId: string, input: string | PasswordChangeInput) {

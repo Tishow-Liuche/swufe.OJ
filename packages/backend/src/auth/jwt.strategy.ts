@@ -22,13 +22,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(req: Request, payload: { sub: string; ver?: number }) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, username: true, role: true, authVersion: true, mustChangePassword: true },
+      select: {
+        id: true, username: true, role: true, authVersion: true, mustChangePassword: true,
+        deletedAt: true, teacherApplicationStatus: true,
+      },
     });
-    if (!user || (payload.ver ?? 0) !== user.authVersion) throw new UnauthorizedException('登录状态已失效，请重新登录');
+    if (!user || user.deletedAt || (payload.ver ?? 0) !== user.authVersion) throw new UnauthorizedException('登录状态已失效，请重新登录');
     if (user.mustChangePassword && !this.isAllowedBeforePasswordChange(req)) {
       throw new ForbiddenException('必须先修改密码');
     }
-    return user;
+    return user.teacherApplicationStatus === 'PENDING' ? { ...user, role: 'STUDENT' } : user;
   }
 
   private isAllowedBeforePasswordChange(req: Request): boolean {

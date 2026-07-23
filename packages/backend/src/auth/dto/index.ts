@@ -13,9 +13,9 @@ import {
 export class RegisterDto {
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @IsString()
-  @MinLength(3, { message: '用户名至少 3 个字符' })
+  @MinLength(1, { message: '用户名至少 1 个字符' })
   @MaxLength(20, { message: '用户名最多 20 个字符' })
-  @Matches(/^[A-Za-z0-9_-]+$/, { message: '用户名只能包含字母、数字、下划线和连字符' })
+  @Matches(/^[\p{L}\p{N}_-]+$/u, { message: '用户名只能包含汉字、字母、数字、下划线和连字符' })
   username: string;
 
   @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)

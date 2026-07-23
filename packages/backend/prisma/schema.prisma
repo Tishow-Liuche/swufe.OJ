@@ -25,6 +25,7 @@ model User {
   school                   String?
   requestedRole            String   @default("STUDENT")
   teacherApplicationStatus String   @default("NOT_REQUIRED")
+  deletedAt                DateTime?
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
@@ -62,6 +63,8 @@ model User {
   reviewedContentReports              ContentReport[]          @relation("ContentReportReviewer")
   problemFeedbacks                    ProblemFeedback[]        @relation("ProblemFeedbackReporter")
   reviewedProblemFeedbacks            ProblemFeedback[]        @relation("ProblemFeedbackReviewer")
+
+  @@index([deletedAt])
 }
 
 model CompetitionAward {
