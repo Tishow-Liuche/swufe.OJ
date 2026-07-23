@@ -10,7 +10,7 @@ import { python } from '@codemirror/lang-python';
 import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
 import {
-  BookOpen, Clock3, HardDrive, MessageCircle, Play, RefreshCw, Send, Star, Tag, Target, Wrench, X,
+  ArrowLeft, BookOpen, Clock3, HardDrive, MessageCircle, Play, RefreshCw, Send, Star, Tag, Target, Wrench, X,
 } from '@lucide/vue';
 import { sanitizeStatementHtml } from '../security/sanitize-statement';
 import 'katex/dist/katex.min.css';
@@ -24,6 +24,7 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const contestId = computed(() => String(route.query.contestId || ''));
+const isContestMode = computed(() => Boolean(contestId.value));
 const isAuthorPreview = computed(() => String(route.query.preview || '') === '1');
 const problem = ref<any>(null);
 const problemState = ref<any>(null);
@@ -501,14 +502,30 @@ async function submitFeedback() {
         <strong>比赛预备题验题模式</strong>
         <span>当前题目不会出现在公开题库中；这里的提交用于命题人测试数据和判题正确性。</span>
       </div>
-      <header class="problem-header">
+      <div v-if="isContestMode" class="contest-mode-bar">
+        <RouterLink
+          class="contest-back-link"
+          :to="{ path: '/contests', query: { contestId } }"
+        >
+          <ArrowLeft :size="16" />
+          返回比赛选题
+        </RouterLink>
+        <span class="contest-mode-hint">比赛模式 · 仅题面与提交</span>
+      </div>
+      <header class="problem-header" :class="{ 'contest-header': isContestMode }">
         <div class="problem-title-row">
           <div class="problem-title-block">
-            <p class="problem-kicker">{{ isAuthorPreview ? '比赛预备题 · 验题' : (problem.source === 'LOCAL' ? '原创题目' : (problem.source || '题目')) }}</p>
+            <p class="problem-kicker">
+              {{
+                isContestMode
+                  ? '比赛题目'
+                  : (isAuthorPreview ? '比赛预备题 · 验题' : (problem.source === 'LOCAL' ? '原创题目' : (problem.source || '题目')))
+              }}
+            </p>
             <h1>{{ problem.title }}</h1>
-            <ProblemStateBadges v-if="problemState" class="detail-state" :state="problemState" />
+            <ProblemStateBadges v-if="!isContestMode && problemState" class="detail-state" :state="problemState" />
           </div>
-          <div class="problem-header-actions">
+          <div v-if="!isContestMode" class="problem-header-actions">
             <RouterLink
               class="header-link"
               :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }"
@@ -547,40 +564,44 @@ async function submitFeedback() {
         <div class="problem-meta">
           <span class="meta-item"><Clock3 :size="14" />{{ problem.timeLimit }} ms</span>
           <span class="meta-item"><HardDrive :size="14" />{{ problem.memoryLimit }} MB</span>
-          <span class="meta-item"><Target :size="14" />{{ pointDifficultyLabel(problem.difficulty) }}</span>
-          <span v-if="(problem.tags || []).length" class="meta-item tags">
-            <Tag :size="14" />
-            <i v-for="tag in problem.tags" :key="tag.name || tag">{{ tag.name || tag }}</i>
-          </span>
+          <template v-if="!isContestMode">
+            <span class="meta-item"><Target :size="14" />{{ pointDifficultyLabel(problem.difficulty) }}</span>
+            <span v-if="(problem.tags || []).length" class="meta-item tags">
+              <Tag :size="14" />
+              <i v-for="tag in problem.tags" :key="tag.name || tag">{{ tag.name || tag }}</i>
+            </span>
+          </template>
         </div>
 
-        <p v-if="feedbackMessage" class="feedback-banner success">{{ feedbackMessage }}</p>
-        <p v-if="feedbackError" class="feedback-banner error">{{ feedbackError }}</p>
+        <template v-if="!isContestMode">
+          <p v-if="feedbackMessage" class="feedback-banner success">{{ feedbackMessage }}</p>
+          <p v-if="feedbackError" class="feedback-banner error">{{ feedbackError }}</p>
 
-        <form v-if="feedbackOpen" class="feedback-form" @submit.prevent="submitFeedback">
-          <div class="feedback-form-header">
-            <strong>题目纠错</strong>
-            <button class="feedback-close" type="button" title="关闭" @click="feedbackOpen = false"><X :size="16" /></button>
-          </div>
-          <select v-model="feedback.type" aria-label="问题类型">
-            <option value="STATEMENT">题面问题</option>
-            <option value="SAMPLE">样例问题</option>
-            <option value="TESTDATA">测试数据问题</option>
-            <option value="OTHER">其他问题</option>
-          </select>
-          <textarea
-            v-model="feedback.content"
-            maxlength="3000"
-            placeholder="说明发现的问题，并尽量给出可复现的信息"
-            required
-          />
-          <footer>
-            <button class="plain-button" type="button" @click="feedbackOpen = false">取消</button>
-            <button class="submit-button" type="submit" :disabled="feedbackSubmitting">
-              <Send :size="15" />{{ feedbackSubmitting ? '提交中...' : '提交反馈' }}
-            </button>
-          </footer>
-        </form>
+          <form v-if="feedbackOpen" class="feedback-form" @submit.prevent="submitFeedback">
+            <div class="feedback-form-header">
+              <strong>题目纠错</strong>
+              <button class="feedback-close" type="button" title="关闭" @click="feedbackOpen = false"><X :size="16" /></button>
+            </div>
+            <select v-model="feedback.type" aria-label="问题类型">
+              <option value="STATEMENT">题面问题</option>
+              <option value="SAMPLE">样例问题</option>
+              <option value="TESTDATA">测试数据问题</option>
+              <option value="OTHER">其他问题</option>
+            </select>
+            <textarea
+              v-model="feedback.content"
+              maxlength="3000"
+              placeholder="说明发现的问题，并尽量给出可复现的信息"
+              required
+            />
+            <footer>
+              <button class="plain-button" type="button" @click="feedbackOpen = false">取消</button>
+              <button class="submit-button" type="submit" :disabled="feedbackSubmitting">
+                <Send :size="15" />{{ feedbackSubmitting ? '提交中...' : '提交反馈' }}
+              </button>
+            </footer>
+          </form>
+        </template>
       </header>
 
       <div class="content-split">
@@ -670,7 +691,7 @@ async function submitFeedback() {
       </div>
 
       <ProblemDiscussionPanel
-        v-if="!isAuthorPreview"
+        v-if="!isAuthorPreview && !isContestMode"
         class="problem-discussion-mount"
         :problem-id="problem.id"
         :problem-title="problem.title"
@@ -1204,6 +1225,36 @@ async function submitFeedback() {
 .remove-only { border: 1px solid #cbd6e0; color: #526579; background: #f7f9fb; }
 .resolved-actions button:disabled { opacity: .58; cursor: wait; }
 .problem-discussion-mount { margin-top: 18px; }
+.contest-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid #d7e4f2;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f4f9ff 0%, #eef5fc 100%);
+}
+.contest-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #1d5f98;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+.contest-back-link:hover { color: #124772; text-decoration: underline; }
+.contest-mode-hint {
+  color: #6b8198;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.problem-header.contest-header {
+  padding-bottom: 14px;
+}
 .cf-step { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 14px; }
 .cf-step-num { width: 24px; height: 24px; border-radius: 50%; background: #3498db; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .cf-step-text { flex: 1; }

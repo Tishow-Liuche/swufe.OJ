@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useStorage } from '@vueuse/core';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { CalendarClock, Flag, ListFilter, PanelLeftClose, PanelLeftOpen, PlayCircle, Trophy } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
@@ -18,6 +18,7 @@ type Contest = {
 };
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const contests = ref<Contest[]>([]);
 const selected = ref<Contest | null>(null);
@@ -79,6 +80,9 @@ async function load() {
 }
 async function selectContest(contest: Contest) {
   selected.value = contest; standings.value = []; standingsProblems.value = []; contestSubmissions.value = [];
+  if (String(route.query.contestId || '') !== contest.id) {
+    void router.replace({ path: '/contests', query: { ...route.query, contestId: contest.id } });
+  }
   await refreshLiveBoard();
 }
 function showOverview(nextFilter: string) {
@@ -187,10 +191,31 @@ async function createContest() {
   } catch (e: any) { error.value = e.response?.data?.message || '创建比赛失败'; }
   finally { actionLoading.value = false; }
 }
+async function restoreContestFromRoute() {
+  const requested = String(route.query.contestId || '');
+  if (!requested) return;
+  const found = contests.value.find((item) => item.id === requested);
+  if (found) {
+    if (selected.value?.id !== found.id) await selectContest(found);
+    return;
+  }
+  // Keep URL clean if the contest is no longer listed for this user.
+  if (route.query.contestId) {
+    const nextQuery = { ...route.query };
+    delete nextQuery.contestId;
+    void router.replace({ path: '/contests', query: nextQuery });
+  }
+}
+
 onMounted(async () => {
   await load();
+  await restoreContestFromRoute();
   standingTimer = setInterval(refreshLiveBoard, 15000);
 });
+watch(
+  () => route.query.contestId,
+  () => { void restoreContestFromRoute(); },
+);
 onUnmounted(() => {
   if (standingTimer) clearInterval(standingTimer);
 });
