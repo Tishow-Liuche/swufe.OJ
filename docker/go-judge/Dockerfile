@@ -1,7 +1,10 @@
 FROM criyle/go-judge:latest
 
 # Install compilers and runtimes (Debian base)
-RUN sed -i 's|http://deb.debian.org|http://mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources \
+RUN sed -i \
+    -e 's|https://deb.debian.org|http://mirrors.cloud.tencent.com|g' \
+    -e 's|http://deb.debian.org|http://mirrors.cloud.tencent.com|g' \
+    /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     g++ gcc make \
