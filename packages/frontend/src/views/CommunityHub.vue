@@ -5,7 +5,7 @@ import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  Bell, BookmarkCheck, Check, ChevronRight, CircleHelp, FileWarning, Flame,
+  Bell, BookOpenCheck, BookmarkCheck, Check, ChevronRight, CircleHelp, FileWarning, Flame,
   ImagePlus, LockKeyhole, Megaphone, MessageCircle, MessageSquarePlus, PanelLeftClose,
   Flag, Mail, PanelLeftOpen, Reply, Search, Send, ShieldCheck, ThumbsUp, Users, X,
 } from '@lucide/vue';
@@ -68,13 +68,32 @@ const isModerator = computed(() => auth.isTeacher() || auth.isAdmin());
 const isFeed = computed(() => panel.value === 'feed' || panel.value === 'solutions');
 const feedTitle = computed(() => panel.value === 'solutions' ? '题解复盘' : (scopedProblemId.value ? '题目讨论' : '学习讨论'));
 const feedDescription = computed(() => panel.value === 'solutions'
-  ? '题解以通过题目后解锁为默认规则，保留独立思考空间。'
+  ? (scopedProblemId.value
+    ? '围绕当前题目撰写或阅读题解。学生通过后可发布；教师与管理员可随时发布。'
+    : '题解以通过题目后解锁为默认规则。请从题目页进入「写题解」，或浏览全部题解复盘。')
   : scopedProblemId.value
     ? '围绕当前题目交流思路、提问和回复，内容会集中归档到题目社区。'
     : '提问、拆解思路、分享训练经验。题目内讨论请在对应题目页发起。');
 const authorName = computed(() => auth.user?.nickname || auth.user?.username || '未登录');
 const categoryOptions = ['全部', '学习交流', '算法讨论', '平台建议', '组队交流'];
+const solutionCategoryOptions = ['题解复盘', '官方题解', '思路讲解', '代码优化'].map((item) => ({ value: item, label: item }));
 const composerCategoryOptions = categoryOptions.slice(1).map((item) => ({ value: item, label: item }));
+const hasSolvedScopedProblem = ref(false);
+const solutionEligibilityLoading = ref(false);
+const canPublishSolution = computed(() => {
+  if (!auth.isLoggedIn()) return false;
+  if (!scopedProblemId.value) return false;
+  if (isModerator.value) return true;
+  return hasSolvedScopedProblem.value;
+});
+const canOpenSolutionComposer = computed(() => auth.isLoggedIn() && Boolean(scopedProblemId.value));
+const solutionComposerHint = computed(() => {
+  if (!auth.isLoggedIn()) return '登录后可发布题解。';
+  if (!scopedProblemId.value) return '请从题目页进入本题社区后再发布题解。';
+  if (isModerator.value) return '教师 / 管理员可直接发布本题题解，内容将对未通过的学生锁定。';
+  if (hasSolvedScopedProblem.value) return '你已通过本题，可以发布题解复盘。';
+  return '通过本题（Accepted）后即可发布题解。';
+});
 const topicFilterOptions = [
   { value: '', label: '全部话题' },
   ...composerCategoryOptions,
@@ -104,9 +123,32 @@ function requireLogin() {
 
 function applyRouteScope() {
   const requestedPanel = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel;
-  if (requestedPanel === 'feed' || requestedPanel === 'solutions') panel.value = requestedPanel;
+  if (requestedPanel === 'feed' || requestedPanel === 'solutions' || requestedPanel === 'announcements' || requestedPanel === 'help') {
+    panel.value = requestedPanel as Panel;
+  }
   const requestedComposer = Array.isArray(route.query.compose) ? route.query.compose[0] : route.query.compose;
-  showComposer.value = panel.value === 'feed' && requestedComposer === '1';
+  showComposer.value = (panel.value === 'feed' || panel.value === 'solutions') && requestedComposer === '1';
+  if (panel.value === 'solutions' && showComposer.value) {
+    postForm.value = { ...postForm.value, category: '题解复盘' };
+  }
+}
+
+async function refreshSolutionEligibility() {
+  hasSolvedScopedProblem.value = false;
+  if (!auth.isLoggedIn() || !scopedProblemId.value) return;
+  if (isModerator.value) {
+    hasSolvedScopedProblem.value = true;
+    return;
+  }
+  solutionEligibilityLoading.value = true;
+  try {
+    const { data } = await api.get(`/api/learning/problem-states/${scopedProblemId.value}`);
+    hasSolvedScopedProblem.value = data?.status === 'PASSED';
+  } catch {
+    hasSolvedScopedProblem.value = false;
+  } finally {
+    solutionEligibilityLoading.value = false;
+  }
 }
 
 function resetMessage() {
@@ -159,16 +201,48 @@ async function loadNotifications() {
 async function switchPanel(nextPanel: Panel) {
   panel.value = nextPanel;
   resetMessage();
+  if (nextPanel !== 'feed' && nextPanel !== 'solutions') showComposer.value = false;
   if (nextPanel === 'announcements') await loadAnnouncements();
-  if (nextPanel === 'feed' || nextPanel === 'solutions') await loadPosts();
+  if (nextPanel === 'feed' || nextPanel === 'solutions') {
+    await Promise.all([loadPosts(), refreshSolutionEligibility()]);
+  }
 }
 
 async function openDiscussionComposer() {
+  if (!requireLogin()) return;
   const needsFeedReload = panel.value !== 'feed';
   panel.value = 'feed';
   showComposer.value = true;
+  postForm.value = { title: '', content: '', category: '学习交流' };
   resetMessage();
   if (needsFeedReload) await loadPosts();
+  await nextTick();
+  document.querySelector('.discussion-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function openSolutionComposer() {
+  if (!requireLogin()) return;
+  resetMessage();
+  if (!scopedProblemId.value) {
+    errorMessage.value = '请从题目页进入「写题解」，以便关联正确题目。';
+    return;
+  }
+  await refreshSolutionEligibility();
+  if (!canPublishSolution.value) {
+    errorMessage.value = isModerator.value
+      ? '暂时无法发布题解，请稍后重试。'
+      : '通过本题（Accepted）后才能发布题解。';
+    return;
+  }
+  const needsReload = panel.value !== 'solutions';
+  panel.value = 'solutions';
+  showComposer.value = true;
+  postForm.value = {
+    title: postForm.value.title || `${scopedProblemTitle.value || '本题'} 题解`,
+    content: postForm.value.content || '',
+    category: '题解复盘',
+  };
+  if (needsReload) await loadPosts();
   await nextTick();
   document.querySelector('.discussion-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -176,6 +250,19 @@ async function openDiscussionComposer() {
 async function publishPost() {
   if (!requireLogin()) return;
   resetMessage();
+  const isSolution = panel.value === 'solutions';
+  if (isSolution) {
+    if (!scopedProblemId.value) {
+      errorMessage.value = '题解必须关联题目，请从题目页进入后再发布。';
+      return;
+    }
+    await refreshSolutionEligibility();
+    if (!canPublishSolution.value) {
+      errorMessage.value = '通过本题后才能发布题解（教师 / 管理员除外）。';
+      return;
+    }
+  }
+
   isPublishingPost.value = true;
   try {
     const imagePaths = await Promise.all(pendingImages.value.map(async (image) => {
@@ -185,15 +272,18 @@ async function publishPost() {
       return data.path as string;
     }));
     await api.post('/api/community/posts', {
-      type: 'FORUM',
+      type: isSolution ? 'SOLUTION' : 'FORUM',
       problemId: scopedProblemId.value || undefined,
-      ...postForm.value,
+      spoilerLevel: isSolution ? 'SOLUTION' : 'NONE',
+      title: postForm.value.title,
+      content: postForm.value.content,
+      category: postForm.value.category,
       imagePaths,
     });
-    postForm.value = { title: '', content: '', category: '学习交流' };
+    postForm.value = { title: '', content: '', category: isSolution ? '题解复盘' : '学习交流' };
     clearPendingImages();
     showComposer.value = false;
-    feedbackMessage.value = '已发布到学习社区。';
+    feedbackMessage.value = isSolution ? '题解已发布，未通过本题的同学将看到锁定预览。' : '已发布到学习社区。';
     await loadPosts();
   } catch (error: any) {
     errorMessage.value = error.response?.data?.message || '发布失败。';
@@ -466,14 +556,14 @@ async function handleFeedback(item: any) {
 watch([sort, category], () => { void loadPosts(); });
 watch(() => [route.query.panel, route.query.problemId, route.query.problemTitle, route.query.compose], () => {
   applyRouteScope();
-  void loadPosts();
+  void Promise.all([loadPosts(), refreshSolutionEligibility()]);
 });
 watch(() => route.query.post, (postId, previousPostId) => {
   if (postId && postId !== previousPostId) void openPostFromRoute(postId);
 });
 onMounted(async () => {
   applyRouteScope();
-  await Promise.all([loadPosts(), loadAnnouncements(), loadNotifications()]);
+  await Promise.all([loadPosts(), loadAnnouncements(), loadNotifications(), refreshSolutionEligibility()]);
   await openPostFromRoute(route.query.post);
 });
 onBeforeUnmount(clearPendingImages);
@@ -490,6 +580,19 @@ onBeforeUnmount(clearPendingImages);
       <button type="button" :title="communitySidebarCollapsed ? '帮助中心' : undefined" :class="{ active: panel === 'help' }" @click="switchPanel('help')"><CircleHelp :size="18" /><span><strong>帮助中心</strong><small>使用指引</small></span></button>
       <div class="nav-rule"></div>
       <button class="create-discussion" type="button" title="发起讨论" @click="openDiscussionComposer"><MessageSquarePlus :size="18" /><span><strong>发起讨论</strong><small>发布新话题</small></span></button>
+      <button
+        v-if="canOpenSolutionComposer"
+        class="create-discussion create-solution"
+        type="button"
+        title="写题解"
+        @click="openSolutionComposer"
+      >
+        <BookOpenCheck :size="18" />
+        <span>
+          <strong>写题解</strong>
+          <small>{{ isModerator ? '教师/管理可发' : (canPublishSolution ? '已通过可发' : '通过后可发') }}</small>
+        </span>
+      </button>
       <p class="signed-state"><Users :size="15" /><span>{{ auth.isLoggedIn() ? `当前：${authorName}` : '登录后可发帖、点赞和回复' }}</span></p>
     </aside>
 
@@ -516,21 +619,96 @@ onBeforeUnmount(clearPendingImages);
               <button type="button" @click="router.replace({ path: '/community', query: { panel } })">查看全部社区</button>
             </div>
           </div>
-          <div class="feed-heading"><div><p class="section-kicker">{{ panel === 'solutions' ? '通过后解锁' : '学习社区' }}</p><h2>{{ feedTitle }}</h2><p>{{ feedDescription }}</p></div><button v-if="panel === 'feed'" class="primary-command" type="button" @click="showComposer = !showComposer"><MessageSquarePlus :size="17" />发起讨论</button></div>
-          <form v-if="showComposer && panel === 'feed'" class="discussion-composer" @submit.prevent="publishPost">
-            <input v-model="postForm.title" maxlength="120" placeholder="用一句话说清你的讨论主题" required>
-            <div><FilterSelect v-model="postForm.category" class="composer-category-select" :options="composerCategoryOptions" label="讨论分类" /><span>公开发布，请勿在普通讨论区直接公布完整题解。</span></div>
-            <textarea v-model="postForm.content" maxlength="12000" placeholder="描述背景、尝试过的方法或你的思路" required />
+          <div class="feed-heading">
+            <div>
+              <p class="section-kicker">{{ panel === 'solutions' ? '通过后解锁' : '学习社区' }}</p>
+              <h2>{{ feedTitle }}</h2>
+              <p>{{ feedDescription }}</p>
+            </div>
+            <button
+              v-if="panel === 'feed'"
+              class="primary-command"
+              type="button"
+              @click="showComposer = !showComposer"
+            >
+              <MessageSquarePlus :size="17" />发起讨论
+            </button>
+            <button
+              v-else-if="panel === 'solutions' && canOpenSolutionComposer"
+              class="primary-command"
+              type="button"
+              :disabled="solutionEligibilityLoading"
+              @click="openSolutionComposer"
+            >
+              <BookOpenCheck :size="17" />
+              {{ canPublishSolution ? '写本题题解' : (isModerator ? '写本题题解' : '通过后可写题解') }}
+            </button>
+          </div>
+          <form v-if="showComposer && isFeed" class="discussion-composer" @submit.prevent="publishPost">
+            <input
+              v-model="postForm.title"
+              maxlength="120"
+              :placeholder="panel === 'solutions' ? '题解标题，例如：二分答案 + 贪心构造' : '用一句话说清你的讨论主题'"
+              required
+            >
+            <div>
+              <FilterSelect
+                v-model="postForm.category"
+                class="composer-category-select"
+                :options="panel === 'solutions' ? solutionCategoryOptions : composerCategoryOptions"
+                :label="panel === 'solutions' ? '题解分类' : '讨论分类'"
+              />
+              <span v-if="panel === 'solutions'">{{ solutionComposerHint }}</span>
+              <span v-else>公开发布，请勿在普通讨论区直接公布完整题解。</span>
+            </div>
+            <textarea
+              v-model="postForm.content"
+              maxlength="12000"
+              :placeholder="panel === 'solutions' ? '写清思路、复杂度、关键代码与易错点。未通过的同学会看到锁定预览。' : '描述背景、尝试过的方法或你的思路'"
+              required
+            />
             <input ref="imageInput" class="image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change="selectImages">
             <div v-if="pendingImages.length" class="composer-image-grid" aria-label="待发布图片">
               <figure v-for="image in pendingImages" :key="image.id"><img :src="image.previewUrl" :alt="image.file.name"><button type="button" title="移除图片" :aria-label="`移除 ${image.file.name}`" @click="removePendingImage(image.id)"><X :size="15" /></button></figure>
             </div>
-            <footer><button class="image-command" type="button" :disabled="pendingImages.length >= 6" @click="imageInput?.click()"><ImagePlus :size="17" />添加图片</button><span class="composer-image-count">{{ pendingImages.length }}/6</span><span class="composer-spacer"></span><button type="button" class="plain-command" @click="closeComposer">取消</button><button class="primary-command" type="submit" :disabled="isPublishingPost"><Send :size="16" />{{ isPublishingPost ? '正在发布' : '发布' }}</button></footer>
+            <footer>
+              <button class="image-command" type="button" :disabled="pendingImages.length >= 6" @click="imageInput?.click()"><ImagePlus :size="17" />添加图片</button>
+              <span class="composer-image-count">{{ pendingImages.length }}/6</span>
+              <span class="composer-spacer"></span>
+              <button type="button" class="plain-command" @click="closeComposer">取消</button>
+              <button
+                class="primary-command"
+                type="submit"
+                :disabled="isPublishingPost || (panel === 'solutions' && !canPublishSolution)"
+              >
+                <Send :size="16" />{{ isPublishingPost ? '正在发布' : (panel === 'solutions' ? '发布题解' : '发布') }}
+              </button>
+            </footer>
           </form>
           <div class="feed-toolbar"><div class="sort-tabs"><button type="button" :class="{ active: sort === 'LATEST' }" @click="sort = 'LATEST'">最新</button><button type="button" :class="{ active: sort === 'HOT' }" @click="sort = 'HOT'"><Flame :size="15" />热门</button><button type="button" :class="{ active: sort === 'UNANSWERED' }" @click="sort = 'UNANSWERED'">未回复</button></div><FilterSelect v-model="category" class="topic-filter-select" :options="topicFilterOptions" label="话题筛选" /></div>
           <div v-if="loading" class="empty-feed">正在加载社区内容...</div>
           <article v-for="post in posts" :key="post.id" class="feed-post"><div class="post-body"><button class="community-author-avatar" type="button" :title="`查看 ${post.author?.nickname || post.author?.username || '用户'} 的资料`" @click="openUserCard(post.author)"><UserAvatar :name="post.author?.nickname || post.author?.username" :avatar="post.author?.avatar" :size="38" /></button><button class="post-copy" type="button" @click="openPost(post)"><span class="post-labels"><span>{{ post.category || (post.type === 'SOLUTION' ? '题解复盘' : '学习交流') }}</span><span v-if="post.problem" class="problem-link">关联题目：{{ post.problem.title }}</span><span v-if="post.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span><span v-if="post.contentLocked" class="locked"><LockKeyhole :size="13" />通过后可见</span></span><h3>{{ post.title || (post.type === 'SOLUTION' ? '题解复盘' : '题目讨论') }}</h3><p>{{ post.contentPreview }}</p><span v-if="post.imageUrls?.length" class="post-image-count"><ImagePlus :size="14" />{{ post.imageUrls.length }} 张图片</span><footer><span>{{ post.author?.nickname || post.author?.username }}</span><span class="author-separator"></span><time>{{ formatDate(post.updatedAt) }}</time></footer></button></div><div class="post-metrics"><button type="button" :class="{ reacted: post.viewerReacted }" title="点赞" @click="toggleReaction(post)"><ThumbsUp :size="16" />{{ post.reactionCount || 0 }}</button><button type="button" title="查看回复" @click="openPost(post)"><MessageCircle :size="16" />{{ post.replyCount || 0 }}</button><span>{{ post.viewCount || 0 }} 浏览</span></div></article>
-          <div v-if="!loading && !posts.length" class="empty-feed"><MessageCircle :size="26" /><b>{{ panel === 'solutions' ? '暂无可展示的题解' : '还没有讨论' }}</b><span>{{ panel === 'solutions' ? '在题目页通过题目后可发布题解。' : '发起一个有上下文的问题，通常更容易获得有效回复。' }}</span></div>
+          <div v-if="!loading && !posts.length" class="empty-feed">
+            <MessageCircle :size="26" />
+            <b>{{ panel === 'solutions' ? '暂无可展示的题解' : '还没有讨论' }}</b>
+            <span v-if="panel === 'solutions'">
+              {{ canPublishSolution
+                ? '还没有人发布本题题解，点击上方「写本题题解」成为第一篇。'
+                : (scopedProblemId
+                  ? solutionComposerHint
+                  : '从题目页进入题解区，通过后即可发布。') }}
+            </span>
+            <span v-else>发起一个有上下文的问题，通常更容易获得有效回复。</span>
+            <button
+              v-if="panel === 'solutions' && canPublishSolution"
+              class="primary-command"
+              type="button"
+              style="margin-top: 10px"
+              @click="openSolutionComposer"
+            >
+              <BookOpenCheck :size="16" />写本题题解
+            </button>
+          </div>
         </template>
 
         <template v-else-if="panel === 'announcements'">
@@ -579,7 +757,7 @@ onBeforeUnmount(clearPendingImages);
 
 <style scoped>
 .community-hub { width: min(1360px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 60px; color: #243145; }.community-topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 22px; }.brand-block p, .section-kicker, .moderation-drawer header p { margin: 0 0 5px; color: #087f5b; font-size: 12px; font-weight: 800; }.brand-block h1 { margin: 0; color: #182230; font-size: 27px; }.topbar-actions { display: flex; align-items: center; gap: 9px; }.search-field { display: flex; width: min(310px, 28vw); height: 38px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #d5dee8; border-radius: 6px; background: #fff; color: #667085; }.search-field input { width: 100%; border: 0; outline: 0; color: #344054; font: inherit; }.icon-command { position: relative; display: inline-grid; width: 38px; height: 38px; place-items: center; border: 1px solid #d5dee8; border-radius: 6px; background: #fff; color: #475467; cursor: pointer; }.icon-command:hover { border-color: #0d9273; background: #f0faf7; color: #087f5b; }.counter { position: absolute; top: -7px; right: -7px; min-width: 18px; padding: 1px 4px; border-radius: 10px; background: #c2410c; color: #fff; font-size: 10px; font-weight: 800; }.notification-anchor { position: relative; }.notification-popover { position: absolute; z-index: 20; top: 45px; right: 0; width: min(360px, calc(100vw - 30px)); overflow: hidden; border: 1px solid #d5dee8; border-radius: 8px; background: #fff; box-shadow: 0 16px 34px rgba(16, 24, 40, .16); }.notification-popover header { padding: 12px 14px; border-bottom: 1px solid #edf1f5; color: #344054; font-weight: 800; }.notification-popover button { display: grid; width: 100%; gap: 3px; padding: 11px 14px; border: 0; border-bottom: 1px solid #edf1f5; background: #fff; color: #475467; text-align: left; cursor: pointer; }.notification-popover button.unread, .notification-popover button:hover { background: #effaf6; }.notification-popover span, .notification-popover time, .notification-popover > p { overflow: hidden; color: #667085; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.notification-popover > p { padding: 16px; text-align: center; }.toast { display: flex; align-items: center; gap: 7px; margin: 0 0 14px; padding: 9px 11px; border-radius: 6px; font-size: 14px; }.toast.success { background: #ecfdf3; color: #067647; }.toast.error { background: #fff1f2; color: #b42318; }
-.community-layout { display: grid; grid-template-columns: 196px minmax(0, 1fr) 244px; gap: 22px; align-items: start; }.community-nav { position: sticky; top: 74px; display: grid; gap: 4px; }.community-nav > button { display: flex; min-height: 39px; align-items: center; gap: 10px; padding: 0 11px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #5d6b7b; font: inherit; text-align: left; cursor: pointer; }.community-nav > button:hover { background: #edf7f3; color: #087f5b; }.community-nav > button.active { border-color: #c6e1d6; background: #eaf7f1; color: #087f5b; font-weight: 800; }.community-nav .create-discussion { justify-content: center; border-color: #087f5b; background: #087f5b; color: #fff; font-weight: 800; }.community-nav .create-discussion:hover { background: #056d4e; color: #fff; }.nav-rule { height: 1px; margin: 9px 4px; background: #dce4ed; }.signed-state { display: flex; align-items: flex-start; gap: 6px; margin: 6px 8px; color: #7b8794; font-size: 12px; line-height: 1.45; }
+.community-layout { display: grid; grid-template-columns: 196px minmax(0, 1fr) 244px; gap: 22px; align-items: start; }.community-nav { position: sticky; top: 74px; display: grid; gap: 4px; }.community-nav > button { display: flex; min-height: 39px; align-items: center; gap: 10px; padding: 0 11px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #5d6b7b; font: inherit; text-align: left; cursor: pointer; }.community-nav > button:hover { background: #edf7f3; color: #087f5b; }.community-nav > button.active { border-color: #c6e1d6; background: #eaf7f1; color: #087f5b; font-weight: 800; }.community-nav .create-discussion { justify-content: center; border-color: #087f5b; background: #087f5b; color: #fff; font-weight: 800; }.community-nav .create-discussion:hover { background: #056d4e; color: #fff; }.community-nav .create-solution { border-color: #0f766e; background: #0f766e; }.community-nav .create-solution:hover { background: #0b5f59; color: #fff; }.nav-rule { height: 1px; margin: 9px 4px; background: #dce4ed; }.signed-state { display: flex; align-items: flex-start; gap: 6px; margin: 6px 8px; color: #7b8794; font-size: 12px; line-height: 1.45; }
 .community-feed { min-width: 0; border: 1px solid #dce4ed; border-radius: 8px; background: #fff; }.feed-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 22px 18px; border-bottom: 1px solid #edf1f5; }.feed-heading h2 { margin: 0; color: #253346; font-size: 22px; }.feed-heading p:not(.section-kicker) { max-width: 560px; margin: 7px 0 0; color: #667085; line-height: 1.55; font-size: 14px; }.primary-command { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 6px; background: #087f5b; color: #fff; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; white-space: nowrap; }.primary-command:hover { background: #056d4e; }.discussion-composer { display: grid; gap: 10px; margin: 16px 22px; padding: 15px; border: 1px solid #c4e1d5; border-radius: 7px; background: #f6fcf9; }.discussion-composer input, .discussion-composer textarea, .discussion-composer select, .reply-list textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #1f2937; font: inherit; }.discussion-composer input, .discussion-composer select { min-height: 36px; padding: 0 9px; }.discussion-composer textarea, .reply-list textarea { min-height: 98px; padding: 9px; line-height: 1.5; resize: vertical; }.discussion-composer > div { display: flex; align-items: center; justify-content: space-between; gap: 9px; color: #667085; font-size: 12px; }.discussion-composer select { width: 130px; }.discussion-composer footer { display: flex; justify-content: flex-end; gap: 10px; }.plain-command { border: 0; background: transparent; color: #087f5b; font: inherit; cursor: pointer; }.pin-option { display: flex; align-items: center; gap: 7px; color: #475467; font-size: 13px; }.feed-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 22px; border-top: 1px solid #edf1f5; border-bottom: 1px solid #edf1f5; }.sort-tabs { display: flex; gap: 4px; }.sort-tabs button { display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: #667085; font: inherit; font-size: 13px; cursor: pointer; }.sort-tabs button.active, .sort-tabs button:hover { background: #edf7f3; color: #087f5b; font-weight: 800; }.feed-toolbar select { height: 30px; border: 1px solid #d5dee8; border-radius: 5px; background: #fff; color: #475467; font: inherit; font-size: 13px; }.feed-post { border-bottom: 1px solid #edf1f5; }.post-body { display: block; width: 100%; padding: 18px 22px 12px; border: 0; background: #fff; color: inherit; text-align: left; cursor: pointer; }.post-body:hover h3 { color: #087f5b; }.post-labels { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }.post-labels > span { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 4px; background: #eef5ff; color: #2764a8; font-size: 11px; font-weight: 800; }.post-labels > .resolved { background: #eaf7f1; color: #087f5b; }.post-labels > .locked { background: #fff7e8; color: #94620a; }.post-body h3 { margin: 9px 0 6px; color: #253346; font-size: 17px; }.post-body > p { display: -webkit-box; overflow: hidden; margin: 0; color: #667085; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }.post-body footer { display: flex; gap: 10px; margin-top: 10px; color: #98a2b3; font-size: 12px; }.post-metrics { display: flex; align-items: center; gap: 10px; padding: 0 22px 14px; color: #98a2b3; font-size: 12px; }.post-metrics button, .dialog-actions button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: #7b8794; font: inherit; font-size: 12px; cursor: pointer; }.post-metrics button:hover, .post-metrics button.reacted, .dialog-actions button.reacted { color: #c2410c; }.empty-feed { display: grid; min-height: 220px; place-content: center; justify-items: center; gap: 9px; padding: 20px; color: #7b8794; text-align: center; }.empty-feed b { color: #475467; }
 .community-aside { display: grid; gap: 14px; }.community-aside section { padding: 15px; border: 1px solid #dce4ed; border-radius: 8px; background: #fff; }.community-aside h3 { margin: 0 0 10px; color: #344054; font-size: 14px; }.community-aside ol { margin: 0; padding-left: 18px; color: #667085; font-size: 13px; line-height: 1.7; }.community-aside section > button { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 8px 0; border: 0; border-top: 1px solid #edf1f5; background: transparent; color: #087f5b; font: inherit; font-size: 13px; cursor: pointer; }.community-aside section > button:first-of-type { margin-top: 11px; }.moderation-shortcut { border-color: #ead9be !important; background: #fffaf2 !important; }.moderation-shortcut p { margin: 0 0 8px; color: #8a6d3b; font-size: 13px; }
 .announcement-item { display: grid; grid-template-columns: 38px 1fr; gap: 12px; padding: 18px 22px; border-bottom: 1px solid #edf1f5; }.announcement-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 6px; background: #fff3da; color: #a05a00; }.announcement-item header { display: flex; align-items: center; gap: 7px; }.announcement-item h3 { margin: 0; color: #344054; font-size: 16px; }.announcement-item header span { padding: 2px 6px; border-radius: 4px; background: #fff1cd; color: #966000; font-size: 11px; font-weight: 800; }.announcement-item p { margin: 8px 0; color: #475467; line-height: 1.65; white-space: pre-wrap; }.announcement-item footer { color: #98a2b3; font-size: 12px; }.help-list { padding: 8px 22px 22px; }.help-list article { display: flex; gap: 12px; padding: 17px 0; border-bottom: 1px solid #edf1f5; }.help-list article:last-child { border-bottom: 0; }.help-list svg { color: #087f5b; }.help-list h3 { margin: 0 0 5px; color: #344054; font-size: 15px; }.help-list p { margin: 0; color: #667085; line-height: 1.6; font-size: 14px; }

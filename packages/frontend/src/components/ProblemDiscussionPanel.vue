@@ -1,17 +1,37 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { ArrowRight, BookOpen, MessageCircle, Send, Wrench } from '@lucide/vue';
+import { ArrowRight, BookOpen, MessageCircle, PenLine, Send, Wrench } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
 
-const props = defineProps<{ problemId: string; problemTitle: string }>();
+const props = defineProps<{
+  problemId: string;
+  problemTitle: string;
+  /** Optional: parent can pass PASSED state to avoid an extra request. */
+  solved?: boolean;
+}>();
 const router = useRouter();
 const auth = useAuthStore();
 const feedbackOpen = ref(false);
 const feedback = ref({ type: 'STATEMENT', content: '' });
 const message = ref('');
 const error = ref('');
+const hasSolved = ref(Boolean(props.solved));
+const checkingSolved = ref(false);
+
+const isModerator = computed(() => auth.isTeacher() || auth.isAdmin());
+const canWriteSolution = computed(() => {
+  if (!auth.isLoggedIn()) return false;
+  if (isModerator.value) return true;
+  return hasSolved.value;
+});
+const writeSolutionHint = computed(() => {
+  if (!auth.isLoggedIn()) return '登录并完成本题后可写题解。';
+  if (isModerator.value) return '教师 / 管理员可直接发布本题题解。';
+  if (hasSolved.value) return '你已通过本题，可以撰写题解复盘。';
+  return '通过本题（Accepted）后可写题解。';
+});
 
 function openCommunity(panel: 'feed' | 'solutions', compose = false) {
   void router.push({
@@ -30,6 +50,45 @@ function requireLogin() {
   void router.push({ path: '/login', query: { redirect: `/problems/${props.problemId}` } });
   return false;
 }
+
+async function refreshSolvedState() {
+  if (typeof props.solved === 'boolean') {
+    hasSolved.value = props.solved;
+    return;
+  }
+  if (!auth.isLoggedIn()) {
+    hasSolved.value = false;
+    return;
+  }
+  if (isModerator.value) {
+    hasSolved.value = true;
+    return;
+  }
+  checkingSolved.value = true;
+  try {
+    const { data } = await api.get(`/api/learning/problem-states/${props.problemId}`);
+    hasSolved.value = data?.status === 'PASSED';
+  } catch {
+    hasSolved.value = false;
+  } finally {
+    checkingSolved.value = false;
+  }
+}
+
+function writeSolution() {
+  if (!requireLogin()) return;
+  if (!canWriteSolution.value) {
+    error.value = writeSolutionHint.value;
+    return;
+  }
+  openCommunity('solutions', true);
+}
+
+watch(() => props.solved, (value) => {
+  if (typeof value === 'boolean') hasSolved.value = value;
+});
+watch(() => props.problemId, () => { void refreshSolvedState(); });
+onMounted(() => { void refreshSolvedState(); });
 
 async function submitFeedback() {
   if (!requireLogin()) return;
@@ -79,6 +138,23 @@ async function submitFeedback() {
           <h3>查看本题题解</h3>
           <p>题解统一在社区阅读，通过本题后可查看完整内容并参与回复。</p>
           <button type="button" @click="openCommunity('solutions')">查看题解 <ArrowRight :size="15" /></button>
+        </div>
+      </article>
+      <article class="community-entry write-solution">
+        <span class="entry-icon write"><PenLine :size="20" /></span>
+        <div>
+          <p class="entry-kicker">发布题解</p>
+          <h3>{{ canWriteSolution ? '写本题题解' : '题解发布条件' }}</h3>
+          <p>{{ writeSolutionHint }}</p>
+          <button
+            type="button"
+            :disabled="checkingSolved || (auth.isLoggedIn() && !canWriteSolution)"
+            @click="writeSolution"
+          >
+            <PenLine :size="15" />
+            {{ canWriteSolution ? '去写题解' : (auth.isLoggedIn() ? '尚未通过' : '登录后查看') }}
+            <ArrowRight :size="15" />
+          </button>
         </div>
       </article>
     </div>
@@ -152,8 +228,11 @@ async function submitFeedback() {
 .feedback-trigger:hover { border-color: #9fc0de; color: #2469ad; background: #edf5fc; }
 .community-entries {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+@media (max-width: 900px) {
+  .community-entries { grid-template-columns: 1fr; }
 }
 .community-entry {
   display: flex;
@@ -174,6 +253,11 @@ async function submitFeedback() {
 }
 .entry-icon.discussion { color: #2469ad; background: #e5f0fb; }
 .entry-icon.solution { color: #5267a5; background: #edf1fb; }
+.entry-icon.write { color: #0f766e; background: #e7f8f4; }
+.community-entry button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .community-entry div { min-width: 0; }
 .community-entry h3 {
   margin: 4px 0 6px;

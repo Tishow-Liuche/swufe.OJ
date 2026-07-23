@@ -17,6 +17,7 @@ import 'katex/dist/katex.min.css';
 import { renderMarkdownWithMath } from '../utils/markdown';
 import { pointDifficultyLabel } from '../utils/pointDifficulty';
 import ProblemStateBadges from '../components/ProblemStateBadges.vue';
+import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
 import { useAuthStore } from '../stores/auth';
 
 const route = useRoute();
@@ -520,6 +521,13 @@ async function submitFeedback() {
             >
               <BookOpen :size="16" />题解
             </RouterLink>
+            <RouterLink
+              v-if="problemState?.status === 'PASSED' || auth.isTeacher() || auth.isAdmin()"
+              class="header-link"
+              :to="{ path: '/community', query: { panel: 'solutions', problemId: problem.id, problemTitle: problem.title, compose: '1' } }"
+            >
+              <BookOpen :size="16" />写题解
+            </RouterLink>
             <button class="header-link" type="button" :class="{ active: feedbackOpen }" @click="toggleFeedback">
               <Wrench :size="16" />题目纠错
             </button>
@@ -660,6 +668,14 @@ async function submitFeedback() {
           </div>
         </aside>
       </div>
+
+      <ProblemDiscussionPanel
+        v-if="!isAuthorPreview"
+        class="problem-discussion-mount"
+        :problem-id="problem.id"
+        :problem-title="problem.title"
+        :solved="problemState?.status === 'PASSED'"
+      />
     </template>
 
     <!-- 第三方 OJ 远程提交引导弹窗 -->
@@ -1187,6 +1203,7 @@ async function submitFeedback() {
 .keep-favorite { border: 1px solid #e2c45c; color: #7b5b00; background: #fff8d8; }
 .remove-only { border: 1px solid #cbd6e0; color: #526579; background: #f7f9fb; }
 .resolved-actions button:disabled { opacity: .58; cursor: wait; }
+.problem-discussion-mount { margin-top: 18px; }
 .cf-step { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 14px; }
 .cf-step-num { width: 24px; height: 24px; border-radius: 50%; background: #3498db; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .cf-step-text { flex: 1; }
