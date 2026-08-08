@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -59,12 +66,13 @@ export class SubmissionService {
     // Local judge path
     const cv = problem.versions[0];
     if (!cv) throw new NotFoundException('Problem version not found');
+    await this.assertLocalQueueCapacity(userId);
+    const tc = await this.prisma.problemTestCase.count({ where: { problemVersionId: cv.id } });
+    if (tc === 0) throw new NotFoundException('No test data');
     const submission = await this.prisma.submission.create({
       data: { problemId: dto.problemId, problemVersionId: cv.id, userId,
         language: dto.language, sourceCode: dto.sourceCode, status: 'PENDING' },
     });
-    const tc = await this.prisma.problemTestCase.count({ where: { problemVersionId: cv.id } });
-    if (tc === 0) throw new NotFoundException('No test data');
     await this.prisma.judgeTask.create({ data: { submissionId: submission.id } });
     await this.judgeQueue.add('local-judge', {
       submissionId: submission.id, problemId: dto.problemId,
@@ -73,6 +81,44 @@ export class SubmissionService {
     }, { priority: 1 });
     await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
     return { id: submission.id, status: 'QUEUING', mode: 'LOCAL' };
+  }
+
+  private async assertLocalQueueCapacity(userId: string) {
+    const activeStatuses = ['PENDING', 'QUEUING', 'COMPILING', 'RUNNING', 'JUDGING'];
+    if (typeof (this.prisma.submission as any).findFirst === 'function') {
+      const active = await this.prisma.submission.findFirst({
+        where: { userId, status: { in: activeStatuses } },
+        select: { id: true },
+      });
+      if (active) {
+        throw new HttpException('请等待当前提交评测完成后再提交', HttpStatus.TOO_MANY_REQUESTS);
+      }
+
+      const cooldownSeconds = this.positiveInteger('JUDGE_SUBMISSION_COOLDOWN_SECONDS', 5);
+      const recent = await this.prisma.submission.findFirst({
+        where: {
+          userId,
+          createdAt: { gte: new Date(Date.now() - cooldownSeconds * 1000) },
+        },
+        select: { id: true },
+      });
+      if (recent) {
+        throw new HttpException(`提交过于频繁，请等待 ${cooldownSeconds} 秒`, HttpStatus.TOO_MANY_REQUESTS);
+      }
+    }
+
+    if (typeof (this.judgeQueue as any).getWaitingCount === 'function') {
+      const waiting = await this.judgeQueue.getWaitingCount();
+      const maxWaiting = this.positiveInteger('JUDGE_QUEUE_MAX_WAITING', 500);
+      if (waiting >= maxWaiting) {
+        throw new HttpException('判题队列繁忙，请稍后再试', HttpStatus.TOO_MANY_REQUESTS);
+      }
+    }
+  }
+
+  private positiveInteger(name: string, fallback: number) {
+    const value = Number.parseInt(process.env[name] || '', 10);
+    return Number.isInteger(value) && value > 0 ? value : fallback;
   }
 
   async findOne(id: string) {

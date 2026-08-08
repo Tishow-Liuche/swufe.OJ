@@ -41,8 +41,9 @@ const feedbackMessage = ref('');
 const feedbackError = ref('');
 const feedback = ref({ type: 'STATEMENT', content: '' });
 let cmView: EditorView | null = null;
-let pollTimer: any = null;
-let visibilityCleanupId: any = null;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollingActive = false;
+let pollingVisibilityHandler: (() => void) | null = null;
 const editorHost = ref<HTMLElement | null>(null);
 const pollExhausted = ref(false);
 const wrongResolvedOpen = ref(false);
@@ -146,8 +147,7 @@ onUnmounted(() => {
     void persistDraft();
   }
   cmView?.destroy();
-  if (pollTimer) clearInterval(pollTimer);
-  if (visibilityCleanupId) clearInterval(visibilityCleanupId);
+  stopPolling();
 });
 
 function createEditor(initialCode?: string) {
@@ -369,19 +369,30 @@ async function submitCode() {
 }
 
 function startPolling(id: string) {
-  if (pollTimer) clearInterval(pollTimer);
-  if (visibilityCleanupId) clearInterval(visibilityCleanupId);
+  stopPolling();
   pollExhausted.value = false;
+  pollingActive = true;
 
   let attempts = 0;
   let errorCount = 0;
-  // CF: 10 min (400 x 1.5s), local: 45s (30 x 1.5s)
-  const maxAttempts = isExternal.value ? 400 : 30;
-  const maxErrors = isExternal.value ? 60 : 10;
+  // Adaptive polling keeps fast feedback at the start without multiplying API
+  // traffic while a large contest queue is draining.
+  const maxAttempts = isExternal.value ? 70 : 20;
+  const maxErrors = isExternal.value ? 20 : 8;
 
-  function doPoll() {
+  const nextDelay = () => attempts < 5 ? 2_000 : attempts < 15 ? 5_000 : 10_000;
+
+  const scheduleNext = () => {
+    if (!pollingActive || document.visibilityState !== 'visible') return;
+    pollTimer = setTimeout(() => void doPoll(), nextDelay());
+  };
+
+  async function doPoll() {
+    pollTimer = null;
+    if (!pollingActive || document.visibilityState !== 'visible') return;
     attempts++;
-    api.get(`/api/submissions/${id}`).then(async ({ data }) => {
+    try {
+      const { data } = await api.get(`/api/submissions/${id}`);
       errorCount = 0; // reset on success
       // Preserve mode from the initial submission response if the poll
       // response does not include it (raw Prisma data has no mode field)
@@ -395,52 +406,50 @@ function startPolling(id: string) {
         'SYSTEM_ERROR', 'REMOTE_ERROR', 'CANCELLED',
       ];
       if (finalStatuses.includes(data.status)) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        clearInterval(visibilityCleanupId);
-        visibilityCleanupId = null;
+        stopPolling();
         await refreshProblemState();
         if (data.status === 'ACCEPTED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
         return;
       }
       if (attempts >= maxAttempts) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        clearInterval(visibilityCleanupId);
-        visibilityCleanupId = null;
+        stopPolling();
         pollExhausted.value = true;
+        return;
       }
-    }).catch(() => {
+      scheduleNext();
+    } catch {
       errorCount++;
       // Don't kill CF polling on transient API errors — the backend
       // worker may still be processing. Only stop if errors are
       // persistently high relative to the polling window.
       if (errorCount >= maxErrors) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        clearInterval(visibilityCleanupId);
-        visibilityCleanupId = null;
+        stopPolling();
         pollExhausted.value = true;
+        return;
       }
-    });
+      scheduleNext();
+    }
   }
 
-  doPoll();
-  pollTimer = setInterval(doPoll, 1500);
-
-  // Refresh immediately when the user switches back to this tab
-  const onVisible = () => {
-    if (document.visibilityState === 'visible' && pollTimer) doPoll();
-  };
-  document.addEventListener('visibilitychange', onVisible);
-  // Clean up visibility listener when polling stops
-  visibilityCleanupId = setInterval(() => {
-    if (!pollTimer) {
-      clearInterval(visibilityCleanupId);
-      visibilityCleanupId = null;
-      document.removeEventListener('visibilitychange', onVisible);
+  pollingVisibilityHandler = () => {
+    if (document.visibilityState === 'visible' && pollingActive && !pollTimer) void doPoll();
+    if (document.visibilityState !== 'visible' && pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
     }
-  }, 1000);
+  };
+  document.addEventListener('visibilitychange', pollingVisibilityHandler);
+  void doPoll();
+}
+
+function stopPolling() {
+  pollingActive = false;
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+  if (pollingVisibilityHandler) {
+    document.removeEventListener('visibilitychange', pollingVisibilityHandler);
+    pollingVisibilityHandler = null;
+  }
 }
 
 function renderMd(text: string): string {

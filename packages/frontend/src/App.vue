@@ -25,7 +25,9 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown);
   window.addEventListener('swufe:notifications-changed', handleNotificationChanged);
   void fetchNotificationUnread();
-  notificationPoll = window.setInterval(() => void fetchNotificationUnread(), 60_000);
+  notificationPoll = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void fetchNotificationUnread();
+  }, 180_000);
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);

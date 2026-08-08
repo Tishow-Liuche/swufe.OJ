@@ -8,6 +8,7 @@ function registerDto(username: string) {
     email: 'student@example.com',
     password: 'Passw0rd1',
     school: 'SWUFE',
+    studentId: '20240001',
     college: 'Computer Science',
     requestedRole: 'STUDENT',
   });

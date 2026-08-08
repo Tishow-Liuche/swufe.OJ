@@ -321,6 +321,7 @@ model ProblemVersion {
   checker      Checker?
 
   @@index([problemId])
+  @@index([problemId, isCurrent])
 }
 
 model ProblemTag {
@@ -411,6 +412,8 @@ model Submission {
   @@index([problemId])
   @@index([status])
   @@index([createdAt])
+  @@index([userId, status, createdAt])
+  @@index([problemId, createdAt])
 }
 
 model SubmissionCase {

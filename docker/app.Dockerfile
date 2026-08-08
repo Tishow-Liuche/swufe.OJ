@@ -11,16 +11,6 @@ COPY packages/backend ./
 RUN npx prisma generate --schema=prisma/schema.prisma && NODE_OPTIONS=--max-old-space-size=768 npm run build
 
 
-FROM node:22-alpine AS frontend-build
-
-WORKDIR /app/frontend
-COPY packages/frontend/package*.json ./
-RUN npm ci
-
-COPY packages/frontend ./
-RUN npm run build
-
-
 FROM node:22-alpine AS runtime
 
 RUN apk add --no-cache openssl
@@ -36,10 +26,8 @@ COPY --from=backend-build --chown=node:node /app/backend/dist ./backend/dist
 COPY --from=backend-build --chown=node:node /app/backend/prisma ./backend/prisma
 COPY --from=backend-build --chown=node:node /app/backend/scripts ./backend/scripts
 COPY --from=backend-build --chown=node:node /app/backend/tsconfig.json ./backend/tsconfig.json
-COPY --from=frontend-build --chown=node:node /app/frontend/dist ./frontend/dist
-
 WORKDIR /app/backend
 USER node
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
+CMD ["node", "dist/src/main"]

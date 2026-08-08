@@ -26,7 +26,7 @@ describe('JudgeProcessor local test data judging', () => {
   it('accepts standard output when only final whitespace or line endings differ', async () => {
     prisma.problemVersion.findFirst.mockResolvedValue({
       checker: { type: 'STANDARD' },
-      testCases: [{ order: 1, input: '1 2\n', expectedOutput: 'Hello\r\nWorld', score: 100 }],
+      testCases: [{ order: 1, input: '1 2\n', expectedOutput: 'Hello\r\nWorld', score: 100, isSample: true }],
     });
     judge.compile.mockResolvedValue({ success: true, fileId: 'program', message: '' });
     judge.run.mockResolvedValue({ status: 'ACCEPTED', timeUsed: 3, memoryUsed: 128, output: 'Hello\nWorld\n' });
@@ -53,7 +53,7 @@ describe('JudgeProcessor local test data judging', () => {
   it('keeps standard output strict for meaningful content differences', async () => {
     prisma.problemVersion.findFirst.mockResolvedValue({
       checker: { type: 'STANDARD' },
-      testCases: [{ order: 1, input: '1 2\n', expectedOutput: 'Praise The Fool', score: 100 }],
+      testCases: [{ order: 1, input: '1 2\n', expectedOutput: 'Praise The Fool', score: 100, isSample: true }],
     });
     judge.compile.mockResolvedValue({ success: true, fileId: 'program', message: '' });
     judge.run.mockResolvedValue({ status: 'ACCEPTED', timeUsed: 3, memoryUsed: 128, output: 'Hello Ameng\n' });
@@ -77,6 +77,27 @@ describe('JudgeProcessor local test data judging', () => {
     });
   });
 
+  it('does not duplicate hidden test data and truncates oversized program output', async () => {
+    const output = 'x'.repeat(40_000);
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      checker: { type: 'STANDARD' },
+      testCases: [{ order: 1, input: 'secret input', expectedOutput: output, score: 100, isSample: false }],
+    });
+    judge.compile.mockResolvedValue({ success: true, fileId: 'program', message: '' });
+    judge.run.mockResolvedValue({ status: 'ACCEPTED', timeUsed: 3, memoryUsed: 128, output });
+
+    await processor.process({ data: {
+      submissionId: 's1', problemId: 'p1', language: 'cpp', sourceCode: 'code',
+      timeLimit: 1000, memoryLimit: 256,
+    } } as any);
+
+    const stored = prisma.submissionCase.create.mock.calls[0][0].data;
+    expect(stored.input).toBeNull();
+    expect(stored.expectedOutput).toBeNull();
+    expect(stored.actualOutput).toHaveLength(32_787);
+    expect(stored.actualOutput).toMatch(/\[output truncated\]$/);
+  });
+
   it('runs SPJ checker with user output as checker stdin', async () => {
     prisma.problemVersion.findFirst.mockResolvedValue({
       checker: {
@@ -84,7 +105,7 @@ describe('JudgeProcessor local test data judging', () => {
         language: 'python',
         sourceCode: 'import sys; print(sys.stdin.read().strip() == "3")',
       },
-      testCases: [{ order: 1, input: '1 2\n', expectedOutput: '', score: 100 }],
+      testCases: [{ order: 1, input: '1 2\n', expectedOutput: '', score: 100, isSample: true }],
     });
     judge.compile
       .mockResolvedValueOnce({ success: true, fileId: 'program', message: '' })

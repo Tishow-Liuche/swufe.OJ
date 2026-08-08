@@ -5,6 +5,11 @@ services:
     image: postgres:16-alpine
     container_name: oj-postgres
     restart: unless-stopped
+    mem_limit: 384m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in config/infra.env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in config/infra.env}
@@ -23,13 +28,18 @@ services:
     image: redis:7-alpine
     container_name: oj-redis
     restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in config/infra.env}
       --protected-mode yes
       --appendonly yes
       --appendfsync everysec
-      --maxmemory 512mb
+      --maxmemory ${REDIS_MAXMEMORY:-192mb}
       --maxmemory-policy noeviction
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in config/infra.env}
@@ -47,6 +57,11 @@ services:
     image: minio/minio:latest
     container_name: oj-minio
     restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in config/infra.env}
@@ -72,6 +87,10 @@ services:
     container_name: oj-go-judge
     privileged: true
     restart: unless-stopped
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     ulimits:
       nproc: 65535
       nofile: 65535
@@ -79,7 +98,7 @@ services:
     command: >
       -http-addr 0.0.0.0:5050
       -enable-metrics
-      -parallelism 2
+      -parallelism ${GO_JUDGE_PARALLELISM:-1}
       -tmp-fs-param size=256m,nr_inodes=8k
       -output-limit 268435456
       -copy-out-limit 67108864

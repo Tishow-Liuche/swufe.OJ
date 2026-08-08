@@ -32,7 +32,7 @@ const error = ref('');
 const showCreator = ref(false);
 const problems = ref<any[]>([]);
 const form = ref({ title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] as string[] });
-let standingTimer: ReturnType<typeof setInterval> | null = null;
+let standingTimer: ReturnType<typeof setTimeout> | null = null;
 const sidebarCollapsed = useStorage('swufe-oj:contest-sidebar-collapsed-v2', true);
 
 const isTeacher = computed(() => auth.isTeacher());
@@ -210,14 +210,18 @@ async function restoreContestFromRoute() {
 onMounted(async () => {
   await load();
   await restoreContestFromRoute();
-  standingTimer = setInterval(refreshLiveBoard, 15000);
+  const refreshBoardWhenVisible = async () => {
+    if (document.visibilityState === 'visible' && selected.value) await refreshLiveBoard();
+    standingTimer = setTimeout(refreshBoardWhenVisible, 30_000);
+  };
+  standingTimer = setTimeout(refreshBoardWhenVisible, 30_000);
 });
 watch(
   () => route.query.contestId,
   () => { void restoreContestFromRoute(); },
 );
 onUnmounted(() => {
-  if (standingTimer) clearInterval(standingTimer);
+  if (standingTimer) clearTimeout(standingTimer);
 });
 </script>
 

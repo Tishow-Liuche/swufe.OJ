@@ -31,9 +31,17 @@ interface RunResult {
 interface ProblemTestCaseForJudge {
   input: string;
   expectedOutput: string;
+  isSample?: boolean;
 }
 
-@Processor('judge')
+const MAX_STORED_OUTPUT_CHARS = 32_768;
+
+const configuredConcurrency = Number.parseInt(process.env.JUDGE_WORKER_CONCURRENCY || '1', 10);
+const judgeConcurrency = Number.isInteger(configuredConcurrency) && configuredConcurrency > 0
+  ? configuredConcurrency
+  : 1;
+
+@Processor('judge', { concurrency: judgeConcurrency })
 export class JudgeProcessor extends WorkerHost {
   private readonly logger = new Logger(JudgeProcessor.name);
 
@@ -70,7 +78,7 @@ export class JudgeProcessor extends WorkerHost {
           where: { id: data.submissionId },
           data: {
             status: 'COMPILE_ERROR',
-            compileMessage: compileResult.message,
+              compileMessage: this.truncateOutput(compileResult.message),
             judgedAt: new Date(),
           },
         });
@@ -140,9 +148,9 @@ export class JudgeProcessor extends WorkerHost {
             status: caseStatus,
             timeUsed: result.timeUsed,
             memoryUsed: result.memoryUsed,
-            input: tc.input,
-            expectedOutput: useSpj ? '[SPJ]' : tc.expectedOutput,
-            actualOutput: result.output,
+            input: tc.isSample ? tc.input : null,
+            expectedOutput: useSpj ? '[SPJ]' : tc.isSample ? tc.expectedOutput : null,
+            actualOutput: this.truncateOutput(result.output),
           },
         });
 
@@ -223,6 +231,13 @@ export class JudgeProcessor extends WorkerHost {
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
       .replace(/[ \t\n]+$/g, '');
+  }
+
+  private truncateOutput(output: string): string {
+    const value = String(output ?? '');
+    return value.length <= MAX_STORED_OUTPUT_CHARS
+      ? value
+      : `${value.slice(0, MAX_STORED_OUTPUT_CHARS)}\n[output truncated]`;
   }
 
   private checkerAccepted(result: RunResult): boolean {

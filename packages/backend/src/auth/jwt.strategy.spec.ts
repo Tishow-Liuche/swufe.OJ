@@ -58,4 +58,18 @@ describe('JwtStrategy mandatory password change', () => {
     await expect((strategy as any).validate({ method: 'GET', path: '/api/user/profile' }, { sub: 'u1', ver: 0 }))
       .resolves.toMatchObject({ role: 'STUDENT' });
   });
+
+  it('reuses a short-lived user lookup for repeated authenticated requests', async () => {
+    const user = {
+      id: 'u1', username: 'alice', role: 'STUDENT', authVersion: 0,
+      mustChangePassword: false, deletedAt: null, teacherApplicationStatus: 'NOT_REQUIRED',
+    };
+    const prisma: any = { user: { findUnique: jest.fn().mockResolvedValue(user) } };
+    const strategy = new JwtStrategy(config, prisma);
+
+    await strategy.validate({ method: 'GET', path: '/api/user/profile' } as any, { sub: 'u1', ver: 0 });
+    await strategy.validate({ method: 'GET', path: '/api/user/profile' } as any, { sub: 'u1', ver: 0 });
+
+    expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+  });
 });

@@ -9,6 +9,7 @@ describe('SubmissionService contest reserved access', () => {
       },
       submission: {
         create: jest.fn().mockResolvedValue({ id: 'submission-1' }),
+        findFirst: jest.fn().mockResolvedValue(null),
         update: jest.fn().mockResolvedValue({ id: 'submission-1', status: 'QUEUING' }),
       },
       problemTestCase: {
@@ -20,6 +21,7 @@ describe('SubmissionService contest reserved access', () => {
     };
     const judgeQueue: any = {
       add: jest.fn().mockResolvedValue({ id: 'queue-job-1' }),
+      getWaitingCount: jest.fn().mockResolvedValue(0),
     };
     const service = new SubmissionService(prisma, {} as any, {} as any, {} as any, judgeQueue);
     return { service, prisma, judgeQueue };
@@ -106,6 +108,32 @@ describe('SubmissionService contest reserved access', () => {
       language: 'cpp',
       sourceCode: 'int main() { return 0; }',
     }, { authorPreviewActor: { id: 'teacher-2', role: 'TEACHER' } })).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(prisma.submission.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects another local submission while the user already has an active one', async () => {
+    const { service, prisma } = createService(reservedProblem);
+    prisma.submission.findFirst.mockResolvedValueOnce({ id: 'active-submission' });
+
+    await expect(service.submit('student-1', {
+      problemId: 'problem-1',
+      language: 'cpp',
+      sourceCode: 'int main() { return 0; }',
+    }, { allowContestReserved: true })).rejects.toMatchObject({ status: 429 });
+
+    expect(prisma.submission.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects submissions when the configured judge queue is full', async () => {
+    const { service, prisma, judgeQueue } = createService(reservedProblem);
+    judgeQueue.getWaitingCount.mockResolvedValue(500);
+
+    await expect(service.submit('student-1', {
+      problemId: 'problem-1',
+      language: 'cpp',
+      sourceCode: 'int main() { return 0; }',
+    }, { allowContestReserved: true })).rejects.toMatchObject({ status: 429 });
 
     expect(prisma.submission.create).not.toHaveBeenCalled();
   });
