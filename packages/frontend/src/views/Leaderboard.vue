@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { BarChart3, Medal, Sparkles, Target, Trophy } from '@lucide/vue';
+import { BarChart3, Sparkles, Target, Trophy } from '@lucide/vue';
 import api from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
 
@@ -33,10 +33,19 @@ const scopeMeta = computed(() => ({
   OVERALL: {
     title: '综合排名',
     kicker: 'SINGULARITY SCORE',
-    desc: '综合积分榜框架已预留，等你给出积分公式后接入正式计算。',
+    desc: '按本 OJ 提交 AC 的题目难度计做题分，比赛分当前为 0。',
     icon: Sparkles,
   },
 })[scope.value]);
+
+const currentScopeTitle = computed(() => (
+  scope.value === 'OVERALL' ? '综合排名' : scopeMeta.value.title
+));
+const currentScopeDesc = computed(() => (
+  scope.value === 'OVERALL'
+    ? '综合分 = 做题分 + 比赛分；当前做题分只统计本 OJ 提交并 AC 的题，比赛分暂为 0。'
+    : scopeMeta.value.desc
+));
 
 const contestOptions = computed(() => [
   { value: '', label: '选择比赛' },
@@ -51,15 +60,20 @@ const boardColumns = computed(() => {
     return ['排名', '选手', '得分', '已解决'];
   }
   if (scope.value === 'OVERALL') {
-    return ['排名', '用户', '综合积分', '构成'];
+    return ['排名', '用户', '综合得分', '构成'];
   }
   return ['排名', '用户', '已解决', '提交数', '通过率'];
 });
 
+const displayBoardColumns = computed(() => (
+  scope.value === 'OVERALL' ? ['排名', '用户', '综合得分', '构成'] : boardColumns.value
+));
+
 async function loadContests() {
   try {
     const { data } = await api.get('/api/contests');
-    contests.value = Array.isArray(data) ? data : data.items || [];
+    contests.value = (Array.isArray(data) ? data : data.items || [])
+      .filter((item: any) => item.state === 'ENDED');
   } catch {
     contests.value = [];
   }
@@ -87,7 +101,8 @@ async function load() {
         username: row.user?.username || row.username,
       }));
     } else {
-      rows.value = [];
+      const { data } = await api.get('/api/leaderboard/overall');
+      rows.value = Array.isArray(data) ? data : [];
     }
   } catch (e: any) {
     error.value = e.response?.data?.message || '排行榜加载失败';
@@ -130,8 +145,8 @@ onMounted(async () => {
     <section class="leaderboard-hero">
       <div>
         <p class="eyebrow"><BarChart3 :size="16" /> LEADERBOARD</p>
-        <h1>{{ scopeMeta.title }}</h1>
-        <p>{{ scopeMeta.desc }}</p>
+        <h1>{{ currentScopeTitle }}</h1>
+        <p>{{ currentScopeDesc }}</p>
       </div>
       <div class="hero-orb">
         <component :is="scopeMeta.icon" :size="54" />
@@ -157,7 +172,7 @@ onMounted(async () => {
         <Sparkles :size="18" />
         <span>
           <strong>综合排名</strong>
-          <small>积分公式待接入</small>
+          <small>做题分 + 比赛分</small>
         </span>
       </button>
     </section>
@@ -173,26 +188,17 @@ onMounted(async () => {
       <span v-if="!contests.length">暂无可选择比赛，或比赛列表加载失败。</span>
     </div>
 
-    <section v-if="scope === 'OVERALL'" class="overall-placeholder">
-      <div class="placeholder-icon"><Medal :size="34" /></div>
-      <div>
-        <p class="eyebrow">FRAME READY</p>
-        <h2>综合积分榜框架已搭好</h2>
-        <p>后续只需要补充你的积分公式，我会把“过题、比赛、奖项、活跃度”等指标映射成统一积分，并在这里展示正式排名。</p>
-      </div>
-    </section>
-
     <p v-if="error" class="notice">{{ error }}</p>
     <div v-if="loading" class="state">正在计算排行榜…</div>
-    <div v-else-if="scope !== 'OVERALL' && !rows.length" class="state">
+    <div v-else-if="!rows.length" class="state">
       {{ scope === 'CONTEST' && !targetId ? '请选择一场比赛查看排名' : '暂无可展示的排名数据' }}
     </div>
 
-    <section v-else-if="scope !== 'OVERALL'" class="board">
-      <div class="board-head" :class="{ contest: scope === 'CONTEST' }">
-        <span v-for="column in boardColumns" :key="column">{{ column }}</span>
+    <section v-else class="board">
+      <div class="board-head" :class="{ contest: scope === 'CONTEST', overall: scope === 'OVERALL' }">
+        <span v-for="column in displayBoardColumns" :key="column">{{ column }}</span>
       </div>
-      <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="{ top: row.rank <= 3, contest: scope === 'CONTEST' }">
+      <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="{ top: row.rank <= 3, contest: scope === 'CONTEST', overall: scope === 'OVERALL' }">
         <span class="rank">
           <i v-if="rankMedal(row.rank)">{{ rankMedal(row.rank) }}</i>
           <b v-else>{{ row.rank }}</b>
@@ -201,11 +207,20 @@ onMounted(async () => {
           <strong>{{ row.nickname || row.username }}</strong>
           <small>@{{ row.username }}</small>
         </span>
+        <template v-if="scope === 'OVERALL'">
+          <strong>{{ row.overallScore }}</strong>
+          <span class="score-breakdown">
+            做题 {{ row.problemScore }} + 比赛 {{ row.contestScore }}
+            <small>{{ row.localSolvedCount }} 题</small>
+          </span>
+        </template>
+        <template v-else>
         <strong v-if="scope === 'CONTEST' && contest?.mode === 'IOI'">{{ row.score }} 分</strong>
         <strong v-else>{{ row.solvedCount }}</strong>
         <span v-if="scope === 'CONTEST' && contest?.mode === 'ACM'">{{ row.penalty }} min</span>
         <span v-else-if="scope === 'CONTEST'">{{ row.solvedCount }}</span>
         <span v-else>{{ row.submissionCount }}</span>
+        </template>
         <span v-if="scope === 'GLOBAL'">{{ row.acceptRate }}%</span>
       </div>
     </section>
@@ -376,38 +391,6 @@ onMounted(async () => {
   width: min(360px, 100%);
 }
 
-.overall-placeholder {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 18px;
-  align-items: center;
-  margin-bottom: 18px;
-  padding: 24px;
-  border: 1px dashed #aac7fa;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #fff, #f3f8ff);
-}
-
-.placeholder-icon {
-  display: grid;
-  width: 72px;
-  height: 72px;
-  place-items: center;
-  border-radius: 20px;
-  background: #fff3d7;
-  color: #d58618;
-}
-
-.overall-placeholder h2 {
-  margin: 0 0 8px;
-}
-
-.overall-placeholder p:last-child {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.75;
-}
-
 .notice {
   padding: 12px 14px;
   border-radius: 12px;
@@ -445,6 +428,11 @@ onMounted(async () => {
 .board-head.contest,
 .board-row.contest {
   grid-template-columns: 82px minmax(180px, 1fr) 120px 110px;
+}
+
+.board-head.overall,
+.board-row.overall {
+  grid-template-columns: 82px minmax(180px, 1fr) 130px minmax(220px, .8fr);
 }
 
 .board-head {
@@ -498,6 +486,23 @@ onMounted(async () => {
 
 .board-row > strong {
   color: #1e66b4;
+}
+
+.score-breakdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4e5f75;
+  font-weight: 750;
+}
+
+.score-breakdown small {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #2f70df;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 @media (max-width: 760px) {

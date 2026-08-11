@@ -49,6 +49,12 @@ const errorMessage = ref('');
 const replyContent = ref('');
 const postForm = ref({ title: '', content: '', category: '学习交流' });
 const announcementForm = ref({ title: '', content: '', isPinned: false });
+const editingPostId = ref('');
+const editPostForm = ref({ title: '', content: '', category: '' });
+const editingReplyId = ref('');
+const editReplyContent = ref('');
+const editingAnnouncementId = ref('');
+const editAnnouncementForm = ref({ title: '', content: '', isPinned: false });
 
 const isModerator = computed(() => auth.isTeacher() || auth.isAdmin());
 const isFeed = computed(() => panel.value === 'feed' || panel.value === 'solutions');
@@ -92,6 +98,10 @@ function applyRouteScope() {
 function resetMessage() {
   feedbackMessage.value = '';
   errorMessage.value = '';
+}
+
+function canManageContent(item: any) {
+  return Boolean(item && auth.user && (item.authorId === auth.user.id || item.author?.id === auth.user.id || isModerator.value));
 }
 
 async function loadPosts() {
@@ -171,6 +181,41 @@ async function publishPost() {
   }
 }
 
+function beginEditPost(post: any) {
+  editingPostId.value = post.id;
+  editPostForm.value = {
+    title: post.title || '',
+    content: post.content || '',
+    category: post.category || '瀛︿範浜ゆ祦',
+  };
+}
+
+async function savePostEdit() {
+  if (!editingPostId.value) return;
+  try {
+    const { data } = await api.patch(`/api/community/posts/${editingPostId.value}`, editPostForm.value);
+    selectedPost.value = data;
+    editingPostId.value = '';
+    await loadPosts();
+    feedbackMessage.value = '内容已更新。';
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '编辑失败。';
+  }
+}
+
+async function deletePost(post: any = selectedPost.value) {
+  if (!post?.id) return;
+  if (!window.confirm('确认删除这条内容？删除后普通用户将无法再看到。')) return;
+  try {
+    await api.delete(`/api/community/posts/${post.id}`);
+    if (selectedPost.value?.id === post.id) selectedPost.value = null;
+    posts.value = posts.value.filter((item) => item.id !== post.id);
+    feedbackMessage.value = '内容已删除。';
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '删除失败。';
+  }
+}
+
 async function openPost(post: Post) {
   if (!requireLogin()) return;
   resetMessage();
@@ -229,6 +274,36 @@ async function replyToPost() {
   }
 }
 
+function beginEditReply(reply: any) {
+  editingReplyId.value = reply.id;
+  editReplyContent.value = reply.content || '';
+}
+
+async function saveReplyEdit() {
+  if (!selectedPost.value || !editingReplyId.value) return;
+  try {
+    await api.patch(`/api/community/replies/${editingReplyId.value}`, { content: editReplyContent.value });
+    const { data } = await api.get(`/api/community/posts/${selectedPost.value.id}`);
+    selectedPost.value = data;
+    editingReplyId.value = '';
+    editReplyContent.value = '';
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '回复编辑失败。';
+  }
+}
+
+async function deleteReply(reply: any) {
+  if (!reply?.id || !selectedPost.value) return;
+  if (!window.confirm('确认删除这条回复？')) return;
+  try {
+    await api.delete(`/api/community/replies/${reply.id}`);
+    const { data } = await api.get(`/api/community/posts/${selectedPost.value.id}`);
+    selectedPost.value = data;
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '回复删除失败。';
+  }
+}
+
 async function resolvePost() {
   if (!selectedPost.value) return;
   try {
@@ -251,6 +326,39 @@ async function publishAnnouncement() {
     await loadAnnouncements();
   } catch (error: any) {
     errorMessage.value = error.response?.data?.message || '公告发布失败。';
+  }
+}
+
+function beginEditAnnouncement(item: any) {
+  editingAnnouncementId.value = item.id;
+  editAnnouncementForm.value = {
+    title: item.title || '',
+    content: item.content || '',
+    isPinned: Boolean(item.isPinned),
+  };
+}
+
+async function saveAnnouncementEdit() {
+  if (!editingAnnouncementId.value) return;
+  try {
+    await api.patch(`/api/community/announcements/${editingAnnouncementId.value}`, editAnnouncementForm.value);
+    editingAnnouncementId.value = '';
+    await loadAnnouncements();
+    feedbackMessage.value = '公告已更新。';
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '公告编辑失败。';
+  }
+}
+
+async function deleteAnnouncement(item: any) {
+  if (!item?.id) return;
+  if (!window.confirm('确认删除这条公告？')) return;
+  try {
+    await api.delete(`/api/community/announcements/${item.id}`);
+    announcements.value = announcements.value.filter((ann) => ann.id !== item.id);
+    feedbackMessage.value = '公告已删除。';
+  } catch (error: any) {
+    errorMessage.value = error.response?.data?.message || '公告删除失败。';
   }
 }
 
@@ -354,7 +462,7 @@ onMounted(async () => {
         <template v-else-if="panel === 'announcements'">
           <div class="feed-heading"><div><p class="section-kicker">平台动态</p><h2>公告</h2><p>课程安排、功能更新和社区规则会在这里发布。</p></div><button v-if="isModerator" class="primary-command" type="button" @click="showAnnouncementComposer = !showAnnouncementComposer"><Megaphone :size="17" />发布公告</button></div>
           <form v-if="showAnnouncementComposer" class="discussion-composer" @submit.prevent="publishAnnouncement"><input v-model="announcementForm.title" maxlength="120" placeholder="公告标题" required><label class="pin-option"><input v-model="announcementForm.isPinned" type="checkbox">置顶显示</label><textarea v-model="announcementForm.content" maxlength="6000" placeholder="面向全体用户发布的公告正文" required /><footer><button type="button" class="plain-command" @click="showAnnouncementComposer = false">取消</button><button class="primary-command" type="submit"><Megaphone :size="16" />发布</button></footer></form>
-          <article v-for="item in announcements" :key="item.id" class="announcement-item"><div class="announcement-mark"><Megaphone :size="18" /></div><div><header><h3>{{ item.title }}</h3><span v-if="item.isPinned">置顶</span></header><p>{{ item.content }}</p><footer>{{ item.author?.nickname || item.author?.username }} · {{ formatDate(item.publishAt) }}</footer></div></article><div v-if="!announcements.length" class="empty-feed"><Megaphone :size="26" />暂无公告</div>
+          <article v-for="item in announcements" :key="item.id" class="announcement-item"><div class="announcement-mark"><Megaphone :size="18" /></div><div><form v-if="editingAnnouncementId === item.id" class="inline-edit-form" @submit.prevent="saveAnnouncementEdit"><input v-model="editAnnouncementForm.title" maxlength="120" required><label class="pin-option"><input v-model="editAnnouncementForm.isPinned" type="checkbox">置顶显示</label><textarea v-model="editAnnouncementForm.content" maxlength="6000" required></textarea><footer><button type="button" class="plain-command" @click="editingAnnouncementId = ''">取消</button><button class="primary-command" type="submit">保存公告</button></footer></form><template v-else><header><h3>{{ item.title }}</h3><span v-if="item.isPinned">置顶</span></header><p>{{ item.content }}</p><footer>{{ item.author?.nickname || item.author?.username }} · {{ formatDate(item.publishAt) }}</footer><div v-if="canManageContent(item)" class="owner-actions"><button type="button" @click="beginEditAnnouncement(item)">编辑</button><button type="button" class="danger" @click="deleteAnnouncement(item)">删除</button></div></template></div></article><div v-if="!announcements.length" class="empty-feed"><Megaphone :size="26" />暂无公告</div>
         </template>
 
         <template v-else>
@@ -373,7 +481,7 @@ onMounted(async () => {
       <section v-if="moderationOpen" class="moderation-drawer"><header><div><p>教师 / 管理员</p><h2>审核中心</h2></div><button class="icon-command" type="button" title="关闭" @click="moderationOpen = false"><X :size="18" /></button></header><div class="moderation-columns"><div><h3>内容举报 <span>{{ reports.length }}</span></h3><article v-for="item in reports" :key="item.id"><b>{{ item.reason }}</b><p>{{ item.detail || '未填写补充说明' }}</p><small>举报人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleReport(item, false)">保留</button><button type="button" class="danger" @click="handleReport(item, true)">隐藏内容</button></footer></article><p v-if="!reports.length" class="no-item">暂无待处理举报</p></div><div><h3>题目纠错 <span>{{ feedbacks.length }}</span></h3><article v-for="item in feedbacks" :key="item.id"><b>{{ item.problem?.title }} · {{ item.type }}</b><p>{{ item.content }}</p><small>反馈人：{{ item.reporter?.nickname || item.reporter?.username }}</small><footer><button type="button" @click="handleFeedback(item)">开始核实</button></footer></article><p v-if="!feedbacks.length" class="no-item">暂无待处理反馈</p></div></div></section>
     </main>
 
-    <div v-if="selectedPost" class="dialog-backdrop" @click.self="closePost"><article class="post-dialog"><button class="icon-command close-dialog" type="button" title="关闭" @click="closePost"><X :size="18" /></button><div class="post-labels"><span>{{ selectedPost.category || selectedPost.type }}</span><span v-if="selectedPost.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span></div><h2>{{ selectedPost.title || (selectedPost.type === 'SOLUTION' ? '题解复盘' : '讨论') }}</h2><div v-if="selectedPost.contentLocked" class="spoiler-state"><LockKeyhole :size="22" /><div><b>题解内容尚未解锁</b><p>{{ selectedPost.lockReason }}</p></div></div><template v-else><p class="post-content">{{ selectedPost.content }}</p><footer class="dialog-actions"><button type="button" :class="{ reacted: selectedPost.viewerReacted }" @click="toggleReaction(selectedPost)"><ThumbsUp :size="16" />{{ selectedPost.reactionCount || 0 }}</button><button v-if="selectedPost.authorId === auth.user?.id || isModerator" type="button" @click="resolvePost"><BookmarkCheck :size="16" />{{ selectedPost.isResolved ? '重新打开讨论' : '标记为已解决' }}</button></footer><section class="reply-list"><h3>回复 {{ selectedPost.replyCount || selectedPost.replies?.length || 0 }}</h3><article v-for="reply in selectedPost.replies" :key="reply.id"><b>{{ reply.author?.nickname || reply.author?.username }}</b><p>{{ reply.content }}</p><time>{{ formatDate(reply.createdAt) }}</time></article><form @submit.prevent="replyToPost"><textarea v-model="replyContent" maxlength="4000" placeholder="补充思路、给出建议或回答问题" required /><button class="primary-command" type="submit"><Send :size="16" />回复</button></form></section></template></article></div>
+    <div v-if="selectedPost" class="dialog-backdrop" @click.self="closePost"><article class="post-dialog"><button class="icon-command close-dialog" type="button" title="关闭" @click="closePost"><X :size="18" /></button><div class="post-labels"><span>{{ selectedPost.category || selectedPost.type }}</span><span v-if="selectedPost.isResolved" class="resolved"><BookmarkCheck :size="13" />已解决</span></div><form v-if="editingPostId === selectedPost.id" class="inline-edit-form" @submit.prevent="savePostEdit"><input v-model="editPostForm.title" maxlength="120" placeholder="标题"><FilterSelect v-model="editPostForm.category" class="composer-category-select" :options="composerCategoryOptions" label="讨论分类" /><textarea v-model="editPostForm.content" maxlength="12000" required></textarea><footer><button type="button" class="plain-command" @click="editingPostId = ''">取消</button><button class="primary-command" type="submit">保存内容</button></footer></form><template v-else><h2>{{ selectedPost.title || (selectedPost.type === 'SOLUTION' ? '题解复盘' : '讨论') }}</h2><div v-if="selectedPost.contentLocked" class="spoiler-state"><LockKeyhole :size="22" /><div><b>题解内容尚未解锁</b><p>{{ selectedPost.lockReason }}</p></div></div><template v-else><p class="post-content">{{ selectedPost.content }}</p><footer class="dialog-actions"><button type="button" :class="{ reacted: selectedPost.viewerReacted }" @click="toggleReaction(selectedPost)"><ThumbsUp :size="16" />{{ selectedPost.reactionCount || 0 }}</button><button v-if="selectedPost.authorId === auth.user?.id || isModerator" type="button" @click="resolvePost"><BookmarkCheck :size="16" />{{ selectedPost.isResolved ? '重新打开讨论' : '标记为已解决' }}</button><button v-if="canManageContent(selectedPost)" type="button" @click="beginEditPost(selectedPost)">编辑</button><button v-if="canManageContent(selectedPost)" type="button" class="danger" @click="deletePost(selectedPost)">删除</button></footer><section class="reply-list"><h3>回复 {{ selectedPost.replyCount || selectedPost.replies?.length || 0 }}</h3><article v-for="reply in selectedPost.replies" :key="reply.id"><b>{{ reply.author?.nickname || reply.author?.username }}</b><template v-if="editingReplyId === reply.id"><textarea v-model="editReplyContent" maxlength="4000" class="reply-edit-textarea"></textarea><div class="owner-actions"><button type="button" @click="saveReplyEdit">保存</button><button type="button" @click="editingReplyId = ''">取消</button></div></template><template v-else><p>{{ reply.content }}</p><time>{{ formatDate(reply.createdAt) }}</time><div v-if="canManageContent(reply)" class="owner-actions"><button type="button" @click="beginEditReply(reply)">编辑</button><button type="button" class="danger" @click="deleteReply(reply)">删除</button></div></template></article><form @submit.prevent="replyToPost"><textarea v-model="replyContent" maxlength="4000" placeholder="补充思路、给出建议或回答问题" required /><button class="primary-command" type="submit"><Send :size="16" />回复</button></form></section></template></template></article></div>
   </div>
 </template>
 
@@ -385,6 +493,7 @@ onMounted(async () => {
 .announcement-item { display: grid; grid-template-columns: 38px 1fr; gap: 12px; padding: 18px 22px; border-bottom: 1px solid #edf1f5; }.announcement-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 6px; background: #fff3da; color: #a05a00; }.announcement-item header { display: flex; align-items: center; gap: 7px; }.announcement-item h3 { margin: 0; color: #344054; font-size: 16px; }.announcement-item header span { padding: 2px 6px; border-radius: 4px; background: #fff1cd; color: #966000; font-size: 11px; font-weight: 800; }.announcement-item p { margin: 8px 0; color: #475467; line-height: 1.65; white-space: pre-wrap; }.announcement-item footer { color: #98a2b3; font-size: 12px; }.help-list { padding: 8px 22px 22px; }.help-list article { display: flex; gap: 12px; padding: 17px 0; border-bottom: 1px solid #edf1f5; }.help-list article:last-child { border-bottom: 0; }.help-list svg { color: #087f5b; }.help-list h3 { margin: 0 0 5px; color: #344054; font-size: 15px; }.help-list p { margin: 0; color: #667085; line-height: 1.6; font-size: 14px; }
 .moderation-drawer { width: min(1120px, calc(100% - 40px)); margin: 24px auto 0; padding: 20px; border: 1px solid #e4d7c3; border-radius: 8px; background: #fffaf4; }.moderation-drawer header { display: flex; align-items: center; justify-content: space-between; }.moderation-drawer header h2 { margin: 0; color: #344054; font-size: 20px; }.moderation-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 16px; }.moderation-columns > div { padding: 14px; border: 1px solid #eadfcf; border-radius: 6px; background: #fff; }.moderation-columns h3 { margin: 0 0 9px; color: #344054; font-size: 15px; }.moderation-columns h3 span { color: #b42318; }.moderation-columns article { padding: 11px 0; border-bottom: 1px solid #edf1f5; }.moderation-columns p { margin: 6px 0; color: #667085; font-size: 13px; }.moderation-columns small { color: #98a2b3; }.moderation-columns footer { display: flex; gap: 8px; margin-top: 9px; }.moderation-columns footer button { padding: 5px 9px; border: 1px solid #bcd9cd; border-radius: 5px; background: #fff; color: #087f5b; font: inherit; font-size: 12px; cursor: pointer; }.moderation-columns footer .danger { border-color: #f2c1c4; color: #b42318; }.no-item { color: #98a2b3; text-align: center; }
 .dialog-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(16, 24, 40, .52); }.post-dialog { position: relative; width: min(760px, 100%); max-height: 90vh; overflow: auto; padding: 25px; border-radius: 8px; background: #fff; box-shadow: 0 22px 52px rgba(16, 24, 40, .25); }.close-dialog { position: absolute; top: 13px; right: 13px; }.post-dialog h2 { margin: 12px 30px 16px 0; color: #253346; font-size: 21px; }.post-content { margin: 0; color: #344054; line-height: 1.75; white-space: pre-wrap; }.spoiler-state { display: flex; gap: 11px; align-items: flex-start; padding: 15px; border: 1px solid #efd29c; border-radius: 7px; background: #fff9ea; color: #7a4f00; }.spoiler-state p { margin: 5px 0 0; color: #8b6b32; line-height: 1.5; }.dialog-actions { display: flex; gap: 15px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #edf1f5; }.dialog-actions button { font-size: 13px; }.reply-list { margin-top: 18px; }.reply-list h3 { margin: 0 0 8px; font-size: 16px; }.reply-list > article { padding: 12px 0; border-bottom: 1px solid #edf1f5; }.reply-list > article p { margin: 5px 0; color: #475467; line-height: 1.55; white-space: pre-wrap; }.reply-list time { color: #98a2b3; font-size: 11px; }.reply-list form { display: grid; gap: 9px; margin-top: 15px; }.reply-list form .primary-command { justify-self: end; }
+.owner-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }.owner-actions button, .dialog-actions .danger { padding: 4px 9px; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #3b82f6; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }.owner-actions button:hover { background: #eff6ff; }.owner-actions .danger, .dialog-actions .danger { border-color: #fecaca; color: #dc2626; }.owner-actions .danger:hover, .dialog-actions .danger:hover { background: #fef2f2; }.inline-edit-form { display: grid; gap: 10px; margin: 12px 0; padding: 13px; border: 1px solid #d8e6f5; border-radius: 8px; background: #f8fbff; }.inline-edit-form input, .inline-edit-form textarea, .reply-edit-textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #1f2937; font: inherit; }.inline-edit-form input { min-height: 36px; padding: 0 9px; }.inline-edit-form textarea, .reply-edit-textarea { min-height: 96px; padding: 9px; line-height: 1.55; resize: vertical; }.inline-edit-form footer { display: flex; justify-content: flex-end; gap: 10px; }
 @media (max-width: 1050px) { .community-layout { grid-template-columns: 170px minmax(0, 1fr); }.community-aside { display: none; } }
 @media (max-width: 720px) { .community-hub { width: min(100% - 28px, 1360px); padding-top: 18px; }.community-topbar { align-items: flex-start; }.brand-block h1 { font-size: 23px; }.search-field { display: none; }.community-layout { grid-template-columns: 1fr; }.community-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }.community-nav .nav-rule, .community-nav .signed-state { display: none; }.community-nav > button { justify-content: center; padding: 0 8px; }.community-nav .create-discussion { grid-column: 1 / -1; }.feed-heading { padding: 18px 16px 15px; }.feed-heading h2 { font-size: 20px; }.discussion-composer, .feed-toolbar { margin-left: 16px; margin-right: 16px; }.discussion-composer > div { align-items: flex-start; flex-direction: column; }.feed-toolbar { padding: 10px 0; }.post-body { padding: 16px 16px 10px; }.post-metrics { padding: 0 16px 13px; }.announcement-item { padding: 16px; }.help-list { padding: 6px 16px 18px; }.moderation-drawer { width: min(100% - 28px, 1120px); }.moderation-columns { grid-template-columns: 1fr; }.post-dialog { padding: 21px 16px; } }
 

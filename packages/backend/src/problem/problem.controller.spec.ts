@@ -1,5 +1,10 @@
 import { ProblemController } from './problem.controller';
 
+jest.mock('sanitize-html', () => ({
+  __esModule: true,
+  default: (html: string) => String(html),
+}));
+
 describe('ProblemController mutation actor propagation', () => {
   const actor = { id: 'teacher-1', role: 'TEACHER' };
   const file = { originalname: 'testdata.zip' } as Express.Multer.File;
@@ -15,6 +20,7 @@ describe('ProblemController mutation actor propagation', () => {
       assignOwner: jest.fn(),
       grantPermission: jest.fn(),
       removePermission: jest.fn(),
+      getMetadata: jest.fn().mockResolvedValue({ total: 0, tags: [], difficulties: [], sources: [] }),
     };
     const controller = new ProblemController(problem);
 
@@ -38,5 +44,14 @@ describe('ProblemController mutation actor propagation', () => {
     expect(problem.assignOwner).toHaveBeenCalledWith('p1', 'teacher-2', admin);
     expect(problem.grantPermission).toHaveBeenCalledWith('p1', expect.anything(), actor);
     expect(problem.removePermission).toHaveBeenCalledWith('p1', 'grant-1', actor);
+  });
+
+  it('exposes public problem metadata for filter options', async () => {
+    const metadata = { total: 3, tags: [{ name: 'dp', count: 2 }], difficulties: [], sources: [] };
+    const problem: any = { getMetadata: jest.fn().mockResolvedValue(metadata) };
+    const controller = new ProblemController(problem);
+
+    await expect(controller.getMetadata()).resolves.toBe(metadata);
+    expect(problem.getMetadata).toHaveBeenCalledWith();
   });
 });

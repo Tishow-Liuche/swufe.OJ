@@ -21,6 +21,8 @@ import { useAuthStore } from '../stores/auth';
 
 const route = useRoute();
 const auth = useAuthStore();
+const contestId = computed(() => String(route.query.contestId || ''));
+const isAuthorPreview = computed(() => String(route.query.preview || '') === '1');
 const problem = ref<any>(null);
 const problemState = ref<any>(null);
 const code = ref('');
@@ -30,6 +32,9 @@ const submitting = ref(false);
 const errorMsg = ref('');
 const showAllCases = ref(false);
 const isExternal = ref(false);
+const problemSubmissions = ref<any[]>([]);
+const submissionsLoading = ref(false);
+const selectedSubmission = ref<any | null>(null);
 let cmView: EditorView | null = null;
 let pollTimer: any = null;
 let visibilityCleanupId: any = null;
@@ -96,13 +101,19 @@ function formatMemoryKb(value: unknown) {
 
 onMounted(async () => {
   try {
-    const { data } = await api.get(`/api/problems/${route.params.id}`);
+    const problemUrl = contestId.value
+      ? `/api/contests/${contestId.value}/problems/${route.params.id}`
+      : isAuthorPreview.value
+        ? `/api/problems/mine/created/${route.params.id}`
+      : `/api/problems/${route.params.id}`;
+    const { data } = await api.get(problemUrl);
     problem.value = data;
-    if (auth.token) {
+    if (auth.token && !contestId.value && !isAuthorPreview.value) {
       problemState.value = (await api.get(`/api/learning/problem-states/${route.params.id}`)).data;
       if (problemState.value?.draft?.language) language.value = problemState.value.draft.language;
       if (problemState.value?.status === 'PASSED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
     }
+    await loadProblemSubmissions();
   } catch (e: any) {
     errorMsg.value = '题目加载失败';
   }
@@ -178,7 +189,7 @@ function isTemplateCode(value: string) {
 }
 
 function scheduleDraftSave() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   if (draftSaveTimer) clearTimeout(draftSaveTimer);
   draftSaveTimer = setTimeout(() => {
     draftSaveTimer = null;
@@ -187,7 +198,7 @@ function scheduleDraftSave() {
 }
 
 async function persistDraft() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   try {
     if (!code.value.trim() || isTemplateCode(code.value)) {
       if (problemState.value?.hasDraft) {
@@ -205,7 +216,7 @@ async function persistDraft() {
 }
 
 async function refreshProblemState() {
-  if (!auth.token || !problem.value) return;
+  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
   problemState.value = (await api.get(`/api/learning/problem-states/${problem.value.id}`)).data;
 }
 
@@ -245,6 +256,46 @@ function openExternalUrl(url?: string): boolean {
   return !!opened;
 }
 
+async function loadProblemSubmissions() {
+  if (!auth.token || !problem.value) return;
+  submissionsLoading.value = true;
+  try {
+    const { data } = await api.get('/api/submissions', {
+      params: { problemId: problem.value.id, page: 1, pageSize: 30 },
+    });
+    problemSubmissions.value = data.items || [];
+  } catch {
+    problemSubmissions.value = [];
+  } finally {
+    submissionsLoading.value = false;
+  }
+}
+
+async function openSubmissionDetail(submissionId: string) {
+  if (!submissionId) return;
+  try {
+    const { data } = await api.get(`/api/submissions/${submissionId}`);
+    selectedSubmission.value = data;
+  } catch (error: any) {
+    errorMsg.value = error?.response?.data?.message || '提交详情加载失败';
+  }
+}
+
+function getSwufeOjApiBase() {
+  return globalThis.location?.origin || 'http://127.0.0.1:3000';
+}
+
+function withSwufeOjApiParam(url?: string) {
+  if (!url) return url;
+  try {
+    const next = new URL(url);
+    next.searchParams.set('swufeOjApi', getSwufeOjApiBase());
+    return next.toString();
+  } catch {
+    return url;
+  }
+}
+
 function retryOpenCf() {
   cfOpenBlocked.value = !openExternalUrl(cfData.value?.url);
 }
@@ -270,7 +321,10 @@ async function submitCode() {
   isExternal.value = false;
   try {
     await persistDraft();
-    const { data } = await api.post('/api/submissions', {
+    const submitUrl = contestId.value
+      ? `/api/contests/${contestId.value}/submit`
+      : (isAuthorPreview.value ? '/api/submissions/preview' : '/api/submissions');
+    const { data } = await api.post(submitUrl, {
       problemId: problem.value.id,
       language: language.value,
       sourceCode: code.value,
@@ -290,7 +344,7 @@ async function submitCode() {
       const isLuogu = data.mode === 'LUOGU';
       const isQoj = data.mode === 'QOJ';
       cfData.value = {
-        url: isQoj ? data.qojSubmitUrl : (isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl),
+        url: withSwufeOjApiParam(isQoj ? data.qojSubmitUrl : (isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl)),
         platform: isQoj ? 'QOJ' : (isLuogu ? '洛谷' : 'Codeforces'),
         language: isQoj
           ? (qojLangNames[language.value] || language.value)
@@ -345,6 +399,7 @@ function startPolling(id: string) {
         clearInterval(visibilityCleanupId);
         visibilityCleanupId = null;
         await refreshProblemState();
+        await loadProblemSubmissions();
         if (data.status === 'ACCEPTED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
         return;
       }
@@ -412,6 +467,10 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
     <div v-if="errorMsg && !problem" class="error-msg">{{ errorMsg }}</div>
 
     <template v-if="problem">
+      <div v-if="isAuthorPreview" class="preview-banner">
+        <strong>比赛预备题验题模式</strong>
+        <span>当前题目不会出现在公开题库中；这里的提交用于命题人测试数据和判题正确性。</span>
+      </div>
       <div class="problem-header">
         <div class="problem-title-row">
           <h2>{{ problem.title }}</h2>
@@ -508,6 +567,31 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
             </p>
           </div>
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
+
+          <div v-if="auth.token" class="card problem-submissions-card">
+            <div class="submission-card-title">
+              <strong>本题提交记录</strong>
+              <button type="button" @click="loadProblemSubmissions">{{ submissionsLoading ? '刷新中...' : '刷新' }}</button>
+            </div>
+            <div v-if="submissionsLoading" class="submission-empty">正在加载提交记录...</div>
+            <div v-else-if="problemSubmissions.length" class="problem-submission-list">
+              <button
+                v-for="submission in problemSubmissions"
+                :key="submission.id"
+                type="button"
+                class="problem-submission-row"
+                @click="openSubmissionDetail(submission.id)"
+              >
+                <span class="submission-status-dot" :style="{ background: statusColors[submission.status] || '#94a3b8' }">
+                  {{ statusLabels[submission.status] || submission.status }}
+                </span>
+                <span>{{ submission.language }}</span>
+                <span>{{ hasMetric(submission.timeUsed) ? `${submission.timeUsed}ms` : '-' }} / {{ hasMetric(submission.memoryUsed) ? formatMemoryKb(submission.memoryUsed) : '-' }}</span>
+                <time>{{ new Date(submission.createdAt).toLocaleString('zh-CN') }}</time>
+              </button>
+            </div>
+            <div v-else class="submission-empty">暂无本题提交记录。</div>
+          </div>
         </div>
       </div>
 
@@ -558,6 +642,42 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
       </div>
     </div>
 
+    <div v-if="selectedSubmission" class="submission-detail-overlay" @click.self="selectedSubmission = null">
+      <article class="submission-detail-dialog">
+        <header>
+          <h2>提交详情</h2>
+          <button type="button" @click="selectedSubmission = null">×</button>
+        </header>
+        <div class="submission-detail-meta">
+          <span><b>状态：</b>{{ statusLabels[selectedSubmission.status] || selectedSubmission.status }}</span>
+          <span><b>语言：</b>{{ selectedSubmission.language }}</span>
+          <span v-if="hasMetric(selectedSubmission.timeUsed)"><b>用时：</b>{{ selectedSubmission.timeUsed }}ms</span>
+          <span v-if="hasMetric(selectedSubmission.memoryUsed)"><b>内存：</b>{{ formatMemoryKb(selectedSubmission.memoryUsed) }}</span>
+          <span v-if="selectedSubmission.user"><b>提交者：</b>{{ selectedSubmission.user.nickname || selectedSubmission.user.username }}</span>
+        </div>
+        <div v-if="selectedSubmission.compileMessage || selectedSubmission.compileOutput" class="compile-box">
+          <b>编译输出</b>
+          <pre>{{ selectedSubmission.compileMessage || selectedSubmission.compileOutput }}</pre>
+        </div>
+        <h3>源代码</h3>
+        <pre class="submission-source">{{ selectedSubmission.sourceCode }}</pre>
+        <div v-if="selectedSubmission.cases?.length" class="submission-cases">
+          <h3>测试点</h3>
+          <table>
+            <thead><tr><th>#</th><th>状态</th><th>用时</th><th>内存</th></tr></thead>
+            <tbody>
+              <tr v-for="item in selectedSubmission.cases" :key="item.id || item.caseIndex">
+                <td>{{ item.caseIndex ?? item.index }}</td>
+                <td>{{ statusLabels[item.status] || item.status }}</td>
+                <td>{{ hasMetric(item.timeUsed) ? `${item.timeUsed}ms` : '-' }}</td>
+                <td>{{ hasMetric(item.memoryUsed) ? formatMemoryKb(item.memoryUsed) : '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+
     <div v-if="wrongResolvedOpen" class="wrong-resolved-overlay" role="dialog" aria-modal="true" aria-labelledby="wrong-resolved-title">
       <section class="wrong-resolved-dialog">
         <span class="resolved-icon">✓</span>
@@ -574,6 +694,25 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 
 <style scoped>
 .problem-page { max-width: 100%; margin: 0; padding: 20px 24px; }
+.preview-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 13px;
+}
+.preview-banner strong {
+  font-size: 14px;
+}
+.preview-banner span {
+  color: #4f5a93;
+}
 .problem-header { margin-bottom: 20px; }
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
 .problem-community-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
@@ -646,6 +785,27 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .cm-editor-host { height: 420px; }
 .cm-editor-host :deep(.cm-editor) { height: 100%; }
 .cm-editor-host :deep(.cm-scroller) { overflow: auto; }
+
+.problem-submissions-card { display: grid; gap: 10px; }
+.submission-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.submission-card-title strong { color: #24364b; }
+.submission-card-title button { padding: 5px 10px; border: 1px solid #c6daf2; border-radius: 6px; background: #f4f8ff; color: #1f5eff; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.problem-submission-list { display: grid; gap: 7px; }
+.problem-submission-row { display: grid; grid-template-columns: 78px 56px minmax(110px, 1fr) 132px; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 1px solid #e4ebf2; border-radius: 8px; background: #fff; color: #475569; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.problem-submission-row:hover { border-color: #b5cff2; background: #f8fbff; }
+.submission-status-dot { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; padding: 0 7px; border-radius: 999px; color: #fff; font-size: 11px; font-weight: 900; }
+.submission-empty { padding: 14px; border: 1px dashed #d7e2ee; border-radius: 8px; color: #7b8794; text-align: center; font-size: 13px; }
+.submission-detail-overlay { position: fixed; z-index: 11050; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, .52); }
+.submission-detail-dialog { width: min(860px, 100%); max-height: min(760px, 90vh); overflow: auto; padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 24px 70px rgba(15, 23, 42, .28); }
+.submission-detail-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.submission-detail-dialog h2, .submission-detail-dialog h3 { margin: 0; color: #24364b; }
+.submission-detail-dialog h3 { margin-top: 16px; font-size: 15px; }
+.submission-detail-dialog header button { border: 0; background: transparent; color: #64748b; font-size: 26px; cursor: pointer; }
+.submission-detail-meta { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 12px; }
+.submission-detail-meta span { padding: 6px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; }
+.submission-source { max-height: 420px; overflow: auto; padding: 14px; border-radius: 10px; background: #0f172a; color: #e2e8f0; font-size: 13px; line-height: 1.6; }
+.submission-cases table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+.submission-cases th, .submission-cases td { padding: 8px; border-bottom: 1px solid #e5edf5; text-align: left; }
 
 .result-card { border-left: 4px solid #3498db; }
 .result-header { display: flex; align-items: center; gap: 12px; }

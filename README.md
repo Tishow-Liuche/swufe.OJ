@@ -146,11 +146,12 @@ cd packages/backend
 cp ../../config/.env.example .env
 # 将 .env 中的数据库、Redis 和 MinIO 密钥替换为 config/infra.env 对应值
 npm install
-npx prisma migrate deploy
-npx prisma generate
+npm run db:sync
 npm run seed            # 导入洛谷 P1000-P1010 共 11 道题目
 npm run start:dev       # 启动开发服务器 (localhost:3000)
 ```
+
+> 合并或 pull 队友分支后，不要直接运行 `nest start --watch`。统一使用 `npm run start:dev`，启动前会自动执行 `prisma migrate deploy`、`prisma generate`、校验登录所需的 `UserSession.refreshTokenHash` 字段，并清理占用 3000 端口的旧后端进程。这样可以避免“代码已经合并，但数据库没迁移 / 浏览器仍在访问旧后端”导致的登录失败。
 
 ### 构建前端
 

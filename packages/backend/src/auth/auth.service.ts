@@ -26,13 +26,17 @@ export class AuthService {
         OR: [
           { username: { equals: dto.username, mode: 'insensitive' } },
           { email: { equals: dto.email, mode: 'insensitive' } },
+          ...(dto.requestedRole === 'STUDENT' && dto.studentId ? [{ studentId: dto.studentId }] : []),
         ],
       },
-      select: { username: true, email: true },
+      select: { username: true, email: true, studentId: true },
     });
     if (existing) {
       if (existing.username.toLowerCase() === dto.username.toLowerCase()) {
         throw new ConflictException('该用户名已被使用');
+      }
+      if (dto.studentId && existing.studentId === dto.studentId) {
+        throw new ConflictException('该学号已绑定其他账号');
       }
       throw new ConflictException('该邮箱已注册');
     }
@@ -47,6 +51,7 @@ export class AuthService {
         nickname: dto.nickname,
         school: dto.school,
         college: dto.college,
+        studentId: dto.requestedRole === 'STUDENT' ? dto.studentId : undefined,
         role: 'STUDENT',
         requestedRole: dto.requestedRole,
         teacherApplicationStatus: teacherRequested ? 'PENDING' : 'NOT_REQUIRED',

@@ -158,6 +158,47 @@ export class CommunityService {
     return post;
   }
 
+  async updatePost(postId: string, viewer: Viewer, body: any) {
+    const post = await this.prisma.communityPost.findFirst({ where: { id: postId, status: 'PUBLISHED' } });
+    if (!post) throw new NotFoundException('帖子不存在或已隐藏');
+    if (post.authorId !== viewer.id && !this.isModerator(viewer)) {
+      throw new ForbiddenException('仅作者、教师或管理员可以编辑该内容');
+    }
+
+    const data: any = {};
+    if (body.title !== undefined) data.title = this.cleanText(body.title, 120, false) || null;
+    if (body.content !== undefined) data.content = this.cleanText(body.content, 12000, true);
+    if (body.category !== undefined) data.category = this.cleanText(body.category, 40, false) || null;
+    if (!Object.keys(data).length) throw new BadRequestException('没有可更新的内容');
+    const updated = await this.prisma.communityPost.update({
+      where: { id: postId },
+      data,
+      include: {
+        author: { select: { id: true, username: true, nickname: true, role: true } },
+        problem: { select: { id: true, title: true } },
+        replies: {
+          where: { status: 'PUBLISHED' },
+          include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+        _count: { select: { replies: { where: { status: 'PUBLISHED' } }, reactions: true } },
+      },
+    });
+    await this.audit(viewer.id, 'COMMUNITY_POST_UPDATE', 'CommunityPost', postId, { fields: Object.keys(data) });
+    return { ...updated, contentLocked: false, reactionCount: updated._count.reactions, replyCount: updated._count.replies };
+  }
+
+  async deletePost(postId: string, viewer: Viewer) {
+    const post = await this.prisma.communityPost.findFirst({ where: { id: postId, status: 'PUBLISHED' } });
+    if (!post) throw new NotFoundException('帖子不存在或已隐藏');
+    if (post.authorId !== viewer.id && !this.isModerator(viewer)) {
+      throw new ForbiddenException('仅作者、教师或管理员可以删除该内容');
+    }
+    await this.prisma.communityPost.update({ where: { id: postId }, data: { status: 'HIDDEN' } });
+    await this.audit(viewer.id, 'COMMUNITY_POST_DELETE', 'CommunityPost', postId, { type: post.type });
+    return { deleted: true };
+  }
+
   async createReply(postId: string, viewer: Viewer, rawContent: string) {
     const content = this.cleanText(rawContent, 4000, true);
     const post = await this.prisma.communityPost.findFirst({ where: { id: postId, status: 'PUBLISHED' } });
@@ -175,6 +216,33 @@ export class CommunityService {
     }
     await this.notifyMentions(content, viewer, `/community?post=${postId}`, [post.authorId]);
     return reply;
+  }
+
+  async updateReply(replyId: string, viewer: Viewer, rawContent: string) {
+    const reply = await this.prisma.communityReply.findFirst({ where: { id: replyId, status: 'PUBLISHED' } });
+    if (!reply) throw new NotFoundException('回复不存在或已隐藏');
+    if (reply.authorId !== viewer.id && !this.isModerator(viewer)) {
+      throw new ForbiddenException('仅作者、教师或管理员可以编辑该回复');
+    }
+    const content = this.cleanText(rawContent, 4000, true);
+    const updated = await this.prisma.communityReply.update({
+      where: { id: replyId },
+      data: { content },
+      include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
+    });
+    await this.audit(viewer.id, 'COMMUNITY_REPLY_UPDATE', 'CommunityReply', replyId, { postId: reply.postId });
+    return updated;
+  }
+
+  async deleteReply(replyId: string, viewer: Viewer) {
+    const reply = await this.prisma.communityReply.findFirst({ where: { id: replyId, status: 'PUBLISHED' } });
+    if (!reply) throw new NotFoundException('回复不存在或已隐藏');
+    if (reply.authorId !== viewer.id && !this.isModerator(viewer)) {
+      throw new ForbiddenException('仅作者、教师或管理员可以删除该回复');
+    }
+    await this.prisma.communityReply.update({ where: { id: replyId }, data: { status: 'HIDDEN' } });
+    await this.audit(viewer.id, 'COMMUNITY_REPLY_DELETE', 'CommunityReply', replyId, { postId: reply.postId });
+    return { deleted: true };
   }
 
   async toggleReaction(postId: string, viewer: Viewer) {
@@ -287,6 +355,38 @@ export class CommunityService {
     });
     await this.audit(viewer.id, 'ANNOUNCEMENT_CREATE', 'Announcement', announcement.id, { audience });
     return announcement;
+  }
+
+  async updateAnnouncement(announcementId: string, viewer: Viewer, body: any) {
+    const announcement = await this.prisma.announcement.findFirst({ where: { id: announcementId, status: 'PUBLISHED' } });
+    if (!announcement) throw new NotFoundException('公告不存在或已删除');
+    if (announcement.authorId !== viewer.id && !this.isModerator(viewer)) {
+      throw new ForbiddenException('仅公告发布者、教师或管理员可以编辑公告');
+    }
+    const data: any = {};
+    if (body.title !== undefined) data.title = this.cleanText(body.title, 120, true);
+    if (body.content !== undefined) data.content = this.cleanText(body.content, 6000, true);
+    if (body.isPinned !== undefined) data.isPinned = Boolean(body.isPinned);
+    if (body.expiresAt !== undefined) data.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+    if (!Object.keys(data).length) throw new BadRequestException('没有可更新的公告内容');
+    const updated = await this.prisma.announcement.update({
+      where: { id: announcementId },
+      data,
+      include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
+    });
+    await this.audit(viewer.id, 'ANNOUNCEMENT_UPDATE', 'Announcement', announcementId, { fields: Object.keys(data) });
+    return updated;
+  }
+
+  async deleteAnnouncement(announcementId: string, viewer: Viewer) {
+    const announcement = await this.prisma.announcement.findFirst({ where: { id: announcementId, status: 'PUBLISHED' } });
+    if (!announcement) throw new NotFoundException('公告不存在或已删除');
+    if (announcement.authorId !== viewer.id && !this.isModerator(viewer)) {
+      throw new ForbiddenException('仅公告发布者、教师或管理员可以删除公告');
+    }
+    await this.prisma.announcement.update({ where: { id: announcementId }, data: { status: 'HIDDEN' } });
+    await this.audit(viewer.id, 'ANNOUNCEMENT_DELETE', 'Announcement', announcementId, { audience: announcement.audience });
+    return { deleted: true };
   }
 
   async getModerationOverview(viewer: Viewer) {

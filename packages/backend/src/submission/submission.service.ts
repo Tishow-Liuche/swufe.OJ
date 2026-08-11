@@ -18,12 +18,22 @@ export class SubmissionService {
     @InjectQueue('judge') private judgeQueue: Queue,
   ) {}
 
-  async submit(userId: string, dto: { problemId: string; language: string; sourceCode: string }) {
+  async submit(
+    userId: string,
+    dto: { problemId: string; language: string; sourceCode: string },
+    options: { allowContestReserved?: boolean; authorPreviewActor?: { id: string; role?: string } } = {},
+  ) {
     const problem = await this.prisma.problem.findUnique({
       where: { id: dto.problemId },
       include: { versions: { where: { isCurrent: true } }, sourceInfo: true },
     });
-    if (!problem || problem.status !== 'PUBLISHED')
+    const canPreviewReserved = problem?.status === 'CONTEST_RESERVED'
+      && !!options.authorPreviewActor
+      && (options.authorPreviewActor.role === 'ADMIN' || problem.createdById === options.authorPreviewActor.id);
+    const canSubmit = problem?.status === 'PUBLISHED'
+      || (options.allowContestReserved && problem?.status === 'CONTEST_RESERVED')
+      || canPreviewReserved;
+    if (!problem || !canSubmit)
       throw new NotFoundException('Problem not found or not published');
 
     // Codeforces remote judge path — no local test data needed

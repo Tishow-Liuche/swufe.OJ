@@ -63,6 +63,12 @@ export class ProblemController {
     return this.problem.findAll(query);
   }
 
+  /** 题库聚合元数据（公开） */
+  @Get('metadata')
+  getMetadata() {
+    return this.problem.getMetadata();
+  }
+
   /** 历史录题列表 */
   @Get('mine/created')
   @UseGuards(AuthGuard('jwt'), RolesGuard)

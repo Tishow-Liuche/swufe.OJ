@@ -15,6 +15,14 @@ export class SubmissionController {
     return this.submission.submit(req.user.id, dto);
   }
 
+  /** 比赛预备题验题提交：仅题目作者或管理员可用，不暴露到公开题库 */
+  @Post('preview')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('TEACHER', 'ADMIN')
+  submitPreview(@Req() req: any, @Body() dto: { problemId: string; language: string; sourceCode: string }) {
+    return this.submission.submit(req.user.id, dto, { authorPreviewActor: req.user });
+  }
+
   /** 提交列表（需登录，学生只能看自己，教师/管理员看全部） */
   @Get()
   @UseGuards(AuthGuard('jwt'))

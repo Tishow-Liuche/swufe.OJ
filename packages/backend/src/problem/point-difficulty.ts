@@ -56,8 +56,9 @@ const LEGACY_DIFFICULTY_MAP: Record<string, PointDifficulty> = {
   UNRATED: 'POINT_1',
 };
 
-export function normalizePointDifficulty(value?: string | number | null): PointDifficulty {
+export function normalizePointDifficulty(value?: string | number | null): PointDifficulty | null {
   const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized || normalized === 'UNRATED' || normalized === 'NONE' || normalized === 'NULL') return null;
   if (POINT_VALUES.has(normalized as PointDifficulty)) return normalized as PointDifficulty;
   return LEGACY_DIFFICULTY_MAP[normalized] || 'POINT_1';
 }

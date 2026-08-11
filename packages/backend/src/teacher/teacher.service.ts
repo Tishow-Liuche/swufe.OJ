@@ -44,9 +44,11 @@ export class TeacherService {
 
     if (typeof students[0] === 'string') {
       let added = 0;
+      const approvedUserIds: string[] = [];
       const notFound: string[] = [];
       const alreadyInClass: string[] = [];
       const duplicatedInput: string[] = [];
+      const invalidRole: string[] = [];
       const seen = new Set<string>();
 
       for (const rawIdentifier of students as string[]) {
@@ -66,10 +68,14 @@ export class TeacherService {
               { email: { equals: identifier, mode: 'insensitive' } },
             ],
           },
-          select: { id: true, username: true, email: true },
+          select: { id: true, username: true, email: true, role: true },
         });
         if (!user) {
           notFound.push(identifier);
+          continue;
+        }
+        if (user.role !== 'STUDENT') {
+          invalidRole.push(identifier);
           continue;
         }
         const existing = await this.prisma.classMember.findUnique({
@@ -84,24 +90,29 @@ export class TeacherService {
             where: { classId_userId: { classId, userId: user.id } },
             data: { status: 'APPROVED', reviewNote: null, reviewedAt: new Date() },
           });
+          approvedUserIds.push(user.id);
           added++;
           continue;
         }
         await this.prisma.classMember.create({ data: { classId, userId: user.id } });
+        approvedUserIds.push(user.id);
         added++;
       }
+      await this.enrollStudentsInExistingAssignments(classId, approvedUserIds);
       return {
         added,
-        skipped: notFound.length + alreadyInClass.length + duplicatedInput.length,
+        skipped: notFound.length + alreadyInClass.length + duplicatedInput.length + invalidRole.length,
         notFound,
         alreadyInClass,
         duplicatedInput,
+        invalidRole,
       };
     }
 
     let added = 0;
     let updated = 0;
     let skipped = 0;
+    const approvedUserIds: string[] = [];
     const errors: Array<{ row: number; studentId: string; reason: string }> = [];
     const seen = new Set<string>();
 
@@ -153,16 +164,22 @@ export class TeacherService {
           });
 
       const member = await this.prisma.classMember.findUnique({ where: { classId_userId: { classId, userId: user.id } } });
-      if (!member) { await this.prisma.classMember.create({ data: { classId, userId: user.id } }); added++; }
+      if (!member) {
+        await this.prisma.classMember.create({ data: { classId, userId: user.id } });
+        approvedUserIds.push(user.id);
+        added++;
+      }
       else {
         await this.prisma.classMember.update({
           where: { classId_userId: { classId, userId: user.id } },
           data: { status: 'APPROVED', reviewNote: null, reviewedAt: new Date() },
         });
+        approvedUserIds.push(user.id);
         updated++;
       }
     }
 
+    await this.enrollStudentsInExistingAssignments(classId, approvedUserIds);
     return { added, updated, skipped, errors };
   }
   async getClassMembers(classId: string, teacherId: string) {
@@ -461,16 +478,35 @@ export class TeacherService {
     });
   }
 
-  async createContest(teacherId: string, data: {
+  async createContest(actor: string | { id: string; role?: string }, data: {
     title: string; description?: string; mode?: string;
     startTime: string; endTime: string; problemIds?: string[];
     visibility?: string; registerStart?: string; registerEnd?: string;
     freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
-    penaltyTime?: number; password?: string;
+    penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
   }) {
+    const teacherId = typeof actor === 'string' ? actor : actor.id;
+    const isAdmin = typeof actor !== 'string' && actor.role === 'ADMIN';
     if (new Date(data.endTime) <= new Date(data.startTime)) {
       throw new ForbiddenException('比赛结束时间必须晚于开始时间');
     }
+    const problemIds = [...new Set((data.problemIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    if (problemIds.length) {
+      const reservedProblemWhere: any = {
+        id: { in: problemIds },
+        source: 'LOCAL',
+        status: 'CONTEST_RESERVED',
+      };
+      if (!isAdmin) reservedProblemWhere.createdById = teacherId;
+      const reservedProblems = await this.prisma.problem.findMany({
+        where: reservedProblemWhere,
+        select: { id: true },
+      });
+      if (reservedProblems.length !== problemIds.length) {
+        throw new BadRequestException('比赛只能选择自己录入的比赛预备题库题目');
+      }
+    }
+
     const contest = await this.prisma.contest.create({
       data: {
         title: data.title,
@@ -486,13 +522,15 @@ export class TeacherService {
         allowUpsolve: data.allowUpsolve ?? true,
         maxSubmissions: data.maxSubmissions || null,
         penaltyTime: data.penaltyTime || 20,
+        teamMode: data.teamMode ?? false,
+        isRated: data.isRated ?? false,
         createdBy: teacherId,
       },
     });
 
-    if (data.problemIds?.length) {
+    if (problemIds.length) {
       await this.prisma.contestProblem.createMany({
-        data: data.problemIds.map((pid, i) => ({
+        data: problemIds.map((pid, i) => ({
           contestId: contest.id, problemId: pid, order: i + 1, score: 100,
         })),
       });
@@ -511,5 +549,23 @@ export class TeacherService {
   private generateJoinCode() {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     return Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join('');
+  }
+
+  private async enrollStudentsInExistingAssignments(classId: string, userIds: string[]) {
+    const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+    if (!uniqueUserIds.length) return;
+
+    const assignments = await this.prisma.assignment.findMany({
+      where: { classId },
+      select: { id: true },
+    });
+    if (!Array.isArray(assignments) || !assignments.length) return;
+
+    await this.prisma.assignmentStudent.createMany({
+      data: assignments.flatMap((assignment) =>
+        uniqueUserIds.map((userId) => ({ assignmentId: assignment.id, userId })),
+      ),
+      skipDuplicates: true,
+    });
   }
 }

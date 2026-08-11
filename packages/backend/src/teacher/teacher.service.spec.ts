@@ -38,9 +38,16 @@ describe('TeacherService', () => {
       },
       classMember: {
         create: jest.fn(),
+        findMany: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+      },
+      contest: {
+        create: jest.fn(),
+      },
+      contestProblem: {
+        createMany: jest.fn(),
       },
     };
     service = new TeacherService(prisma);
@@ -85,8 +92,8 @@ describe('TeacherService', () => {
   it('imports students by username or email and reports skipped identifiers', async () => {
     prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
     prisma.user.findFirst
-      .mockResolvedValueOnce({ id: 'student-1', username: 'alice', email: 'alice@example.com' })
-      .mockResolvedValueOnce({ id: 'student-2', username: 'bob', email: 'bob@example.com' })
+      .mockResolvedValueOnce({ id: 'student-1', username: 'alice', email: 'alice@example.com', role: 'STUDENT' })
+      .mockResolvedValueOnce({ id: 'student-2', username: 'bob', email: 'bob@example.com', role: 'STUDENT' })
       .mockResolvedValueOnce(null);
     prisma.classMember.findUnique
       .mockResolvedValueOnce(null)
@@ -106,7 +113,7 @@ describe('TeacherService', () => {
           { email: { equals: 'alice', mode: 'insensitive' } },
         ],
       },
-      select: { id: true, username: true, email: true },
+      select: { id: true, username: true, email: true, role: true },
     });
     expect(prisma.classMember.create).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
@@ -115,6 +122,49 @@ describe('TeacherService', () => {
       notFound: ['missing_user'],
       alreadyInClass: ['bob@example.com'],
       duplicatedInput: ['alice'],
+      invalidRole: [],
+    });
+  });
+
+  it('skips non-student accounts when importing by username or email', async () => {
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'teacher-user',
+      username: 'teacher-user',
+      email: 'teacher@example.com',
+      role: 'TEACHER',
+    });
+
+    const result = await service.importStudents('class-1', 'teacher-1', ['teacher-user']);
+
+    expect(prisma.classMember.create).not.toHaveBeenCalled();
+    expect(prisma.classMember.update).not.toHaveBeenCalled();
+    expect(prisma.assignmentStudent.createMany).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      added: 0,
+      skipped: 1,
+      notFound: [],
+      alreadyInClass: [],
+      duplicatedInput: [],
+      invalidRole: ['teacher-user'],
+    });
+  });
+
+  it('enrolls newly imported approved students into existing assignments', async () => {
+    prisma.class.findUnique.mockResolvedValue({ id: 'class-1', teacherId: 'teacher-1' });
+    prisma.user.findFirst.mockResolvedValue({ id: 'student-1', username: 'alice', email: 'alice@example.com', role: 'STUDENT' });
+    prisma.classMember.findUnique.mockResolvedValue(null);
+    prisma.assignment.findMany.mockResolvedValue([{ id: 'assignment-1' }, { id: 'assignment-2' }]);
+
+    const result = await service.importStudents('class-1', 'teacher-1', ['alice']);
+
+    expect(result.added).toBe(1);
+    expect(prisma.assignmentStudent.createMany).toHaveBeenCalledWith({
+      data: [
+        { assignmentId: 'assignment-1', userId: 'student-1' },
+        { assignmentId: 'assignment-2', userId: 'student-1' },
+      ],
+      skipDuplicates: true,
     });
   });
 
@@ -315,5 +365,79 @@ describe('TeacherService', () => {
       status: 'NOT_SUBMITTED',
       attempts: 0,
     });
+  });
+
+  it('creates contests only with teacher-owned contest reserved local problems', async () => {
+    prisma.problem.findMany.mockResolvedValue([
+      { id: 'reserved-1' },
+      { id: 'reserved-2' },
+    ]);
+    prisma.contest.create.mockResolvedValue({ id: 'contest-1', title: '校内赛' });
+
+    const result = await service.createContest('teacher-1', {
+      title: '校内赛',
+      startTime: '2026-07-22T10:00:00.000Z',
+      endTime: '2026-07-22T12:00:00.000Z',
+      problemIds: ['reserved-1', 'reserved-2', 'reserved-1'],
+    });
+
+    expect(prisma.problem.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['reserved-1', 'reserved-2'] },
+        source: 'LOCAL',
+        status: 'CONTEST_RESERVED',
+        createdById: 'teacher-1',
+      },
+      select: { id: true },
+    });
+    expect(prisma.contestProblem.createMany).toHaveBeenCalledWith({
+      data: [
+        { contestId: 'contest-1', problemId: 'reserved-1', order: 1, score: 100 },
+        { contestId: 'contest-1', problemId: 'reserved-2', order: 2, score: 100 },
+      ],
+    });
+    expect(result).toEqual({ id: 'contest-1', title: '校内赛' });
+  });
+
+  it('rejects contest creation when selected problems are not from the contest reserved bank', async () => {
+    prisma.problem.findMany.mockResolvedValue([{ id: 'reserved-1' }]);
+
+    await expect(service.createContest('teacher-1', {
+      title: '校内赛',
+      startTime: '2026-07-22T10:00:00.000Z',
+      endTime: '2026-07-22T12:00:00.000Z',
+      problemIds: ['reserved-1', 'published-1'],
+    })).rejects.toThrow('比赛只能选择自己录入的比赛预备题库题目');
+
+    expect(prisma.contest.create).not.toHaveBeenCalled();
+    expect(prisma.contestProblem.createMany).not.toHaveBeenCalled();
+  });
+
+  it('allows admins to create contests with any local contest reserved problems, including legacy unowned ones', async () => {
+    prisma.problem.findMany.mockResolvedValue([
+      { id: 'reserved-admin-owned' },
+      { id: 'reserved-legacy' },
+    ]);
+    prisma.contest.create.mockResolvedValue({ id: 'contest-admin', title: 'Admin contest' });
+
+    const result = await service.createContest({ id: 'admin-1', role: 'ADMIN' } as any, {
+      title: 'Admin contest',
+      startTime: '2026-07-22T10:00:00.000Z',
+      endTime: '2026-07-22T12:00:00.000Z',
+      problemIds: ['reserved-admin-owned', 'reserved-legacy'],
+    });
+
+    expect(prisma.problem.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['reserved-admin-owned', 'reserved-legacy'] },
+        source: 'LOCAL',
+        status: 'CONTEST_RESERVED',
+      },
+      select: { id: true },
+    });
+    expect(prisma.contest.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ createdBy: 'admin-1' }),
+    }));
+    expect(result).toEqual({ id: 'contest-admin', title: 'Admin contest' });
   });
 });

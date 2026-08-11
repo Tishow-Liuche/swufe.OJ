@@ -88,6 +88,10 @@ function openProblem(id: string) {
   void router.push(`/problems/${id}`);
 }
 
+function verifyProblem(id: string) {
+  void router.push({ path: `/problems/${id}`, query: { preview: '1' } });
+}
+
 async function releaseProblem(problem: AuthoredProblem) {
   if (!confirm(`确认将“${problem.title}”加入正式题库吗？加入后学生即可在公开题库中看到并提交。`)) return;
   releasingId.value = problem.id;
@@ -153,6 +157,7 @@ onMounted(loadProblems);
             <button v-if="problem.status === 'CONTEST_RESERVED'" class="release" :disabled="releasingId === problem.id" @click="releaseProblem(problem)">
               {{ releasingId === problem.id ? '加入中...' : '加入题库' }}
             </button>
+            <button v-if="problem.status === 'CONTEST_RESERVED'" class="verify" @click="verifyProblem(problem.id)">验题</button>
             <button v-if="problem.status === 'PUBLISHED'" class="ghost" @click="openProblem(problem.id)">查看</button>
           </div>
         </div>
@@ -180,7 +185,7 @@ onMounted(loadProblems);
 .toolbar { display: grid; grid-template-columns: 1fr 160px auto; gap: 10px; margin-bottom: 16px; }
 .toolbar input, .toolbar select { border: 1px solid #dbe1ea; border-radius: 8px; padding: 10px 12px; background: #fff; }
 .panel { background: #fff; border-radius: 14px; box-shadow: 0 1px 4px rgba(15,23,42,.08); overflow: hidden; }
-.table-head, .table-row { display: grid; grid-template-columns: 1fr 90px 80px 80px 70px 150px; gap: 12px; align-items: center; padding: 14px 18px; }
+.table-head, .table-row { display: grid; grid-template-columns: 1fr 90px 80px 80px 70px 210px; gap: 12px; align-items: center; padding: 14px 18px; }
 .table-head { background: #f7f9fc; color: #64748b; font-size: 13px; font-weight: 800; }
 .table-row { border-top: 1px solid #edf0f4; }
 .title-cell strong { display: block; color: #162033; }
@@ -195,6 +200,7 @@ onMounted(loadProblems);
 .actions button { background: #2563eb; color: #fff; padding: 7px 12px; }
 .actions .ghost { background: #f1f5f9; color: #334155; }
 .actions .release { background: #16a34a; color: #fff; }
+.actions .verify { background: #4f46e5; color: #fff; }
 .empty, .error { padding: 36px; text-align: center; color: #64748b; }
 .error { color: #c62828; }
 .pager { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 16px; color: #64748b; }

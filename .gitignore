@@ -49,3 +49,4 @@ temp/
 # Large datasets (downloaded dynamically)
 *.ndjson.gz
 *.gzip
+packages/backend/prisma/problem-bank.snapshot.json.gz

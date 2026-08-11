@@ -23,7 +23,7 @@ export class UserController {
   @UseGuards(AuthGuard('jwt'))
   updateProfile(
     @Req() req: any,
-    @Body() data: { nickname?: string | null; avatar?: string | null; email?: string; phone?: string | null },
+    @Body() data: { nickname?: string | null; avatar?: string | null; email?: string; phone?: string | null; studentId?: string | null },
   ) {
     return this.userService.updateProfile(req.user.id, data);
   }
@@ -84,6 +84,12 @@ export class UserController {
   @UseGuards(AuthGuard('jwt'))
   listMyClasses(@Req() req: any) {
     return this.userService.listMyClasses(req.user.id);
+  }
+
+  @Get('assignments')
+  @UseGuards(AuthGuard('jwt'))
+  listMyAssignments(@Req() req: any) {
+    return this.userService.listMyAssignments(req.user.id);
   }
 
   @Post('classes/join')

@@ -74,7 +74,7 @@ const settingsError = ref('');
 const avatarInput = ref<HTMLInputElement | null>(null);
 const avatarUploading = ref(false);
 const avatarError = ref('');
-const profileForm = reactive({ nickname: '', email: '', phone: '' });
+const profileForm = reactive({ nickname: '', email: '', phone: '', studentId: '' });
 const accountForm = reactive({ codeforcesHandle: '', luoguHandle: '' });
 const cfSyncing = ref(false);
 const passwordForm = reactive({ currentPassword: '', password: '', confirmPassword: '' });
@@ -95,6 +95,8 @@ const awardForm = reactive({
 const overview = computed(() => stats.value?.overview || {});
 const displayName = computed(() => profile.value?.nickname || profile.value?.username || 'OJ 用户');
 const avatarText = computed(() => displayName.value.slice(0, 1).toUpperCase());
+const isStudentAccount = computed(() => profile.value?.role === 'STUDENT' || profile.value?.requestedRole === 'STUDENT');
+const studentIdDisplay = computed(() => profile.value?.studentId || profileForm.studentId || '未绑定学号');
 const maxDifficultyCount = computed(() => Math.max(...(stats.value?.difficultyDist || []).map((item) => item.count), 1));
 const solvedRate = computed(() => {
   const tried = Number(overview.value.triedCount || 0);
@@ -132,6 +134,7 @@ function fillSettings(data: any) {
   profileForm.nickname = p.nickname || '';
   profileForm.email = p.email || '';
   profileForm.phone = p.phone || '';
+  profileForm.studentId = p.studentId || '';
   accountForm.codeforcesHandle = data.externalAccounts?.codeforcesHandle || '';
   accountForm.luoguHandle = data.externalAccounts?.luoguHandle || '';
   awards.value = data.awards || [];
@@ -154,9 +157,22 @@ async function loadSettings() {
 
 async function saveProfile() {
   settingsError.value = '';
+  if (isStudentAccount.value && profileForm.studentId && !/^\d{8}$/.test(profileForm.studentId)) {
+    settingsError.value = '学号必须为 8 位数字';
+    return;
+  }
   try {
-    const { data } = await api.patch('/api/user/profile', profileForm);
+    const payload: Record<string, string> = {
+      nickname: profileForm.nickname,
+      email: profileForm.email,
+      phone: profileForm.phone,
+    };
+    if (isStudentAccount.value && profileForm.studentId.trim()) {
+      payload.studentId = profileForm.studentId.trim();
+    }
+    const { data } = await api.patch('/api/user/profile', payload);
     profile.value = { ...profile.value, ...data };
+    await auth.fetchProfile();
   } catch (e: any) {
     settingsError.value = e.response?.data?.message || '保存基础资料失败';
   }
@@ -488,6 +504,7 @@ void [
           <p class="username">@{{ profile.username }}</p>
           <div class="identity-row">
             <span class="role-badge" :class="profile.role?.toLowerCase()"><ShieldCheck :size="14" />{{ roleLabel(profile.role) }}</span>
+            <span v-if="isStudentAccount" class="student-id-pill" :class="{ missing: !profile.studentId && !profileForm.studentId }"><UserRound :size="14" />学号：{{ studentIdDisplay }}</span>
             <span v-if="profile.email"><Mail :size="14" />{{ profile.email }}</span>
             <span v-if="profile.phone"><Phone :size="14" />{{ profile.phone }}</span>
             <span v-if="profile.createdAt"><CalendarDays :size="14" />加入于 {{ new Date(profile.createdAt).toLocaleDateString('zh-CN') }}</span>
@@ -604,6 +621,7 @@ void [
         <article class="profile-panel">
           <div class="panel-title"><h2>基础资料</h2><UserRound :size="18" /></div>
           <label>昵称<input v-model="profileForm.nickname" placeholder="设置展示昵称" /></label>
+          <label v-if="isStudentAccount">学号<input v-model="profileForm.studentId" inputmode="numeric" maxlength="8" placeholder="绑定 8 位数字学号" /></label>
           <label>邮箱<input v-model="profileForm.email" type="email" placeholder="绑定邮箱" /></label>
           <label>电话<input v-model="profileForm.phone" placeholder="绑定电话号码" /></label>
           <button class="primary-btn" @click="saveProfile"><Save :size="16" />保存基础资料</button>
@@ -809,6 +827,8 @@ void [
 .role-badge.admin { color: #b5222b; background: #fff0f0; }
 .role-badge.teacher { color: #1d63b7; background: #eef6ff; }
 .role-badge.student { color: #16834f; background: #eefaf2; }
+.student-id-pill { color: #7c3aed; background: #f5f0ff; border-color: rgba(124, 58, 237, .2); }
+.student-id-pill.missing { color: #b45309; background: #fff7ed; border-color: rgba(245, 158, 11, .28); }
 
 .hero-avatar {
   display: grid;

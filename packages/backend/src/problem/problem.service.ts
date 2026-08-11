@@ -129,7 +129,7 @@ export class ProblemService {
   async uploadImage(file: Express.Multer.File) {
     const s3Path = await this.fileUpload.uploadImage(file);
     const url = await this.fileUpload.getPresignedUrl(s3Path);
-    return { url: `s3://${s3Path}`, previewUrl: url };
+    return { url: this.publicObjectUrl(s3Path), previewUrl: url, s3Path };
   }
 
   async uploadChecker(problemId: string, file: Express.Multer.File, type: string, language: string, actor: ProblemActor) {
@@ -210,6 +210,40 @@ export class ProblemService {
       this.prisma.problem.count({ where }),
     ]);
     return { items, total, page: currentPage, pageSize: currentPageSize };
+  }
+
+  async getMetadata() {
+    const publishedWhere = { status: 'PUBLISHED' };
+    const [total, localCount, tagGroups, difficultyGroups, sourceGroups] = await Promise.all([
+      this.prisma.problem.count({ where: publishedWhere }),
+      this.prisma.problem.count({ where: { ...publishedWhere, source: 'LOCAL' } }),
+      this.prisma.problemTag.groupBy({
+        by: ['name'],
+        where: { problem: publishedWhere },
+        _count: { name: true },
+        orderBy: [{ _count: { name: 'desc' } }, { name: 'asc' }],
+      }),
+      this.prisma.problem.groupBy({
+        by: ['difficulty'],
+        where: publishedWhere,
+        _count: { _all: true },
+      }),
+      this.prisma.problemSource.groupBy({
+        by: ['platform'],
+        where: { problem: publishedWhere },
+        _count: { _all: true },
+      }),
+    ]);
+
+    return {
+      total,
+      tags: tagGroups.map((item) => ({ name: item.name, count: item._count.name })),
+      difficulties: difficultyGroups.map((item) => ({ difficulty: item.difficulty, count: item._count._all })),
+      sources: [
+        ...(localCount > 0 ? [{ source: 'LOCAL', count: localCount }] : []),
+        ...sourceGroups.map((item) => ({ source: item.platform, count: item._count._all })),
+      ],
+    };
   }
 
   async findAuthored(query: any, viewer: ProblemActor) {
@@ -516,6 +550,12 @@ export class ProblemService {
     const value = String(status || 'DRAFT').toUpperCase();
     if (!PROBLEM_STATUSES.has(value)) throw new BadRequestException('Invalid problem status');
     return value;
+  }
+
+  private publicObjectUrl(s3Path: string) {
+    const match = s3Path.match(/^s3:\/\/([^/]+)\/(.+)$/);
+    if (!match) return s3Path;
+    return `/${match[1]}/${match[2]}`;
   }
 
   private normalizeJudgeMode(mode?: string): JudgeMode {

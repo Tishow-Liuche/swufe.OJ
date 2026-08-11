@@ -1,0 +1,76 @@
+{
+  "chunkSize": 5242880,
+  "assets": [
+    {
+      "output": "luogu_full.ndjson.gz",
+      "sourceName": "luogu_full.ndjson.gz",
+      "size": 26611993,
+      "sha256": "f66df82b0b52c24264fff548507d4cdea8c2e4490cb08ec690393c27a8af4db5",
+      "parts": [
+        {
+          "file": "luogu_full.ndjson.gz.part001",
+          "size": 5242880,
+          "sha256": "9144555f5956c59383f1f1278ed7ced751e21d7464f8c56ddff8e9c6d9042d3d"
+        },
+        {
+          "file": "luogu_full.ndjson.gz.part002",
+          "size": 5242880,
+          "sha256": "ef9bfacb50fa615a5a7c6543b6cfaba69df390229b0dae9d2daf0a887ac8908d"
+        },
+        {
+          "file": "luogu_full.ndjson.gz.part003",
+          "size": 5242880,
+          "sha256": "7fcb9f4f77a44a38216fdf80ece273eaba98d79a41c0f0181e1b9d0b3e8aab1e"
+        },
+        {
+          "file": "luogu_full.ndjson.gz.part004",
+          "size": 5242880,
+          "sha256": "733cebf9d44c543d40c2191dda27e837e075827c42607e38dd46bf3218e0b3bf"
+        },
+        {
+          "file": "luogu_full.ndjson.gz.part005",
+          "size": 5242880,
+          "sha256": "77b1662949fbcf99331543f6cbac301669e102a4c0796544737927297ea58676"
+        },
+        {
+          "file": "luogu_full.ndjson.gz.part006",
+          "size": 397593,
+          "sha256": "0afdd98d1821e0b5790e050e87691f5d16fdb1b86f4c85386536adcd6fa13816"
+        }
+      ]
+    },
+    {
+      "output": "packages/backend/prisma/problem-bank.snapshot.json.gz",
+      "sourceName": "problem-bank.snapshot.json.gz",
+      "size": 21411487,
+      "sha256": "c96e2265c029c6863b2b072a45a8c4e4d5aea3976b6322d558c25096708eb65b",
+      "parts": [
+        {
+          "file": "problem-bank.snapshot.json.gz.part001",
+          "size": 5242880,
+          "sha256": "c3b65ec0151eff1f5de943122e8c9ac07d97c3476d59e3f659fda54ff0e28fd6"
+        },
+        {
+          "file": "problem-bank.snapshot.json.gz.part002",
+          "size": 5242880,
+          "sha256": "91233f9f10a0970b13fb133ec420fa21a6a82f06777d6c2e0ab5e939b6de3cca"
+        },
+        {
+          "file": "problem-bank.snapshot.json.gz.part003",
+          "size": 5242880,
+          "sha256": "3429d6fbc4437cadbd8157c50ba41c54354b1888c0f76056dbd433911130a7b4"
+        },
+        {
+          "file": "problem-bank.snapshot.json.gz.part004",
+          "size": 5242880,
+          "sha256": "28fad12afc36d915e657d3008232c42f011b9bb19c08de153ae24ddc4d880563"
+        },
+        {
+          "file": "problem-bank.snapshot.json.gz.part005",
+          "size": 439967,
+          "sha256": "fd3bff2c85be86a63919a790d1303899285ecc4e6b8826382eca5bdf16e6e15c"
+        }
+      ]
+    }
+  ]
+}

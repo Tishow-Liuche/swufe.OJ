@@ -47,6 +47,7 @@ const registerForm = ref({
   customSchool: '',
   college: '',
   customCollege: '',
+  studentId: '',
   requestedRole: 'STUDENT' as RequestedRole,
   password: '',
   confirmPassword: '',
@@ -106,6 +107,7 @@ const canSubmit = computed(() => {
     /^[A-Za-z0-9_-]{3,20}$/.test(registerForm.value.username.trim())
     && registerForm.value.email.trim()
     && resolvedSchool.value.length >= 2
+    && (registerForm.value.requestedRole !== 'STUDENT' || /^\d{8}$/.test(registerForm.value.studentId.trim()))
     && (registerForm.value.requestedRole !== 'STUDENT' || resolvedCollege.value.length >= 2)
     && passwordScore.value === 3
     && registerForm.value.password === registerForm.value.confirmPassword,
@@ -153,6 +155,11 @@ async function submit() {
     }
   }
 
+  if (mode.value === 'register' && registerForm.value.requestedRole === 'STUDENT' && !/^\d{8}$/.test(registerForm.value.studentId.trim())) {
+    error.value = '学号必须为 8 位数字';
+    return;
+  }
+
   submitting.value = true;
   try {
     const payload = mode.value === 'register'
@@ -161,6 +168,7 @@ async function submit() {
           email: registerForm.value.email.trim(),
           password: registerForm.value.password,
           school: resolvedSchool.value,
+          studentId: registerForm.value.requestedRole === 'STUDENT' ? registerForm.value.studentId.trim() : undefined,
           college: registerForm.value.requestedRole === 'STUDENT' ? resolvedCollege.value : undefined,
           requestedRole: registerForm.value.requestedRole,
         }
@@ -359,6 +367,25 @@ async function submit() {
               <ShieldCheck :size="19" aria-hidden="true" />
               <span>注册后可正常训练；教师管理权限将在管理员审核通过后开通。</span>
             </div>
+
+            <label v-if="registerForm.requestedRole === 'STUDENT'" class="field-group" for="register-student-id">
+              <span class="field-label">学号</span>
+              <span class="input-shell" :class="{ invalid: registerForm.studentId && !/^\d{8}$/.test(registerForm.studentId.trim()) }">
+                <UserRound :size="18" aria-hidden="true" />
+                <input
+                  id="register-student-id"
+                  v-model="registerForm.studentId"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  maxlength="8"
+                  pattern="\d{8}"
+                  placeholder="8 位数字学号"
+                  required
+                />
+              </span>
+              <small class="college-help">学生账号必须绑定本人 8 位学号。</small>
+            </label>
 
             <div v-if="registerForm.requestedRole === 'STUDENT'" class="field-group">
               <span class="field-label">学院</span>

@@ -14,22 +14,27 @@ import { LuoguModule } from '../luogu/luogu.module';
 import { LearningModule } from '../learning/learning.module';
 import { QojModule } from '../qoj/qoj.module';
 
+export function createRedisConnectionOptions(c: ConfigService) {
+  const port = Number(c.getOrThrow<string>('REDIS_PORT'));
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error('REDIS_PORT must be a valid TCP port');
+  }
+  const password = c.get<string>('REDIS_PASSWORD');
+  return {
+    host: c.getOrThrow<string>('REDIS_HOST'),
+    port,
+    ...(password ? { password } : {}),
+  };
+}
+
 @Module({
   imports: [
     JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule, QojModule,
     BullModule.registerQueueAsync({
       name: 'judge', imports: [ConfigModule], inject: [ConfigService],
       useFactory: (c: ConfigService) => {
-        const port = Number(c.getOrThrow<string>('REDIS_PORT'));
-        if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-          throw new Error('REDIS_PORT must be a valid TCP port');
-        }
         return {
-          connection: {
-            host: c.getOrThrow<string>('REDIS_HOST'),
-            port,
-            password: c.getOrThrow<string>('REDIS_PASSWORD'),
-          },
+          connection: createRedisConnectionOptions(c),
           defaultJobOptions: { removeOnComplete: 100, removeOnFail: 200, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
         };
       },

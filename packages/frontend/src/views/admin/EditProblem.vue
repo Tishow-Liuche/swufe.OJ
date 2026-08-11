@@ -17,11 +17,13 @@ const error = ref('');
 const message = ref('');
 const testDataFile = ref<File | null>(null);
 const existingTestCount = ref(0);
+const descriptionImageInput = ref<HTMLInputElement | null>(null);
+const sampleImageInput = ref<HTMLInputElement | null>(null);
 
 const form = reactive({
   title: '',
   description: '',
-  difficulty: 'POINT_1',
+  difficulty: null as string | null,
   timeLimit: 1000,
   memoryLimit: 256,
   outputLimit: 64,
@@ -38,7 +40,10 @@ const form = reactive({
   spjSourceCode: '',
 });
 
-const difficulties = pointDifficultyOptions;
+const difficulties = [
+  { value: null, label: '未评定 / 不显示难度（比赛预备推荐）' },
+  ...pointDifficultyOptions,
+];
 
 const languages = [
   { value: 'python', label: 'Python 3' },
@@ -67,6 +72,39 @@ function renderMd(text: string) {
   return renderMarkdownWithMath(text);
 }
 
+async function uploadAuthoringImage(file: File) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const { data } = await api.post('/api/problems/images/upload', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data.url || data.previewUrl;
+}
+
+async function handleImageSelected(event: Event, target: 'description' | 'sample') {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const url = await uploadAuthoringImage(file);
+    const markdown = `\n\n![${file.name.replace(/\.[^.]+$/, '')}](${url})\n`;
+    if (target === 'description') insertImageIntoDescription(markdown);
+    else insertImageAfterSamples(markdown);
+  } catch (e: any) {
+    error.value = e.response?.data?.message || '图片上传失败';
+  } finally {
+    input.value = '';
+  }
+}
+
+function insertImageIntoDescription(markdown: string) {
+  form.description = `${form.description.replace(/\s*$/, '')}${markdown}`;
+}
+
+function insertImageAfterSamples(markdown: string) {
+  form.description = `${form.description.replace(/\s*$/, '')}\n\n## 样例图片\n${markdown}`;
+}
+
 async function loadProblem() {
   loading.value = true;
   error.value = '';
@@ -76,7 +114,7 @@ async function loadProblem() {
     const checker = version.checker || {};
     form.title = data.title || '';
     form.description = version.description || '';
-    form.difficulty = data.difficulty || 'POINT_1';
+    form.difficulty = data.difficulty || null;
     form.timeLimit = data.timeLimit || 1000;
     form.memoryLimit = data.memoryLimit || 256;
     form.outputLimit = data.outputLimit || 64;
@@ -151,6 +189,12 @@ async function saveProblem() {
   }
 }
 
+function openAnswerPreview() {
+  const path = `/problems/${problemId.value}`;
+  if (form.status === 'PUBLISHED') router.push(path);
+  else router.push({ path, query: { preview: '1' } });
+}
+
 onMounted(loadProblem);
 </script>
 
@@ -185,7 +229,7 @@ onMounted(loadProblem);
           </label>
           <label>难度
             <select v-model="form.difficulty">
-              <option v-for="d in difficulties" :key="d.value" :value="d.value">{{ d.label }}</option>
+              <option v-for="d in difficulties" :key="d.value || 'UNRATED'" :value="d.value">{{ d.label }}</option>
             </select>
           </label>
           <label>标签<input v-model="form.tags" placeholder="动态规划, 图论" /></label>
@@ -221,14 +265,24 @@ onMounted(loadProblem);
       <div class="card">
         <div class="card-header">
           <h3>题面 Markdown</h3>
-          <button class="btn-toggle" @click="preview = !preview">{{ preview ? '编辑' : '预览' }}</button>
+          <div class="editor-actions">
+            <input ref="descriptionImageInput" class="hidden-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" @change="handleImageSelected($event, 'description')" />
+            <button class="btn-toggle" type="button" @click="descriptionImageInput?.click()">插入图片</button>
+            <button class="btn-toggle" type="button" @click="preview = !preview">{{ preview ? '编辑' : '预览' }}</button>
+          </div>
         </div>
         <textarea v-if="!preview" v-model="form.description" rows="18" class="main-editor"></textarea>
         <div v-else class="preview-area" v-html="renderMd(form.description)"></div>
       </div>
 
       <div class="card">
-        <h3>格式、样例与提示</h3>
+        <div class="card-header">
+          <h3>格式、样例与提示</h3>
+          <div class="editor-actions">
+            <input ref="sampleImageInput" class="hidden-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" @change="handleImageSelected($event, 'sample')" />
+            <button class="btn-toggle" type="button" @click="sampleImageInput?.click()">在样例后插入图片</button>
+          </div>
+        </div>
         <div class="form-grid">
           <label class="full">输入格式<textarea v-model="form.inputFormat" rows="3"></textarea></label>
           <label class="full">输出格式<textarea v-model="form.outputFormat" rows="3"></textarea></label>
@@ -243,7 +297,7 @@ onMounted(loadProblem);
         <button class="btn-primary" :disabled="saving || Boolean(validationError)" @click="saveProblem">
           {{ saving ? '保存中...' : '保存修改' }}
         </button>
-        <button class="btn-secondary" @click="router.push(`/problems/${problemId}`)">查看题目</button>
+        <button class="btn-secondary" @click="openAnswerPreview">{{ form.status === 'PUBLISHED' ? '查看题目' : '进入验题' }}</button>
       </div>
       <p v-if="validationError" class="hint danger">{{ validationError }}</p>
       <div v-if="message" class="card success">{{ message }}</div>
@@ -255,6 +309,8 @@ onMounted(loadProblem);
 <style scoped>
 .edit-page { max-width: 1040px; margin: 0 auto; padding: 22px; }
 .page-header, .card-header, .actions { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+.editor-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.hidden-file { display: none; }
 .page-header { margin-bottom: 20px; }
 .page-header h2 { margin: 0 0 6px; }
 .page-header p, .hint { color: #7b8493; font-size: 13px; margin: 0 0 12px; }

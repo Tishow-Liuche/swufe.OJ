@@ -18,4 +18,15 @@ assert(difficultyUtil.includes("shortLabel: 'P1 · 焦点'"), '短标签必须�
 assert(difficultyUtil.includes("return '未评定难度'"), '未评级题目必须显示为“未评定难度”');
 assert(!difficultyUtil.includes("level: 'Point 1'"), '难度等级不能再使用 Point 1 长写');
 
+assert(problemList.includes("'/api/problems/metadata'"), 'Problem library metadata must use the full aggregate endpoint.');
+assert(!problemList.includes('params: { page: 1, pageSize: 100 }'), 'Problem library tag filters must not be built from a sampled first page.');
+assert(!problemList.includes('样本内标签'), 'Problem library tag filter label must not expose sampled tags.');
+assert(problemList.includes('tagSearchKeyword'), 'Problem library tag panel must provide an in-panel tag keyword search.');
+assert(problemList.includes('visibleTagCounts'), 'Problem library tag panel must render tags filtered by the keyword search.');
+assert(problemList.includes('没有匹配标签'), 'Problem library tag panel must show an empty state when no tags match.');
+
+assert(problemList.includes("value: 'UNRATED'"), 'Problem library difficulty filter must include an unrated option.');
+assert(problemList.includes("label: '未评定难度'"), 'Problem library difficulty filter must label unrated problems as 未评定难度.');
+assert(problemList.includes('item.difficulty === null'), 'Problem library difficulty distribution must count null difficulty as unrated.');
+
 console.log('Point difficulty UI checks passed.');
