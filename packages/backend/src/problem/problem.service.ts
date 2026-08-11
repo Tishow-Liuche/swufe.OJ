@@ -129,7 +129,7 @@ export class ProblemService {
   async uploadImage(file: Express.Multer.File) {
     const s3Path = await this.fileUpload.uploadImage(file);
     const url = await this.fileUpload.getPresignedUrl(s3Path);
-    return { url: `s3://${s3Path}`, previewUrl: url };
+    return { url: this.publicObjectUrl(s3Path), previewUrl: url, s3Path };
   }
 
   async uploadChecker(problemId: string, file: Express.Multer.File, type: string, language: string, actor: ProblemActor) {
@@ -550,6 +550,12 @@ export class ProblemService {
     const value = String(status || 'DRAFT').toUpperCase();
     if (!PROBLEM_STATUSES.has(value)) throw new BadRequestException('Invalid problem status');
     return value;
+  }
+
+  private publicObjectUrl(s3Path: string) {
+    const match = s3Path.match(/^s3:\/\/([^/]+)\/(.+)$/);
+    if (!match) return s3Path;
+    return `/${match[1]}/${match[2]}`;
   }
 
   private normalizeJudgeMode(mode?: string): JudgeMode {

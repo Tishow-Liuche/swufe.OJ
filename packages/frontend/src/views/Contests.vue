@@ -24,13 +24,14 @@ const selected = ref<Contest | null>(null);
 const standings = ref<any[]>([]);
 const standingsProblems = ref<any[]>([]);
 const contestSubmissions = ref<any[]>([]);
+const selectedSubmissionDetail = ref<any | null>(null);
 const filter = ref('ALL');
 const loading = ref(true);
 const actionLoading = ref(false);
 const error = ref('');
 const showCreator = ref(false);
 const problems = ref<any[]>([]);
-const form = ref({ title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] as string[] });
+const form = ref({ title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeMode: 'NO_FREEZE', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] as string[] });
 let standingTimer: ReturnType<typeof setInterval> | null = null;
 const sidebarCollapsed = useStorage('swufe-oj:contest-sidebar-collapsed', false);
 
@@ -139,6 +140,10 @@ function statusText(status: string) {
 function timeText(value?: string | null) {
   return value ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value)) : '—';
 }
+function memoryText(value?: number | null) {
+  return value === null || value === undefined ? '-' : `${(Number(value) / 1024).toFixed(1)}MB`;
+}
+
 async function register() {
   if (!selected.value) return;
   if (!auth.token) { router.push({ path: '/login', query: { redirect: '/contests' } }); return; }
@@ -179,13 +184,22 @@ async function createContest() {
     await api.post('/api/teacher/contests', {
       ...form.value,
       startTime: iso(form.value.startTime), endTime: iso(form.value.endTime),
-      registerStart: iso(form.value.registerStart), registerEnd: iso(form.value.registerEnd), freezeTime: iso(form.value.freezeTime),
+      registerStart: iso(form.value.registerStart), registerEnd: iso(form.value.registerEnd), freezeTime: form.value.freezeMode === 'NO_FREEZE' ? undefined : iso(form.value.freezeTime),
     });
     showCreator.value = false;
-    form.value = { title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] };
+    form.value = { title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeMode: 'NO_FREEZE', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] };
     await load();
   } catch (e: any) { error.value = e.response?.data?.message || '创建比赛失败'; }
   finally { actionLoading.value = false; }
+}
+async function openContestAcceptedSubmission(cell: any) {
+  if (!selected.value || !cell?.viewableSubmissionId) return;
+  try {
+    const { data } = await api.get(`/api/contests/${selected.value.id}/submissions/${cell.viewableSubmissionId}`);
+    selectedSubmissionDetail.value = data;
+  } catch (e: any) {
+    error.value = e.response?.data?.message || '提交详情加载失败';
+  }
 }
 onMounted(async () => {
   await load();
@@ -337,6 +351,8 @@ onUnmounted(() => {
                 :class="cellClass(cell)"
                 :title="`${cell.label} ${cell.title || ''} · ${cell.status} · ${cell.attempts || 0} 次提交`"
                 type="button"
+                :disabled="!cell.viewableSubmissionId"
+                @click="openContestAcceptedSubmission(cell)"
               >
                 <span>{{ cellText(cell) }}</span>
               </button>
@@ -350,14 +366,14 @@ onUnmounted(() => {
             <div class="submission-head" aria-hidden="true">
               <span>时间</span><span>选手</span><span>题目</span><span>语言</span><span>结果</span><span>耗时 / 内存</span>
             </div>
-            <div v-for="submission in contestSubmissions" :key="submission.id" class="submission-row">
+            <button v-for="submission in contestSubmissions" :key="submission.id" type="button" class="submission-row" @click="openContestAcceptedSubmission({ viewableSubmissionId: submission.id })">
               <span class="submission-time">{{ timeText(submission.createdAt) }}</span>
               <span class="submission-user">{{ submission.user.nickname || submission.user.username }}</span>
               <span class="submission-problem"><b>{{ submission.problem.label }}</b>{{ submission.problem.title }}</span>
               <span class="submission-lang">{{ submission.language }}</span>
               <strong class="submission-status" :class="submission.status.toLowerCase()">{{ statusText(submission.status) }}</strong>
               <span class="submission-cost">{{ submission.timeUsed ?? '—' }} ms / {{ submission.memoryUsed ?? '—' }} KB</span>
-            </div>
+            </button>
           </div>
         </div>
       </section>
@@ -385,6 +401,24 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <div v-if="selectedSubmissionDetail" class="submission-detail-backdrop" @click.self="selectedSubmissionDetail = null">
+      <article class="submission-detail-modal">
+        <header><div><p class="eyebrow">SUBMISSION DETAIL</p><h2>比赛提交详情</h2></div><button type="button" @click="selectedSubmissionDetail = null">×</button></header>
+        <div class="submission-detail-grid">
+          <span><b>选手</b>{{ selectedSubmissionDetail.user?.nickname || selectedSubmissionDetail.user?.username }}</span>
+          <span><b>题目</b>{{ selectedSubmissionDetail.problem?.title }}</span>
+          <span><b>结果</b>{{ statusText(selectedSubmissionDetail.status) }}</span>
+          <span><b>语言</b>{{ selectedSubmissionDetail.language }}</span>
+          <span><b>时限</b>{{ selectedSubmissionDetail.problem?.timeLimit || '-' }}ms</span>
+          <span><b>内存限制</b>{{ selectedSubmissionDetail.problem?.memoryLimit || '-' }}MB</span>
+          <span><b>实际用时</b>{{ selectedSubmissionDetail.timeUsed ?? '-' }}ms</span>
+          <span><b>实际内存</b>{{ memoryText(selectedSubmissionDetail.memoryUsed) }}</span>
+        </div>
+        <h3>源代码</h3>
+        <pre class="submission-source-code">{{ selectedSubmissionDetail.sourceCode }}</pre>
+      </article>
+    </div>
+
     <div v-if="showCreator" class="backdrop" @click.self="showCreator = false">
       <form class="creator" @submit.prevent="createContest">
         <header><div><p class="eyebrow">TEACHER CONSOLE</p><h2>创建一场比赛</h2></div><button type="button" @click="showCreator = false">×</button></header>
@@ -395,7 +429,7 @@ onUnmounted(() => {
           <label class="wide">比赛说明<textarea v-model="form.description" rows="3" placeholder="说明比赛范围、注意事项与参赛要求"></textarea></label>
           <label>开始时间<input v-model="form.startTime" type="datetime-local" required /></label><label>结束时间<input v-model="form.endTime" type="datetime-local" required /></label>
           <label>报名开始<input v-model="form.registerStart" type="datetime-local" /></label><label>报名截止<input v-model="form.registerEnd" type="datetime-local" /></label>
-          <label>封榜时间<input v-model="form.freezeTime" type="datetime-local" /></label><label class="check"><input v-model="form.allowUpsolve" type="checkbox" /> 允许赛后虚拟比赛</label>
+          <label>封榜设置<select v-model="form.freezeMode"><option value="NO_FREEZE">无封榜</option><option value="CUSTOM">指定封榜时间</option></select></label><label v-if="form.freezeMode === 'CUSTOM'">封榜时间<input v-model="form.freezeTime" type="datetime-local" /></label><label v-else class="freeze-hint">当前比赛全程实时公开排名</label><label class="check"><input v-model="form.allowUpsolve" type="checkbox" /> 允许赛后虚拟比赛</label>
           <label class="check"><input v-model="form.teamMode" type="checkbox" /> 团队公开赛</label><label class="check"><input v-model="form.isRated" type="checkbox" /> Rated（计入评级标识）</label>
         </div>
         <div class="picker"><b>选择比赛题目</b><small>仅从比赛预备题库选择，可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problem.title }} <em>{{ pointDifficultyShortLabel(problem.difficulty) }}</em></label><p v-if="!problems.length">暂无比赛预备题。请先在录题或历史录题中将题目状态设为“比赛预备”。</p></div>
@@ -618,6 +652,9 @@ onUnmounted(() => {
   cursor: default;
   transition: transform .12s ease, box-shadow .12s ease;
 }
+.score-cell:not(:disabled) {
+  cursor: pointer;
+}
 .score-cell:hover {
   transform: translateY(-1px);
 }
@@ -673,9 +710,17 @@ onUnmounted(() => {
 }
 .submission-row {
   padding: 10px 12px;
+  width: 100%;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  color: inherit;
+  text-align: left;
   background: #fff;
   border-top: 1px solid #edf1f5;
   font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
   transition: background .15s ease;
 }
 .submission-row:hover {
@@ -739,6 +784,82 @@ onUnmounted(() => {
 .submission-status.system_error {
   background: #f3e8ff;
   color: #7e22ce;
+}
+.submission-detail-backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .52);
+}
+.submission-detail-modal {
+  width: min(900px, 100%);
+  max-height: min(780px, 90vh);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 26px 70px rgba(15, 23, 42, .26);
+}
+.submission-detail-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.submission-detail-modal header h2 {
+  margin: 4px 0 0;
+}
+.submission-detail-modal header button {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 28px;
+  cursor: pointer;
+}
+.submission-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.submission-detail-grid span {
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+  border: 1px solid #e3eaf2;
+  border-radius: 12px;
+  background: #f8fbff;
+  color: #334155;
+  font-size: 12px;
+}
+.submission-detail-grid b {
+  color: #7a8797;
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+.submission-source-code {
+  max-height: 430px;
+  overflow: auto;
+  padding: 15px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.freeze-hint {
+  display: grid;
+  align-content: center;
+  min-height: 40px;
+  padding: 10px;
+  border: 1px dashed #c7d7e8;
+  border-radius: 9px;
+  color: #64748b;
+  background: #f8fbff;
 }
 @media(max-width:860px){
   .board-toolbar{flex-direction:column}

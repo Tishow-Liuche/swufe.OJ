@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -44,10 +45,34 @@ export class CommunityController {
     return this.community.createPost(req.user, body);
   }
 
+  @Patch('posts/:id')
+  @UseGuards(AuthGuard('jwt'))
+  updatePost(@Param('id') id: string, @Req() req: any, @Body() body: any) {
+    return this.community.updatePost(id, req.user, body);
+  }
+
+  @Delete('posts/:id')
+  @UseGuards(AuthGuard('jwt'))
+  deletePost(@Param('id') id: string, @Req() req: any) {
+    return this.community.deletePost(id, req.user);
+  }
+
   @Post('posts/:id/replies')
   @UseGuards(AuthGuard('jwt'))
   createReply(@Param('id') id: string, @Req() req: any, @Body('content') content: string) {
     return this.community.createReply(id, req.user, content);
+  }
+
+  @Patch('replies/:id')
+  @UseGuards(AuthGuard('jwt'))
+  updateReply(@Param('id') id: string, @Req() req: any, @Body('content') content: string) {
+    return this.community.updateReply(id, req.user, content);
+  }
+
+  @Delete('replies/:id')
+  @UseGuards(AuthGuard('jwt'))
+  deleteReply(@Param('id') id: string, @Req() req: any) {
+    return this.community.deleteReply(id, req.user);
   }
 
   @Post('posts/:id/reaction')
@@ -96,6 +121,18 @@ export class CommunityController {
   @UseGuards(AuthGuard('jwt'))
   createAnnouncement(@Req() req: any, @Body() body: any) {
     return this.community.createAnnouncement(req.user, body);
+  }
+
+  @Patch('announcements/:id')
+  @UseGuards(AuthGuard('jwt'))
+  updateAnnouncement(@Param('id') id: string, @Req() req: any, @Body() body: any) {
+    return this.community.updateAnnouncement(id, req.user, body);
+  }
+
+  @Delete('announcements/:id')
+  @UseGuards(AuthGuard('jwt'))
+  deleteAnnouncement(@Param('id') id: string, @Req() req: any) {
+    return this.community.deleteAnnouncement(id, req.user);
   }
 
   @Get('moderation/overview')

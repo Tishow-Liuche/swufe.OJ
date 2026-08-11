@@ -102,8 +102,11 @@
         Install or update the Codeforces, Luogu, and QOJ Tampermonkey helpers. After installation, external submissions opened from SWUFE OJ can auto-fill code, auto-click submit, and report submission IDs or verdicts back to SWUFE OJ.
       </p>
       <div class="actions">
-        <button type="button" onclick="openAllHelpers()">Open all three installers</button>
+        <button type="button" onclick="installAllHelpers()">一键安装三个脚本 / Install all three helpers</button>
         <a class="btn secondary" href="/">Back to SWUFE OJ</a>
+      </div>
+      <div id="installer-status" class="notice" role="status" aria-live="polite">
+        点击一键安装后，浏览器会依次打开 Codeforces、洛谷、QOJ 三个脚本安装确认页。
       </div>
       <div class="notice">
         Browser security still requires Tampermonkey confirmation for each script. Click Install or Update in each tab. If popups are blocked, use the individual buttons below.
@@ -130,13 +133,23 @@
   </main>
 
   <script>
-    function openAllHelpers() {
+    function installAllHelpers() {
       var urls = ['/cf-helper.user.js', '/luogu-helper.user.js', '/qoj-helper.user.js'];
+      var status = document.getElementById('installer-status');
+      if (status) status.textContent = '正在依次打开三个脚本安装页，请在 Tampermonkey 页面点击 Install / Update。';
       urls.forEach(function (url, index) {
         setTimeout(function () {
-          window.open(url, '_blank', 'noopener,noreferrer');
+          var opened = window.open(url, '_blank', 'noopener,noreferrer');
+          if (!opened && status) {
+            status.textContent = '浏览器拦截了弹窗，请允许弹窗或使用下方三个单独安装按钮。';
+          } else if (status && index === urls.length - 1) {
+            status.textContent = '三个脚本安装页已打开。请逐个确认安装，之后回到 SWUFE OJ 直接提交即可。';
+          }
         }, index * 500);
       });
+    }
+    function openAllHelpers() {
+      installAllHelpers();
     }
   </script>
 </body>
