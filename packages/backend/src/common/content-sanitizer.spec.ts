@@ -11,4 +11,13 @@ describe('sanitizeProblemContent', () => {
     expect(result).toContain('<p class="note">safe</p>');
     expect(result).not.toMatch(/script|onerror|javascript:/i);
   });
+
+  it('keeps same-site uploaded problem images while sanitizing unsafe attributes', () => {
+    const html = '<p>插图</p><img src="/oj-testdata/problem-images/demo.png" alt="demo" onerror="alert(1)">';
+
+    const result = sanitizeProblemContent(html);
+
+    expect(result).toContain('<img src="/oj-testdata/problem-images/demo.png" alt="demo" />');
+    expect(result).not.toMatch(/onerror|javascript:/i);
+  });
 });

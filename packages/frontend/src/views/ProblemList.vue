@@ -13,6 +13,7 @@ import {
   Layers3,
   ListFilter,
   ListTodo,
+  LockKeyhole,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -97,7 +98,7 @@ const sourceOptions = [
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
-const sidebarCollapsed = useStorage('swufe-oj:problem-sidebar-collapsed-v2', true);
+const sidebarCollapsed = useStorage('swufe-oj:problem-sidebar-collapsed', false);
 
 function queryValue(key: string) {
   const value = route.query[key];
@@ -122,6 +123,7 @@ const difficulty = ref(initialDifficulty);
 const source = ref(initialSource);
 const selectedTag = ref(queryValue('tag'));
 const tagSearchKeyword = ref('');
+const showTagDialog = ref(false);
 const page = ref(Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1);
 const pageSize = 10;
 
@@ -166,13 +168,14 @@ const tagSearchSummary = computed(() => {
   if (!normalizedTagSearchKeyword.value) return '输入关键词搜索全部标签';
   return `匹配 ${visibleTagCounts.value.length} / ${tagCounts.value.length} 个标签`;
 });
-const tagOptions = computed(() => [
-  { value: '', label: '全部标签' },
-  ...tagCounts.value.map((item) => ({
-    value: item.name,
-    label: `${item.name} (${item.count})`,
-  })),
-]);
+function openTagDialog() {
+  showTagDialog.value = true;
+  void nextTick(() => document.querySelector<HTMLInputElement>('.tag-dialog-panel input')?.focus());
+}
+function chooseTag(name: string) {
+  selectedTag.value = selectedTag.value === name ? '' : name;
+  showTagDialog.value = false;
+}
 const metadataScopeLabel = computed(() => {
   if (metadataLoading.value) return '统计加载中';
   if (publishedTotal.value !== null) return `全题库 ${formatNumber(publishedTotal.value)} 道`;
@@ -466,29 +469,30 @@ function requireLogin(redirect: string) {
             <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
           </button>
 
-          <router-link
-            v-if="auth.isLoggedIn()"
-            :to="{ path: '/problem-lists', query: { tab: 'library', view: 'favorites' } }"
-            class="sidebar-link"
-            aria-label="我的收藏"
-            :title="sidebarCollapsed ? '我的收藏' : undefined"
-          >
-            <Star :size="18" aria-hidden="true" />
-            <span class="sidebar-link-label">我的收藏</span>
-            <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
-          </router-link>
-
           <button
-            v-else
+            v-if="!auth.isLoggedIn()"
             type="button"
             class="sidebar-link"
             aria-label="登录后查看我的收藏"
             :title="sidebarCollapsed ? '登录后查看我的收藏' : undefined"
-            @click="requireLogin('/problem-lists?tab=library&view=favorites')"
+            @click="requireLogin('/profile')"
           >
             <Star :size="18" aria-hidden="true" />
             <span class="sidebar-link-label">我的收藏</span>
             <ChevronRight class="sidebar-link-trailing" :size="16" aria-hidden="true" />
+          </button>
+
+          <button
+            v-else
+            type="button"
+            class="sidebar-link sidebar-link-disabled"
+            disabled
+            aria-label="我的收藏，数据接口尚未接入"
+            :title="sidebarCollapsed ? '我的收藏（尚未接入）' : '收藏数据接口尚未接入'"
+          >
+            <Star :size="18" aria-hidden="true" />
+            <span class="sidebar-link-label">我的收藏</span>
+            <LockKeyhole class="sidebar-link-trailing" :size="15" aria-hidden="true" />
           </button>
         </nav>
       </aside>
@@ -578,14 +582,10 @@ function requireLogin(redirect: string) {
             <template #icon><Database :size="17" aria-hidden="true" /></template>
           </FilterSelect>
 
-          <FilterSelect
-            v-model="selectedTag"
-            class="tag-select"
-            :options="tagOptions"
-            label="按标签筛选"
-          >
-            <template #icon><Tag :size="17" aria-hidden="true" /></template>
-          </FilterSelect>
+          <button type="button" class="tag-dialog-trigger" @click="openTagDialog">
+            <Tag :size="17" aria-hidden="true" />
+            <span>{{ selectedTag || '全部标签' }}</span>
+          </button>
 
           <button v-if="hasFilters" type="button" class="reset-button" @click="resetFilters">
             <RefreshCw :size="16" aria-hidden="true" />
@@ -851,6 +851,38 @@ function requireLogin(redirect: string) {
         </div>
       </div>
     </div>
+  </div>
+  <div v-if="showTagDialog" class="tag-dialog-backdrop" @click.self="showTagDialog = false">
+    <section class="tag-dialog-panel" role="dialog" aria-modal="true" aria-label="全部标签筛选">
+      <header>
+        <div>
+          <span>标签筛选</span>
+          <strong>{{ tagSearchSummary }}</strong>
+        </div>
+        <button type="button" aria-label="关闭标签筛选" @click="showTagDialog = false"><X :size="18" /></button>
+      </header>
+      <label class="tag-search-box dialog-search">
+        <Search :size="14" aria-hidden="true" />
+        <input v-model="tagSearchKeyword" type="search" placeholder="搜索标签，例如 dp / 数学 / greedy" autocomplete="off" />
+        <button v-if="tagSearchKeyword" type="button" aria-label="清空标签搜索" @click="tagSearchKeyword = ''"><X :size="13" aria-hidden="true" /></button>
+      </label>
+      <div class="tag-dialog-cloud">
+        <button type="button" :class="{ selected: !selectedTag }" @click="chooseTag('')">
+          <span>全部标签</span><strong>{{ formatNumber(metadata?.total || 0) }}</strong>
+        </button>
+        <button
+          v-for="item in visibleTagCounts"
+          :key="item.name"
+          type="button"
+          :class="{ selected: selectedTag === item.name }"
+          @click="chooseTag(item.name)"
+        >
+          <span>{{ item.name }}</span>
+          <strong>{{ item.count }}</strong>
+        </button>
+      </div>
+      <p v-if="!visibleTagCounts.length && !metadataLoading" class="tag-empty-state">没有匹配标签</p>
+    </section>
   </div>
 </template>
 
@@ -1310,6 +1342,31 @@ function requireLogin(redirect: string) {
 
 .tag-select {
   min-width: 154px;
+}
+
+.tag-dialog-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 154px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--outline);
+  border-radius: 7px;
+  background: var(--surface);
+  color: #34536f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tag-dialog-trigger:hover {
+  border-color: #8fb8ef;
+  background: #f8fbfe;
+  color: #1f5eff;
+  box-shadow: 0 0 0 3px rgba(31, 94, 255, .08);
 }
 
 .source-select {
@@ -1901,6 +1958,115 @@ function requireLogin(redirect: string) {
 .tag-cloud strong {
   font-family: 'Manrope Variable', sans-serif;
   font-size: 9px;
+}
+
+.tag-dialog-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .38);
+  backdrop-filter: blur(3px);
+}
+
+.tag-dialog-panel {
+  display: grid;
+  width: min(50vw, 720px);
+  min-width: min(420px, calc(100vw - 32px));
+  height: min(50vh, 560px);
+  min-height: 360px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid #dce5ef;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 26px 70px rgba(15, 23, 42, .22);
+}
+
+.tag-dialog-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.tag-dialog-panel header div {
+  display: grid;
+  gap: 3px;
+}
+
+.tag-dialog-panel header span {
+  color: #1f2a37;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.tag-dialog-panel header strong {
+  color: #66778a;
+  font-size: 12px;
+}
+
+.tag-dialog-panel header button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.dialog-search {
+  margin: 0;
+}
+
+.tag-dialog-cloud {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.tag-dialog-cloud button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid #dbe5f0;
+  border-radius: 11px;
+  background: #f8fbff;
+  color: #34536f;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tag-dialog-cloud button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-dialog-cloud button strong {
+  color: #7a8797;
+  font-size: 11px;
+}
+
+.tag-dialog-cloud button:hover,
+.tag-dialog-cloud button.selected {
+  border-color: #8fb8ef;
+  background: #e7efff;
+  color: #1f5eff;
 }
 
 .skeleton-list {

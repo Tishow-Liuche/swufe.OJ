@@ -71,6 +71,12 @@ export class ContestController {
     return this.contests.contestSubmissions(id, req.user);
   }
 
+  @Get(':id/submissions/:submissionId')
+  @UseGuards(AuthGuard('jwt'))
+  submissionDetail(@Param('id') id: string, @Param('submissionId') submissionId: string, @Req() req: any) {
+    return this.contests.contestSubmissionDetail(id, submissionId, req.user);
+  }
+
   @Post(':id/snapshot')
   @UseGuards(AuthGuard('jwt'))
   snapshot(@Param('id') id: string, @Req() req: any) {

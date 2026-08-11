@@ -34,6 +34,8 @@ const result = ref<any>(null);
 const uploadResult = ref<any>(null);
 const error = ref('');
 const preview = ref(false);
+const descriptionImageInput = ref<HTMLInputElement | null>(null);
+const sampleImageInput = ref<HTMLInputElement | null>(null);
 
 const difficulties = [
   { value: null, label: '未评定 / 不显示难度（比赛预备推荐）' },
@@ -135,6 +137,39 @@ function previewProblem(id: string) {
 
 function renderMd(text: string): string {
   return renderMarkdownWithMath(text);
+}
+
+async function uploadAuthoringImage(file: File) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const { data } = await api.post('/api/problems/images/upload', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data.url || data.previewUrl;
+}
+
+async function handleImageSelected(event: Event, target: 'description' | 'sample') {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const url = await uploadAuthoringImage(file);
+    const markdown = `\n\n![${file.name.replace(/\.[^.]+$/, '')}](${url})\n`;
+    if (target === 'description') insertImageIntoDescription(markdown);
+    else insertImageIntoSample(markdown);
+  } catch (e: any) {
+    error.value = e.response?.data?.message || '图片上传失败';
+  } finally {
+    input.value = '';
+  }
+}
+
+function insertImageIntoDescription(markdown: string) {
+  form.description = `${form.description.replace(/\s*$/, '')}${markdown}`;
+}
+
+function insertImageIntoSample(markdown: string) {
+  form.description = `${form.description.replace(/\s*$/, '')}\n\n## 样例图片\n${markdown}`;
 }
 </script>
 
@@ -240,14 +275,24 @@ function renderMd(text: string): string {
     <div class="card">
       <div class="card-header">
         <h3>题面编辑（Markdown）</h3>
-        <button class="btn-toggle" @click="preview = !preview">{{ preview ? '编辑' : '预览' }}</button>
+        <div class="editor-actions">
+          <input ref="descriptionImageInput" class="hidden-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" @change="handleImageSelected($event, 'description')" />
+          <button class="btn-toggle" type="button" @click="descriptionImageInput?.click()">插入图片</button>
+          <button class="btn-toggle" type="button" @click="preview = !preview">{{ preview ? '编辑' : '预览' }}</button>
+        </div>
       </div>
       <textarea v-if="!preview" v-model="form.description" rows="18" class="main-editor" spellcheck="false"></textarea>
       <div v-else class="preview-area" v-html="renderMd(form.description)"></div>
     </div>
 
     <div class="card">
-      <h3>样例</h3>
+      <div class="card-header">
+        <h3>样例</h3>
+        <div class="editor-actions">
+          <input ref="sampleImageInput" class="hidden-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" @change="handleImageSelected($event, 'sample')" />
+          <button class="btn-toggle" type="button" @click="sampleImageInput?.click()">在样例后插入图片</button>
+        </div>
+      </div>
       <p class="hint">默认提供 3 组样例。只会保存已填写的样例；留空的样例不会显示到题目详情页。</p>
       <div v-for="(sample, index) in samplePairs" :key="index" class="sample-editor">
         <div class="sample-editor-title">样例 #{{ index + 1 }}</div>
@@ -300,6 +345,8 @@ function renderMd(text: string): string {
 .card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .card h3 { margin: 0 0 16px; font-size: 16px; color: #333; }
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 16px; }
+.editor-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.hidden-file { display: none; }
 .btn-toggle { padding: 5px 14px; background: #f0f0f0; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .form-group.full { grid-column: 1 / -1; }

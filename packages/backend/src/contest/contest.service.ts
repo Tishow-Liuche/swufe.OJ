@@ -383,6 +383,7 @@ export class ContestService {
           title: problem.problem?.title || `Problem ${label}`,
           status: this.contestCellStatus(attempts, accepted),
           accepted: !!accepted,
+          viewableSubmissionId: now > end || canManage ? accepted?.id || null : null,
           attempts: attempts.length,
           wrongAttempts,
           score: bestScore,
@@ -497,6 +498,39 @@ export class ContestService {
         };
       }),
     };
+  }
+
+  async contestSubmissionDetail(id: string, submissionId: string, viewer: Viewer) {
+    const contest = await this.prisma.contest.findUnique({
+      where: { id },
+      include: {
+        participants: { select: { userId: true } },
+        submissions: {
+          where: { submissionId },
+          take: 1,
+          include: {
+            submission: {
+              include: {
+                user: { select: { id: true, username: true, nickname: true, avatar: true } },
+                problem: { select: { id: true, title: true, timeLimit: true, memoryLimit: true } },
+                cases: { orderBy: { caseIndex: 'asc' } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!contest) throw new NotFoundException('比赛不存在');
+    this.assertCanViewStandings(contest, viewer);
+    const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
+    const now = new Date();
+    const isOwner = contest.submissions[0]?.submission.userId === viewer.id;
+    if (now <= contest.endTime && !canManage && !isOwner) {
+      throw new ForbiddenException('比赛结束后才能查看其他选手的源码');
+    }
+    const item = contest.submissions[0];
+    if (!item) throw new NotFoundException('提交记录不属于该比赛');
+    return item.submission;
   }
 
   async saveSnapshot(id: string, viewer: Viewer) {

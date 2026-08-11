@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -8,11 +9,8 @@ import {
   Query,
   Req,
   UseGuards,
-  UseInterceptors,
-  UploadedFile,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { CommunityService } from './community.service';
 
 @Controller('api/community')
@@ -20,13 +18,11 @@ export class CommunityController {
   constructor(private readonly community: CommunityService) {}
 
   @Get('announcements')
-  @UseGuards(AuthGuard('jwt'))
   listAnnouncements() {
     return this.community.listAnnouncements();
   }
 
   @Get('posts')
-  @UseGuards(AuthGuard('jwt'))
   listPosts(
     @Query('type') type?: string,
     @Query('problemId') problemId?: string,
@@ -49,28 +45,34 @@ export class CommunityController {
     return this.community.createPost(req.user, body);
   }
 
-  @Post('images')
+  @Patch('posts/:id')
   @UseGuards(AuthGuard('jwt'))
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
-  uploadImage(@Req() req: any, @UploadedFile() file: Express.Multer.File) {
-    return this.community.uploadCommunityImage(req.user, file);
+  updatePost(@Param('id') id: string, @Req() req: any, @Body() body: any) {
+    return this.community.updatePost(id, req.user, body);
+  }
+
+  @Delete('posts/:id')
+  @UseGuards(AuthGuard('jwt'))
+  deletePost(@Param('id') id: string, @Req() req: any) {
+    return this.community.deletePost(id, req.user);
   }
 
   @Post('posts/:id/replies')
   @UseGuards(AuthGuard('jwt'))
-  createReply(
-    @Param('id') id: string,
-    @Req() req: any,
-    @Body('content') content: string,
-    @Body('parentReplyId') parentReplyId?: string,
-  ) {
-    return this.community.createReply(id, req.user, content, parentReplyId);
+  createReply(@Param('id') id: string, @Req() req: any, @Body('content') content: string) {
+    return this.community.createReply(id, req.user, content);
   }
 
-  @Post('replies/:id/reaction')
+  @Patch('replies/:id')
   @UseGuards(AuthGuard('jwt'))
-  reactToReply(@Param('id') id: string, @Req() req: any) {
-    return this.community.toggleReplyReaction(id, req.user);
+  updateReply(@Param('id') id: string, @Req() req: any, @Body('content') content: string) {
+    return this.community.updateReply(id, req.user, content);
+  }
+
+  @Delete('replies/:id')
+  @UseGuards(AuthGuard('jwt'))
+  deleteReply(@Param('id') id: string, @Req() req: any) {
+    return this.community.deleteReply(id, req.user);
   }
 
   @Post('posts/:id/reaction')
@@ -119,6 +121,18 @@ export class CommunityController {
   @UseGuards(AuthGuard('jwt'))
   createAnnouncement(@Req() req: any, @Body() body: any) {
     return this.community.createAnnouncement(req.user, body);
+  }
+
+  @Patch('announcements/:id')
+  @UseGuards(AuthGuard('jwt'))
+  updateAnnouncement(@Param('id') id: string, @Req() req: any, @Body() body: any) {
+    return this.community.updateAnnouncement(id, req.user, body);
+  }
+
+  @Delete('announcements/:id')
+  @UseGuards(AuthGuard('jwt'))
+  deleteAnnouncement(@Param('id') id: string, @Req() req: any) {
+    return this.community.deleteAnnouncement(id, req.user);
   }
 
   @Get('moderation/overview')
