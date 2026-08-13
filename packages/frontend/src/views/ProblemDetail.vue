@@ -361,6 +361,13 @@ async function submitCode() {
       startPolling(data.submissionId || data.id);
     }
   } catch (e: any) {
+    if (e.response?.status === 429) {
+      result.value = {
+        status: 'QUEUING',
+        compileMessage: e.response?.data?.message || '提交过于频繁或评测队列繁忙，请稍后再试。',
+      };
+      return;
+    }
     errorMsg.value = e.response?.data?.message || '提交失败';
   } finally {
     submitting.value = false;

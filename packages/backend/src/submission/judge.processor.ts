@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NativeJudgeService } from '../judge/native-judge.service';
 import { LearningService } from '../learning/learning.service';
+import { ContestCacheService } from '../contest/contest-cache.service';
 
 interface JudgeJob {
   submissionId: string;
@@ -40,6 +41,7 @@ export class JudgeProcessor extends WorkerHost {
     private prisma: PrismaService,
     private judge: NativeJudgeService,
     private learning: LearningService,
+    private contestCache: ContestCacheService,
   ) {
     super();
   }
@@ -239,5 +241,15 @@ export class JudgeProcessor extends WorkerHost {
     await this.prisma.judgeTask
       .update({ where: { submissionId: id }, data: { finishedAt: new Date() } })
       .catch(() => {});
+    await this.invalidateContestCache(id);
+  }
+
+  private async invalidateContestCache(submissionId: string) {
+    const contestSubmission = await this.prisma.contestSubmission
+      .findUnique({ where: { submissionId }, select: { contestId: true } })
+      .catch(() => null);
+    if (contestSubmission?.contestId) {
+      await this.contestCache.invalidateContest(contestSubmission.contestId);
+    }
   }
 }

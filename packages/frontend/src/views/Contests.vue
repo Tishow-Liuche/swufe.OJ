@@ -32,7 +32,10 @@ const error = ref('');
 const showCreator = ref(false);
 const problems = ref<any[]>([]);
 const form = ref({ title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeMode: 'NO_FREEZE', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] as string[] });
-let standingTimer: ReturnType<typeof setInterval> | null = null;
+let standingTimer: ReturnType<typeof setTimeout> | null = null;
+const boardRefreshing = ref(false);
+const boardLastUpdatedAt = ref<Date | null>(null);
+const boardBusyHint = ref('');
 const sidebarCollapsed = useStorage('swufe-oj:contest-sidebar-collapsed', false);
 
 const isTeacher = computed(() => auth.isTeacher());
@@ -81,6 +84,7 @@ async function load() {
 async function selectContest(contest: Contest) {
   selected.value = contest; standings.value = []; standingsProblems.value = []; contestSubmissions.value = [];
   await refreshLiveBoard();
+  scheduleLiveBoardRefresh(5000);
 }
 function showOverview(nextFilter: string) {
   filter.value = nextFilter;
@@ -88,6 +92,7 @@ function showOverview(nextFilter: string) {
   standings.value = [];
   standingsProblems.value = [];
   contestSubmissions.value = [];
+  clearLiveBoardRefresh();
 }
 async function refreshStandings() {
   if (!selected.value) return;
@@ -95,17 +100,50 @@ async function refreshStandings() {
     const { data } = await api.get('/api/contests/' + selected.value.id + '/standings');
     standings.value = data.rows || [];
     standingsProblems.value = data.problems || [];
-  } catch { standings.value = []; }
+  } catch (e: any) {
+    standings.value = [];
+    boardBusyHint.value = e.response?.status === 429 ? '榜单请求过于频繁，系统正在保护比赛服务。' : '';
+  }
 }
 async function refreshContestSubmissions() {
   if (!selected.value || !auth.token) return;
   try {
     const { data } = await api.get('/api/contests/' + selected.value.id + '/submissions');
     contestSubmissions.value = data.items || [];
-  } catch { contestSubmissions.value = []; }
+  } catch (e: any) {
+    contestSubmissions.value = [];
+    if (e.response?.status === 429) boardBusyHint.value = '提交记录刷新过于频繁，已自动降低刷新频率。';
+  }
 }
 async function refreshLiveBoard() {
-  await Promise.all([refreshStandings(), refreshContestSubmissions()]);
+  if (!selected.value || boardRefreshing.value) return;
+  boardRefreshing.value = true;
+  try {
+    await Promise.all([refreshStandings(), refreshContestSubmissions()]);
+    boardLastUpdatedAt.value = new Date();
+  } finally {
+    boardRefreshing.value = false;
+  }
+}
+function clearLiveBoardRefresh() {
+  if (standingTimer) clearTimeout(standingTimer);
+  standingTimer = null;
+}
+function scheduleLiveBoardRefresh(delay = 5000) {
+  clearLiveBoardRefresh();
+  if (!selected.value) return;
+  standingTimer = setTimeout(async () => {
+    if (document.visibilityState === 'visible') {
+      await refreshLiveBoard();
+      scheduleLiveBoardRefresh(selected.value?.state === 'RUNNING' ? 5000 : 15000);
+    } else {
+      scheduleLiveBoardRefresh(30000);
+    }
+  }, delay);
+}
+function boardUpdateText() {
+  if (!boardLastUpdatedAt.value) return '等待首次刷新';
+  return '更新于 ' + new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(boardLastUpdatedAt.value);
 }
 function cellClass(cell: any) {
   return {
@@ -203,10 +241,10 @@ async function openContestAcceptedSubmission(cell: any) {
 }
 onMounted(async () => {
   await load();
-  standingTimer = setInterval(refreshLiveBoard, 15000);
+  scheduleLiveBoardRefresh(5000);
 });
 onUnmounted(() => {
-  if (standingTimer) clearInterval(standingTimer);
+  clearLiveBoardRefresh();
 });
 </script>
 
@@ -317,6 +355,8 @@ onUnmounted(() => {
           <div class="board-toolbar">
             <div>
               <p class="eyebrow">ICPC STYLE SCOREBOARD</p>
+              <small class="board-refresh-state">{{ boardRefreshing ? '刷新中...' : boardUpdateText() }}</small>
+              <small v-if="boardBusyHint" class="board-busy-hint">{{ boardBusyHint }}</small>
               <h3>实时排名</h3>
             </div>
             <div class="rank-legend" aria-label="排名颜色说明">
@@ -493,6 +533,17 @@ onUnmounted(() => {
   color: #1f2a37;
   font-size: 22px;
   letter-spacing: -.03em;
+}
+.board-refresh-state,
+.board-busy-hint {
+  display: block;
+  margin-top: 4px;
+  color: #7a8797;
+  font-size: 11px;
+  font-weight: 800;
+}
+.board-busy-hint {
+  color: #b45309;
 }
 .rank-legend {
   display: flex;

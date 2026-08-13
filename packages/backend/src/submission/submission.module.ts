@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
+import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { Queue } from 'bullmq';
 import { SubmissionService } from './submission.service';
 import { SubmissionController } from './submission.controller';
 import { JudgeProcessor } from './judge.processor';
@@ -13,6 +14,7 @@ import { CodeforcesModule } from '../codeforces/cf.module';
 import { LuoguModule } from '../luogu/luogu.module';
 import { LearningModule } from '../learning/learning.module';
 import { QojModule } from '../qoj/qoj.module';
+import { ContestCacheService } from '../contest/contest-cache.service';
 
 export function createRedisConnectionOptions(c: ConfigService) {
   const port = Number(c.getOrThrow<string>('REDIS_PORT'));
@@ -41,7 +43,15 @@ export function createRedisConnectionOptions(c: ConfigService) {
     }),
   ],
   controllers: [SubmissionController, CfHelperController, LuoguHelperController, QojHelperController],
-  providers: [SubmissionService, JudgeProcessor],
-  exports: [SubmissionService],
+  providers: [
+    {
+      provide: ContestCacheService,
+      inject: [getQueueToken('judge')],
+      useFactory: async (queue: Queue) => new ContestCacheService((await queue.client) as any),
+    },
+    SubmissionService,
+    JudgeProcessor,
+  ],
+  exports: [SubmissionService, ContestCacheService, BullModule],
 })
 export class SubmissionModule {}

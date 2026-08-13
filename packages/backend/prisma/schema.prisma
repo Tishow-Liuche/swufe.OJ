@@ -407,6 +407,8 @@ model Submission {
   @@index([problemId])
   @@index([status])
   @@index([createdAt])
+  @@index([userId, problemId, status, createdAt])
+  @@index([problemId, status, createdAt])
 }
 
 model SubmissionCase {
@@ -543,6 +545,7 @@ model ContestParticipant {
   user         User      @relation(fields: [userId], references: [id])
 
   @@unique([contestId, userId])
+  @@index([contestId, userId])
 }
 
 model ContestSubmission {
@@ -553,6 +556,7 @@ model ContestSubmission {
   submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
 
   @@index([contestId])
+  @@index([contestId, submissionId])
 }
 
 model ContestRankSnapshot {

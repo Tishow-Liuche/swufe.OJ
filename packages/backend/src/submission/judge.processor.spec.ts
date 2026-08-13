@@ -4,6 +4,7 @@ describe('JudgeProcessor local test data judging', () => {
   let prisma: any;
   let judge: any;
   let learning: any;
+  let contestCache: any;
   let processor: JudgeProcessor;
 
   beforeEach(() => {
@@ -12,6 +13,7 @@ describe('JudgeProcessor local test data judging', () => {
       submission: { update: jest.fn() },
       submissionCase: { create: jest.fn() },
       judgeTask: { update: jest.fn().mockResolvedValue({}) },
+      contestSubmission: { findUnique: jest.fn().mockResolvedValue(null) },
     };
     judge = {
       compile: jest.fn(),
@@ -20,7 +22,8 @@ describe('JudgeProcessor local test data judging', () => {
       deleteFile: jest.fn().mockResolvedValue(undefined),
     };
     learning = { recordSubmissionResult: jest.fn().mockResolvedValue(undefined) };
-    processor = new JudgeProcessor(prisma, judge, learning);
+    contestCache = { invalidateContest: jest.fn().mockResolvedValue(undefined) };
+    processor = new JudgeProcessor(prisma, judge, learning, contestCache);
   });
 
   it('accepts standard output when only final whitespace or line endings differ', async () => {
@@ -48,6 +51,27 @@ describe('JudgeProcessor local test data judging', () => {
         actualOutput: 'Hello\nWorld\n',
       }),
     });
+  });
+
+  it('invalidates contest cache after a final local judgement', async () => {
+    prisma.problemVersion.findFirst.mockResolvedValue({
+      checker: { type: 'STANDARD' },
+      testCases: [{ order: 1, input: '', expectedOutput: '', score: 100 }],
+    });
+    prisma.contestSubmission.findUnique.mockResolvedValue({ contestId: 'contest-1' });
+    judge.compile.mockResolvedValue({ success: true, fileId: 'program', message: '' });
+    judge.run.mockResolvedValue({ status: 'ACCEPTED', timeUsed: 1, memoryUsed: 64, output: '' });
+
+    await processor.process({ data: {
+      submissionId: 's1',
+      problemId: 'p1',
+      language: 'cpp',
+      sourceCode: 'code',
+      timeLimit: 1000,
+      memoryLimit: 256,
+    } } as any);
+
+    expect(contestCache.invalidateContest).toHaveBeenCalledWith('contest-1');
   });
 
   it('keeps standard output strict for meaningful content differences', async () => {
