@@ -1,4 +1,9 @@
 import { ContestService } from './contest.service';
+import { ContestStandingsCalculatorService } from './contest-standings-calculator.service';
+
+function createContestService(prisma: any, submissions: any = {}) {
+  return new ContestService(prisma, submissions, new ContestStandingsCalculatorService());
+}
 
 describe('ContestService practice leaderboard', () => {
   it('counts local and external accepted problems once per problem in the global leaderboard', async () => {
@@ -21,7 +26,7 @@ describe('ContestService practice leaderboard', () => {
         ]),
       },
     };
-    const service = new ContestService(prisma, {} as any);
+    const service = createContestService(prisma);
 
     const rows = await service.globalLeaderboard();
 
@@ -61,7 +66,7 @@ describe('ContestService practice leaderboard', () => {
         findMany: jest.fn(),
       },
     };
-    const service = new ContestService(prisma, {} as any);
+    const service = createContestService(prisma);
 
     const rows = await service.overallLeaderboard();
 
@@ -120,7 +125,7 @@ describe('ContestService contest reserved problems', () => {
         }),
       },
     };
-    const service = new ContestService(prisma, {} as any);
+    const service = createContestService(prisma);
 
     await expect(service.getContestProblem('contest-1', 'problem-1', { id: 'student-1', role: 'STUDENT' }))
       .resolves.toBe(problem);
@@ -152,7 +157,7 @@ describe('ContestService contest reserved problems', () => {
     const submissions = {
       submit: jest.fn().mockResolvedValue({ id: 'submission-1', status: 'QUEUING' }),
     };
-    const service = new ContestService(prisma, submissions as any);
+    const service = createContestService(prisma, submissions);
 
     const result = await service.submit('contest-1', { id: 'student-1', role: 'STUDENT' }, {
       problemId: 'problem-1',
@@ -237,7 +242,7 @@ describe('ContestService live contest board', () => {
         }),
       },
     };
-    const service = new ContestService(prisma, {} as any);
+    const service = createContestService(prisma);
 
     const result = await service.standings('contest-1', { id: 'student-1', role: 'STUDENT' });
 
@@ -304,7 +309,7 @@ describe('ContestService live contest board', () => {
         ]),
       },
     };
-    const service = new ContestService(prisma, {} as any);
+    const service = createContestService(prisma);
 
     const result = await (service as any).contestSubmissions('contest-1', { id: 'student-1', role: 'STUDENT' });
 

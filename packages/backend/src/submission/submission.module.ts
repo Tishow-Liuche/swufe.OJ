@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { SubmissionService } from './submission.service';
 import { SubmissionController } from './submission.controller';
 import { CfHelperController } from './cf-helper.controller';
@@ -12,6 +14,7 @@ import { LearningModule } from '../learning/learning.module';
 import { QojModule } from '../qoj/qoj.module';
 import { TeacherModule } from '../teacher/teacher.module';
 import { registerJudgeQueue } from './judge-queue';
+import { ContestCacheService } from '../contest/contest-cache.service';
 
 export { createRedisConnectionOptions } from './judge-queue';
 
@@ -21,7 +24,14 @@ export { createRedisConnectionOptions } from './judge-queue';
     registerJudgeQueue(),
   ],
   controllers: [SubmissionController, CfHelperController, LuoguHelperController, QojHelperController],
-  providers: [SubmissionService],
-  exports: [SubmissionService],
+  providers: [
+    {
+      provide: ContestCacheService,
+      inject: [getQueueToken('judge')],
+      useFactory: async (queue: Queue) => new ContestCacheService((await queue.client) as any),
+    },
+    SubmissionService,
+  ],
+  exports: [SubmissionService, ContestCacheService],
 })
 export class SubmissionModule {}

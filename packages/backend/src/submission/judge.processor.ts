@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JudgeService } from '../judge/judge.service';
 import { LearningService } from '../learning/learning.service';
 import { AssignmentProgressService } from '../teacher/assignment-progress.service';
+import { ContestCacheService } from '../contest/contest-cache.service';
 
 interface JudgeJob {
   submissionId: string;
@@ -50,6 +51,7 @@ export class JudgeProcessor extends WorkerHost {
     private judge: JudgeService,
     private learning: LearningService,
     @Optional() private assignmentProgress?: AssignmentProgressService,
+    @Optional() private contestCache?: ContestCacheService,
   ) {
     super();
   }
@@ -260,5 +262,11 @@ export class JudgeProcessor extends WorkerHost {
     await this.prisma.judgeTask
       .update({ where: { submissionId: id }, data: { finishedAt: new Date() } })
       .catch(() => {});
+    const contestSubmission = await this.prisma.contestSubmission
+      .findUnique({ where: { submissionId: id }, select: { contestId: true } })
+      .catch(() => null);
+    if (contestSubmission?.contestId) {
+      await this.contestCache?.invalidateContest(contestSubmission.contestId);
+    }
   }
 }
