@@ -1,11 +1,17 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubmissionService } from '../submission/submission.service';
+import { ContestCacheService } from './contest-cache.service';
+import { ContestStandingsCalculatorService } from './contest-standings-calculator.service';
 
 type Viewer = { id: string; role?: string };
 
@@ -14,6 +20,9 @@ export class ContestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly submissions: SubmissionService,
+    private readonly standingsCalculator: ContestStandingsCalculatorService,
+    @Optional() private readonly contestCache?: ContestCacheService,
+    @Optional() @Inject(getQueueToken('judge')) private readonly judgeQueue?: Queue,
   ) {}
 
   private contestInclude = {
@@ -221,6 +230,7 @@ export class ContestService {
     });
     if (!contestProblem) throw new ForbiddenException('该题目不属于本场比赛');
 
+    await this.assertContestSubmitCapacity(viewer.id);
     const submitted: any = await this.submissions.submit(viewer.id, dto, { allowContestReserved: true });
     if (!submitted?.id) {
       throw new BadRequestException('当前比赛仅支持可追踪的本地评测提交');
@@ -228,6 +238,7 @@ export class ContestService {
     await this.prisma.contestSubmission.create({
       data: { contestId: id, submissionId: submitted.id },
     });
+    await this.contestCache?.invalidateContest(id);
     return { ...submitted, contestId: id };
   }
 
@@ -314,133 +325,43 @@ export class ContestService {
         },
       },
     });
-    if (!contest) throw new NotFoundException('比赛不存在');
+    if (!contest) throw new NotFoundException('?????');
     this.assertCanViewStandings(contest, viewer);
     const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
-    const now = new Date();
-    const frozen = !!contest.freezeTime
-      && now >= contest.freezeTime
-      && now < contest.endTime
-      && !canManage;
-
-    const problemHeaders = contest.problems.map((problem: any, index: number) => ({
-      problemId: problem.problemId,
-      order: problem.order,
-      label: this.problemLabel(index),
-      title: problem.problem?.title || `Problem ${this.problemLabel(index)}`,
-      score: problem.score,
-    }));
-    const firstAcceptedByProblem = new Map<string, { submissionId: string; userId: string; acceptedAt: Date }>();
-    for (const participant of contest.participants) {
-      const start = participant.isVirtual && participant.virtualStart ? participant.virtualStart : contest.startTime;
-      const end = participant.isVirtual && participant.virtualEnd ? participant.virtualEnd : contest.endTime;
-      const cutoff = frozen && !participant.isVirtual ? contest.freezeTime! : end;
-      const acceptedSubmissions = contest.submissions
-        .map((item: any) => item.submission)
-        .filter((submission: any) =>
-          submission.userId === participant.userId
-          && submission.status === 'ACCEPTED'
-          && submission.createdAt >= start
-          && submission.createdAt <= cutoff,
-        )
-        .sort((a: any, b: any) => a.createdAt.getTime() - b.createdAt.getTime());
-      for (const submission of acceptedSubmissions) {
-        const current = firstAcceptedByProblem.get(submission.problemId);
-        if (!current || submission.createdAt < current.acceptedAt) {
-          firstAcceptedByProblem.set(submission.problemId, {
-            submissionId: submission.id,
-            userId: submission.userId,
-            acceptedAt: submission.createdAt,
-          });
-        }
-      }
+    if (!canManage) {
+      const cached = await this.contestCache?.getStandings(id);
+      if (cached) return cached;
     }
-
-    const rows = contest.participants.map((participant: any) => {
-      const start = participant.isVirtual && participant.virtualStart ? participant.virtualStart : contest.startTime;
-      const end = participant.isVirtual && participant.virtualEnd ? participant.virtualEnd : contest.endTime;
-      const cutoff = frozen && !participant.isVirtual ? contest.freezeTime! : end;
-      const submissions = contest.submissions
-        .map((item: any) => item.submission)
-        .filter((submission: any) =>
-          submission.userId === participant.userId
-          && submission.createdAt >= start
-          && submission.createdAt <= cutoff,
-        )
-        .sort((a: any, b: any) => a.createdAt.getTime() - b.createdAt.getTime());
-
-      const problems = contest.problems.map((problem: any, index: number) => {
-        const attempts = submissions.filter((submission: any) => submission.problemId === problem.problemId);
-        const accepted = attempts.find((submission: any) => submission.status === 'ACCEPTED');
-        const wrongAttempts = accepted
-          ? attempts.filter((submission: any) => submission.createdAt < accepted.createdAt && submission.status !== 'ACCEPTED').length
-          : attempts.filter((submission: any) => submission.status !== 'PENDING' && submission.status !== 'QUEUING').length;
-        const bestScore = attempts.reduce((best: number, submission: any) => Math.max(best, submission.score || 0), 0);
-        const label = this.problemLabel(index);
-        return {
-          problemId: problem.problemId,
-          label,
-          title: problem.problem?.title || `Problem ${label}`,
-          status: this.contestCellStatus(attempts, accepted),
-          accepted: !!accepted,
-          viewableSubmissionId: now > end || canManage ? accepted?.id || null : null,
-          attempts: attempts.length,
-          wrongAttempts,
-          score: bestScore,
-          acceptedAt: accepted?.createdAt || null,
-          firstBlood: !!accepted && firstAcceptedByProblem.get(problem.problemId)?.submissionId === accepted.id,
-        };
-      });
-
-      if (contest.mode === 'IOI') {
-        const score = problems.reduce((sum: number, problem: any) => sum + problem.score, 0);
-        const lastActive = submissions.length ? submissions[submissions.length - 1].createdAt : null;
-        return {
-          user: participant.user,
-          userId: participant.userId,
-          isVirtual: participant.isVirtual,
-          solvedCount: problems.filter((problem: any) => problem.accepted).length,
-          score,
-          penalty: 0,
-          lastActive,
-          problems,
-        };
-      }
-
-      const solved = problems.filter((problem: any) => problem.accepted);
-      const penalty = solved.reduce((sum: number, problem: any) => {
-        const minutes = Math.floor((problem.acceptedAt.getTime() - start.getTime()) / 60_000);
-        return sum + minutes + problem.wrongAttempts * contest.penaltyTime;
-      }, 0);
-      return {
-        user: participant.user,
-        userId: participant.userId,
-        isVirtual: participant.isVirtual,
-        solvedCount: solved.length,
-        score: 0,
-        penalty,
-        lastActive: submissions.length ? submissions[submissions.length - 1].createdAt : null,
-        problems,
-      };
+    const result = this.standingsCalculator.calculate({
+      contest,
+      participants: contest.participants,
+      problems: contest.problems,
+      submissions: contest.submissions.map((item: any) => item.submission),
+      now: new Date(),
+      canManage,
     });
+    if (!canManage) {
+      await this.contestCache?.setStandings(id, result, Number(process.env.CONTEST_STANDINGS_CACHE_TTL_SECONDS || 3));
+    }
+    return result;
+  }
 
-    rows.sort((a: any, b: any) => contest.mode === 'IOI'
-      ? b.score - a.score || (a.lastActive?.getTime() || Infinity) - (b.lastActive?.getTime() || Infinity)
-      : b.solvedCount - a.solvedCount || a.penalty - b.penalty || (a.lastActive?.getTime() || Infinity) - (b.lastActive?.getTime() || Infinity));
-
-    let previous: any;
-    return {
-      contest: { id: contest.id, title: contest.title, mode: contest.mode, frozen },
-      problems: problemHeaders,
-      rows: rows.map((row: any, index: number) => {
-        const tied = previous && (contest.mode === 'IOI'
-          ? previous.score === row.score && previous.lastActive?.getTime() === row.lastActive?.getTime()
-          : previous.solvedCount === row.solvedCount && previous.penalty === row.penalty);
-        const rank = tied ? previous.rank : index + 1;
-        previous = { ...row, rank };
-        return { rank, ...row };
-      }),
-    };
+  private async assertContestSubmitCapacity(userId: string) {
+    const maxWaiting = Number(process.env.JUDGE_QUEUE_MAX_WAITING || 1200);
+    if (!this.judgeQueue || maxWaiting <= 0) return;
+    const [waiting, delayed] = await Promise.all([
+      this.judgeQueue.getWaitingCount().catch(() => 0),
+      this.judgeQueue.getDelayedCount().catch(() => 0),
+    ]);
+    if (waiting + delayed >= maxWaiting) {
+      throw new BadRequestException('?????????????');
+    }
+    const cooldownSeconds = Number(process.env.JUDGE_SUBMISSION_COOLDOWN_SECONDS || 0);
+    if (cooldownSeconds <= 0) return;
+    const client: any = await this.judgeQueue.client;
+    const key = `contest:submit-cooldown:${userId}`;
+    const acquired = await client.set(key, '1', 'EX', cooldownSeconds, 'NX');
+    if (!acquired) throw new BadRequestException(`???????? ${cooldownSeconds} ????`);
   }
 
   async contestSubmissions(id: string, viewer: Viewer) {

@@ -361,7 +361,11 @@ async function submitCode() {
       startPolling(data.submissionId || data.id);
     }
   } catch (e: any) {
-    errorMsg.value = e.response?.data?.message || '提交失败';
+    if (e.response?.status === 429) {
+      errorMsg.value = e.response?.data?.message || '提交过于频繁，请稍后再试';
+    } else {
+      errorMsg.value = e.response?.data?.message || '提交失败';
+    }
   } finally {
     submitting.value = false;
   }
