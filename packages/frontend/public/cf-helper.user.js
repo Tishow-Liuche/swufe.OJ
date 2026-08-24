@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - Codeforces Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      7.3
+// @version      7.5
 // @description  Auto fill code, auto submit to Codeforces, report SID back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
 // @match        https://codeforces.com/*
@@ -24,10 +24,11 @@
 var DEFAULT_API = 'http://127.0.0.1:3000';
 var API_BASE_KEY = 'swufe_oj_api_base';
 var API = resolveApiBase();
-var HELPER_VERSION = '7.3';
+var HELPER_VERSION = '7.5';
 var L = { cpp: '54', c: '43', python: '31', java: '60' };
 var STATE_KEY = 'swufe_cf_auto_state';
 var LOGIN_REQUIRED_KEY = 'swufe_cf_login_required_at';
+var BLOCKED_REPORT_KEY_PREFIX = 'swufe_cf_blocked_reported_';
 
 function gv(k, d) { return GM_getValue(k, d != null ? d : 0); }
 function sv(k, v) { GM_setValue(k, v); }
@@ -68,7 +69,10 @@ function clearState() {
 
 function markLoginRequired() {
   var st = loadState();
-  if (st.submissionId || st.submittedAt || st.leaseNonce || st.stage) clearState();
+  if (st && st.submissionId) {
+    st.stage = 'LOGIN_REQUIRED';
+    saveState(st);
+  }
   sv(LOGIN_REQUIRED_KEY, String(Date.now()));
 }
 
@@ -80,9 +84,10 @@ function banner(text, bg) {
   d.id = 'cf-h';
   d.textContent = text;
   d.style.cssText =
-    'position:fixed;top:0;left:0;right:0;z-index:9999999;padding:12px 24px;' +
-    'text-align:center;font:15px sans-serif;color:#fff;background:' + bg + ';' +
-    'box-shadow:0 2px 14px rgba(0,0,0,.3);';
+    'position:fixed;top:10px;right:12px;z-index:9999999;max-width:min(520px,calc(100vw - 24px));' +
+    'padding:8px 12px;border-radius:999px;pointer-events:none;opacity:.78;' +
+    'text-align:left;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#fff;background:' + bg + ';' +
+    'box-shadow:0 6px 20px rgba(0,0,0,.22);backdrop-filter:blur(4px);';
   document.body.appendChild(d);
 }
 
@@ -112,6 +117,51 @@ function apiRequest(method, url, data, cb) {
   });
 }
 
+
+function compactPageText() {
+  return ((document.title || '') + '\n' + ((document.body && document.body.innerText) || '')).replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+
+function isCaptchaOrVerificationPage() {
+  var text = compactPageText();
+  return /Just a moment|Cloudflare|Checking your browser|verify you are human|human verification|captcha|recaptcha|turnstile|验证码|人机验证|安全验证|请稍候/i.test(text) ||
+    !!document.querySelector('iframe[src*="captcha"], iframe[src*="turnstile"], iframe[src*="recaptcha"], .g-recaptcha, .cf-turnstile');
+}
+
+function reportBlockedForTask(task, failureCode, failureMessage) {
+  if (!task || !task.submissionId || !task.token) return;
+  var key = BLOCKED_REPORT_KEY_PREFIX + task.submissionId + '_' + failureCode;
+  if (gv(key, '')) return;
+  sv(key, String(Date.now()));
+  apiRequest('POST', '/api/cf-submit-helper/' + task.submissionId + '/report-blocked', {
+    token: task.token,
+    leaseNonce: task.leaseNonce || undefined,
+    failureCode: failureCode,
+    failureMessage: failureMessage,
+    rawStatus: compactPageText()
+  }, function(err) {
+    if (err) {
+      console.warn('[CF-Helper] report-blocked failed:', err);
+      dv(key);
+      return;
+    }
+    clearState();
+    banner(failureMessage + ' 已回传到 SWUFE OJ。', '#e74c3c');
+  });
+}
+
+function reportBlockedForProblem(pid, failureCode, failureMessage) {
+  var st = loadState();
+  if (st && st.submissionId && st.token) {
+    reportBlockedForTask(st, failureCode, failureMessage);
+    return;
+  }
+  apiRequest('GET', '/api/cf-submit-helper/lookup?problemId=' + encodeURIComponent(pid), null, function(err, task) {
+    if (!err && task && task.submissionId && task.token) {
+      reportBlockedForTask(task, failureCode, failureMessage);
+    }
+  });
+}
 function getCfHandle() {
   var a = document.querySelector('a[href*="/profile/"]');
   if (a) {
@@ -297,6 +347,7 @@ function watchForOurSub() {
 
   var handle = getCfHandle();
   if (!handle) {
+    reportBlockedForTask(loadState(), 'LOGIN_REQUIRED', 'Codeforces 未登录，无法读取提交记录。');
     banner('Could not detect your CF handle. Please log in, then refresh.', '#e74c3c');
     return;
   }
@@ -367,12 +418,31 @@ function isActiveSubmittedState(st) {
   );
 }
 
+function isLaunchedFromSwufeOj() {
+  try {
+    return new URLSearchParams(location.search).has('swufeOjApi');
+  } catch (_) {
+    return false;
+  }
+}
+
+function isCfStatusTrackingPage() {
+  return /\/(problemset|contest\/\d+|gym\/\d+)\/status/.test(location.href) ||
+    /\/my$/.test(location.href) ||
+    /\/submissions\//.test(location.href);
+}
+
+function shouldActivateHelper() {
+  var st = loadState();
+  if (isLaunchedFromSwufeOj()) return true;
+  return isCfStatusTrackingPage() && isActiveSubmittedState(st);
+}
+
 var href = location.href;
+if (!shouldActivateHelper()) return;
 diagnostic('loaded on ' + location.pathname);
 var onStatusPage =
-  /\/(problemset|contest\/\d+|gym\/\d+)\/status/.test(href) ||
-  /\/my$/.test(href) ||
-  /\/submissions\//.test(href);
+  isCfStatusTrackingPage();
 
 if (onStatusPage) {
   if (isActiveSubmittedState(loadState())) watchForOurSub();
@@ -395,12 +465,16 @@ function fillAndSubmit() {
   pollAttempts++;
 
   if (pollAttempts > 200) {
+    reportBlockedForProblem(problemId, 'FORM_TIMEOUT', 'Codeforces 提交表单长时间未加载完成。');
     banner('Codeforces submit form did not become ready. Refresh to retry.', '#f39c12');
     return;
   }
 
-  if (document.title.indexOf('Just a moment') !== -1 ||
-      document.title.indexOf('请稍候') !== -1) {
+  if (isCaptchaOrVerificationPage()) {
+    if (pollAttempts > 20) {
+      reportBlockedForProblem(problemId, 'VERIFICATION_REQUIRED', 'Codeforces 正在要求验证码或安全验证，自动提交已阻塞。');
+      return;
+    }
     banner('Waiting for Codeforces verification...', '#3498db');
     setTimeout(fillAndSubmit, 2000);
     return;
@@ -408,6 +482,10 @@ function fillAndSubmit() {
 
   if (!isLoggedIn()) {
     markLoginRequired();
+    if (pollAttempts > 3) {
+      reportBlockedForProblem(problemId, 'LOGIN_REQUIRED', 'Codeforces 未登录，自动提交已停止。');
+      return;
+    }
     if (pollAttempts % 10 === 1) {
       banner('Please log into Codeforces first, then refresh this page.', '#e74c3c');
     }
@@ -452,6 +530,7 @@ function fillAndSubmit() {
     setSourceCode(ar, d.sourceCode);
 
     if (sl.value !== (L[d.language] || '54') || ar.value !== d.sourceCode) {
+      reportBlockedForTask(d, 'SUBMIT_BLOCKED', 'Codeforces 代码或语言写入校验失败，已停止提交。');
       banner('Codeforces form verification failed. Submit blocked.', '#e74c3c');
       return;
     }
