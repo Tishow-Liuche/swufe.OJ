@@ -29,7 +29,7 @@ export class ContestService {
     problems: {
       orderBy: { order: 'asc' as const },
       include: {
-        problem: { select: { id: true, title: true, difficulty: true, timeLimit: true, memoryLimit: true } },
+        problem: { select: { id: true, problemNo: true, title: true, difficulty: true, timeLimit: true, memoryLimit: true } },
       },
     },
     _count: { select: { participants: true, submissions: true } },
@@ -245,6 +245,7 @@ export class ContestService {
             problem: {
               select: {
                 id: true,
+                problemNo: true,
                 title: true,
                 source: true,
                 status: true,
@@ -305,7 +306,7 @@ export class ContestService {
         },
         problems: {
           orderBy: { order: 'asc' },
-          include: { problem: { select: { id: true, title: true } } },
+          include: { problem: { select: { id: true, problemNo: true, title: true } } },
         },
         submissions: {
           include: {
@@ -362,7 +363,7 @@ export class ContestService {
         participants: { select: { userId: true } },
         problems: {
           orderBy: { order: 'asc' },
-          include: { problem: { select: { id: true, title: true } } },
+          include: { problem: { select: { id: true, problemNo: true, title: true } } },
         },
       },
     });
@@ -383,7 +384,7 @@ export class ContestService {
         submission: {
           include: {
             user: { select: { id: true, username: true, nickname: true, avatar: true } },
-            problem: { select: { id: true, title: true } },
+            problem: { select: { id: true, problemNo: true, title: true } },
           },
         },
       },
@@ -424,7 +425,7 @@ export class ContestService {
             submission: {
               include: {
                 user: { select: { id: true, username: true, nickname: true, avatar: true } },
-                problem: { select: { id: true, title: true, timeLimit: true, memoryLimit: true } },
+                problem: { select: { id: true, problemNo: true, title: true, timeLimit: true, memoryLimit: true } },
                 cases: { orderBy: { caseIndex: 'asc' } },
               },
             },

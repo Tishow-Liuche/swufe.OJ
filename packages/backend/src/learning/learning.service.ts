@@ -14,6 +14,7 @@ import {
 
 const problemSummary = {
   id: true,
+  problemNo: true,
   title: true,
   source: true,
   difficulty: true,

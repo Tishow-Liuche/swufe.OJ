@@ -19,7 +19,7 @@ interface ClassMember {
   user: { id: string; username: string; nickname?: string };
 }
 interface ProblemItem {
-  id: string; title: string; source?: string; difficulty?: string;
+  id: string; problemNo?: number | null; title: string; source?: string; difficulty?: string;
   sourceInfo?: { platform?: string; remoteProblemId?: string };
 }
 interface AssignmentItem {
@@ -108,6 +108,10 @@ function defaultJoinCodeExpiry() {
 }
 function formatDate(value?: string | null) { return value ? new Date(value).toLocaleString('zh-CN') : '-'; }
 function formatShortDate(value?: string | null) { return value ? new Date(value).toLocaleDateString('zh-CN') : '-'; }
+function problemDisplayTitle(problem: any, fallback = '题目已移除') {
+  if (!problem) return fallback;
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || fallback}`.trim();
+}
 function parseIdentifiers(text: string) { return text.split(/[\n,，\s]+/).map((item) => item.trim()).filter(Boolean); }
 function classStatus(status: string) {
   return status === 'APPROVED' ? '已启用' : status === 'PENDING' ? '待管理员审核' : '未启用';
@@ -459,13 +463,13 @@ async function loadReport(assignmentId = selectedAssignmentId.value) {
 
         <section v-else-if="activePanel === 'assignment'" class="content-view">
           <div class="view-heading"><div><p>ASSIGNMENT BUILDER</p><h2>发布作业</h2><span>从题库选择题目并设置截止时间。</span></div><span class="selection-count">已选 {{ selectedProblems.length }} 题</span></div>
-          <section class="surface assignment-builder"><div class="form-grid"><label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label><label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label></div><label>作业说明<textarea v-model="assignmentDescription" rows="3" placeholder="可选"></textarea></label><div class="problem-search"><Search :size="17" /><input v-model="problemKeyword" placeholder="搜索题目标题或编号" @keyup.enter="searchProblems"><button :disabled="problemSearching" @click="searchProblems">搜索</button></div><div v-if="problemResults.length" class="problem-results"><button v-for="problem in problemResults" :key="problem.id" @click="addProblem(problem)"><span>{{ problem.title }}</span><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }} · 加入</small></button></div><div class="selected-problems"><p>已选题目</p><div v-if="selectedProblems.length"><span v-for="problem in selectedProblems" :key="problem.id">{{ problem.title }}<button title="移除" @click="removeProblem(problem.id)"><X :size="14" /></button></span></div><div v-else class="surface-empty compact">还没有选择题目</div></div><footer class="builder-footer"><span>发布后将同步到当前正式成员</span><button class="primary-command" :disabled="!selectedProblems.length" @click="createAssignment"><BookOpenCheck :size="16" />发布作业</button></footer></section>
+          <section class="surface assignment-builder"><div class="form-grid"><label>作业标题<input v-model="assignmentTitle" placeholder="例如：第一周基础练习"></label><label>截止时间<input v-model="assignmentEndTime" type="datetime-local"></label></div><label>作业说明<textarea v-model="assignmentDescription" rows="3" placeholder="可选"></textarea></label><div class="problem-search"><Search :size="17" /><input v-model="problemKeyword" placeholder="搜索题目标题或编号" @keyup.enter="searchProblems"><button :disabled="problemSearching" @click="searchProblems">搜索</button></div><div v-if="problemResults.length" class="problem-results"><button v-for="problem in problemResults" :key="problem.id" @click="addProblem(problem)"><span>{{ problemDisplayTitle(problem) }}</span><small>{{ problem.sourceInfo?.platform || problem.source || 'LOCAL' }} · 加入</small></button></div><div class="selected-problems"><p>已选题目</p><div v-if="selectedProblems.length"><span v-for="problem in selectedProblems" :key="problem.id">{{ problemDisplayTitle(problem) }}<button title="移除" @click="removeProblem(problem.id)"><X :size="14" /></button></span></div><div v-else class="surface-empty compact">还没有选择题目</div></div><footer class="builder-footer"><span>发布后将同步到当前正式成员</span><button class="primary-command" :disabled="!selectedProblems.length" @click="createAssignment"><BookOpenCheck :size="16" />发布作业</button></footer></section>
         </section>
 
         <section v-else class="content-view">
           <div class="view-heading"><div><p>ASSIGNMENT REPORT</p><h2>作业报告</h2><span>按学生与题目查看完成情况。</span></div></div>
           <div class="report-toolbar"><select v-model="selectedAssignmentId"><option value="">选择作业</option><option v-for="item in assignments" :key="item.id" :value="item.id">{{ item.title }}（{{ item._count?.problems || item.problems?.length || 0 }} 题 / {{ item._count?.students || 0 }} 人）</option></select><button class="primary-command" :disabled="!selectedAssignmentId || reportLoading" @click="loadReport()"><BarChart3 :size="16" />生成报告</button></div>
-          <section v-if="report" class="surface report-surface"><div class="report-summary"><div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div><div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div><div><strong>{{ report.assignment.title }}</strong><span>当前作业</span></div></div><div class="report-table"><table><thead><tr><th>学生</th><th>完成</th><th v-for="problem in report.problems" :key="problem.id">{{ problem.title }}</th></tr></thead><tbody><tr v-for="student in report.students" :key="student.user.id"><td>{{ student.user.nickname || student.user.username }}</td><td>{{ student.solvedCount }}/{{ student.totalProblems }}</td><td v-for="problem in student.problems" :key="problem.problemId"><span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span><small v-if="problem.attempts">{{ problem.attempts }} 次</small></td></tr></tbody></table></div></section><div v-else class="empty-state">选择一个作业查看完成情况</div>
+          <section v-if="report" class="surface report-surface"><div class="report-summary"><div><strong>{{ report.summary.completedStudents }}/{{ report.summary.studentCount }}</strong><span>完成人数</span></div><div><strong>{{ report.summary.problemCount }}</strong><span>题目数</span></div><div><strong>{{ report.assignment.title }}</strong><span>当前作业</span></div></div><div class="report-table"><table><thead><tr><th>学生</th><th>完成</th><th v-for="problem in report.problems" :key="problem.id">{{ problemDisplayTitle(problem) }}</th></tr></thead><tbody><tr v-for="student in report.students" :key="student.user.id"><td>{{ student.user.nickname || student.user.username }}</td><td>{{ student.solvedCount }}/{{ student.totalProblems }}</td><td v-for="problem in student.problems" :key="problem.problemId"><span class="judge-state" :class="statusClass(problem.status)">{{ statusLabel(problem.status) }}</span><small v-if="problem.attempts">{{ problem.attempts }} 次</small></td></tr></tbody></table></div></section><div v-else class="empty-state">选择一个作业查看完成情况</div>
         </section>
       </template>
     </main>

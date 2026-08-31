@@ -91,8 +91,8 @@ const sortedListItems = computed(() => {
       const difference = pointDifficultyOrder(left.problem?.difficulty) - pointDifficultyOrder(right.problem?.difficulty);
       if (difference) return difference * direction;
     } else if (listSort.value === 'number') {
-      const numberOf = (title = '') => Number(title.match(/P\s*(\d+)/i)?.[1] ?? Number.MAX_SAFE_INTEGER);
-      const difference = numberOf(left.problem?.title) - numberOf(right.problem?.title);
+      const numberOf = (problem: any) => Number(problem?.problemNo || Number.MAX_SAFE_INTEGER);
+      const difference = numberOf(left.problem) - numberOf(right.problem);
       if (difference) return difference * direction;
     } else {
       const difference = new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime();
@@ -121,6 +121,11 @@ function fail(err: any, fallback = '操作失败') {
 
 function problemCount(list: any) {
   return list?._count?.items ?? list?.items?.length ?? 0;
+}
+
+function problemDisplayTitle(problem: any) {
+  if (!problem) return '题目已移除';
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || ''}`.trim();
 }
 
 function changeTab(tab: Tab) {
@@ -419,7 +424,7 @@ onMounted(async () => {
                 <button v-for="item in daily.items" :key="item.id" class="problem-row" @click="openProblem(item.problemId)">
                   <span class="problem-index">{{ String(daily.items.indexOf(item) + 1).padStart(2, '0') }}</span>
                   <span class="problem-copy">
-                    <strong>{{ item.problem?.title }}</strong>
+                    <strong>{{ problemDisplayTitle(item.problem) }}</strong>
                     <small>{{ item.source === 'REVIEW' ? '随机复习题' : '未通过题目' }}</small>
                     <ProblemStateBadges :state="item.state" compact />
                   </span>
@@ -445,7 +450,7 @@ onMounted(async () => {
                   @click="openProblem(item.problemId)"
                 >
                   <span>
-                    <strong>{{ item.problem?.title }}</strong>
+                    <strong>{{ problemDisplayTitle(item.problem) }}</strong>
                     <small>{{ item.reason === 'WRONG' ? '错题优先' : '写过但未通过' }}</small>
                     <ProblemStateBadges :state="item.state" compact />
                   </span>
@@ -560,7 +565,7 @@ onMounted(async () => {
                   <div v-if="listProblemsLoading" class="problem-search-empty">正在加载题目...</div>
                   <div v-else-if="listProblems.length" class="search-results">
                     <button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)">
-                      <span><strong>{{ problem.title }}</strong><small>{{ pointDifficultyShortLabel(problem.difficulty) }}</small><ProblemStateBadges :state="problem.state" compact /></span><b>加入</b>
+                      <span><strong>{{ problemDisplayTitle(problem) }}</strong><small>{{ pointDifficultyShortLabel(problem.difficulty) }}</small><ProblemStateBadges :state="problem.state" compact /></span><b>加入</b>
                     </button>
                   </div>
                   <div v-else-if="listProblemsLoaded" class="problem-search-empty">没有更多可加入的已发布题目。</div>
@@ -581,7 +586,7 @@ onMounted(async () => {
               <div v-if="sortedListItems.length" class="ordered-list">
                 <div v-for="(item, index) in sortedListItems" :key="item.id" class="ordered-row">
                   <span class="order-number">{{ index + 1 }}</span>
-                  <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title || '题目已移除' }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                  <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ problemDisplayTitle(item.problem) }}</button><ProblemStateBadges :state="item.state" compact /></span>
                   <span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
                   <button v-if="selectedListOwned" class="icon-command danger" title="移出题单" aria-label="移出题单" @click="removeFromList(item.id)"><Trash2 :size="15" /></button>
                 </div>
@@ -604,7 +609,7 @@ onMounted(async () => {
                 <div class="library-title"><span class="library-icon favorite"><Star :size="17" /></span><div><h3>收藏</h3><small>{{ favorites.length }} 道题</small></div></div>
                 <div v-if="favorites.length" class="library-list">
                   <div v-for="item in favorites.slice(0, 5)" :key="item.id" class="library-row">
-                    <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                    <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ problemDisplayTitle(item.problem) }}</button><ProblemStateBadges :state="item.state" compact /></span>
                     <span>{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
                     <button class="icon-command" title="取消收藏" aria-label="取消收藏" @click="removeFavorite(item.problemId)"><X :size="15" /></button>
                   </div>
@@ -617,7 +622,7 @@ onMounted(async () => {
                 <div class="library-title"><span class="library-icon wrong"><AlertTriangle :size="17" /></span><div><h3>错题</h3><small>{{ wrongBook.length }} 道题</small></div></div>
                 <div v-if="wrongBook.length" class="library-list">
                   <div v-for="item in wrongBook.slice(0, 5)" :key="item.id" class="library-row">
-                    <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                    <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ problemDisplayTitle(item.problem) }}</button><ProblemStateBadges :state="item.state" compact /></span>
                     <span class="wrong-tag">{{ item.errorType || '需要重做' }}</span>
                     <button class="icon-command" title="移出错题本" aria-label="移出错题本" @click="removeWrong(item.problemId)"><X :size="15" /></button>
                   </div>
@@ -629,7 +634,7 @@ onMounted(async () => {
 
             <div v-else-if="fullLibraryItems.length" class="full-library-list">
               <div v-for="item in fullLibraryItems" :key="item.id" class="library-row full-row">
-                <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ item.problem?.title }}</button><ProblemStateBadges :state="item.state" compact /></span>
+                <span class="listed-problem"><button class="problem-link" @click="openProblem(item.problemId)">{{ problemDisplayTitle(item.problem) }}</button><ProblemStateBadges :state="item.state" compact /></span>
                 <span>{{ libraryView === 'favorites' ? pointDifficultyShortLabel(item.problem?.difficulty) : (item.errorType || '需要重做') }}</span>
                 <button class="secondary-btn danger-command" @click="libraryView === 'favorites' ? removeFavorite(item.problemId) : removeWrong(item.problemId)"><Trash2 :size="15" />移除</button>
               </div>

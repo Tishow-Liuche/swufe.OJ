@@ -57,7 +57,7 @@ export class CommunityService {
       where,
       include: {
         author: { select: { id: true, username: true, nickname: true, role: true } },
-        problem: { select: { id: true, title: true } },
+        problem: { select: { id: true, problemNo: true, title: true } },
         _count: { select: { replies: { where: { status: 'PUBLISHED' } }, reactions: true } },
       },
       orderBy: [{ isPinned: 'desc' }, { updatedAt: 'desc' }],
@@ -85,7 +85,7 @@ export class CommunityService {
       where: { id: postId, status: 'PUBLISHED' },
       include: {
         author: { select: { id: true, username: true, nickname: true, role: true } },
-        problem: { select: { id: true, title: true } },
+        problem: { select: { id: true, problemNo: true, title: true } },
         replies: {
           where: { status: 'PUBLISHED' },
           include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
@@ -175,7 +175,7 @@ export class CommunityService {
       data,
       include: {
         author: { select: { id: true, username: true, nickname: true, role: true } },
-        problem: { select: { id: true, title: true } },
+        problem: { select: { id: true, problemNo: true, title: true } },
         replies: {
           where: { status: 'PUBLISHED' },
           include: { author: { select: { id: true, username: true, nickname: true, role: true } } },
@@ -440,7 +440,7 @@ export class CommunityService {
     return this.prisma.problemFeedback.findMany({
       where: status ? { status: status.toUpperCase() } : {},
       include: {
-        problem: { select: { id: true, title: true } },
+        problem: { select: { id: true, problemNo: true, title: true } },
         reporter: { select: { id: true, username: true, nickname: true } },
         reviewer: { select: { id: true, username: true, nickname: true } },
       },

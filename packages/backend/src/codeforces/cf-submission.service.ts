@@ -192,7 +192,7 @@ export class CfSubmissionService {
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
       include: {
-        problem: { select: { id: true, title: true, timeLimit: true, memoryLimit: true } },
+        problem: { select: { id: true, problemNo: true, title: true, timeLimit: true, memoryLimit: true } },
         user: { select: { id: true, username: true } },
         remoteJob: true,
         cases: { orderBy: { caseIndex: 'asc' } },

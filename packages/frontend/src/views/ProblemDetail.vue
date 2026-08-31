@@ -59,6 +59,7 @@ const sampleExamples = computed(() => {
   }
   return examples;
 });
+const platformProblemNo = computed(() => problem.value?.problemNo ? `T${problem.value.problemNo}` : '');
 
 const languageTemplates: Record<string, string> = {
   cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n',
@@ -480,7 +481,10 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
       </div>
       <div class="problem-header">
         <div class="problem-title-row">
-          <h2>{{ problem.title }}</h2>
+          <h2>
+            <span v-if="platformProblemNo" class="problem-no-badge">{{ platformProblemNo }}</span>
+            <span>{{ problem.title }}</span>
+          </h2>
           <button v-if="problemState" class="favorite-command" :class="{ active: problemState.favorite }" @click="toggleFavorite">
             <Star :size="16" :fill="problemState.favorite ? 'currentColor' : 'none'" />{{ problemState.favorite ? '已收藏' : '收藏' }}
           </button>
@@ -726,7 +730,23 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .problem-community-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid #cbdde0; border-radius: 4px; background: #f7fbfa; color: #087a70; font-size: 13px; font-weight: 700; text-decoration: none; }
 .problem-community-links a:hover { border-color: #87bdb7; background: #eaf6f3; }
 .problem-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.problem-title-row h2 { min-width: 0; }
+.problem-title-row h2 { display: flex; min-width: 0; align-items: center; gap: 10px; flex-wrap: wrap; }
+.problem-no-badge {
+  display: inline-flex;
+  min-width: 56px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border: 1px solid #bdd4e8;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #eef7ff, #f7fbff);
+  color: #1e5d93;
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: .02em;
+}
 .favorite-command { display: inline-flex; min-height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid #d4dce5; border-radius: 6px; color: #667587; background: #fff; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
 .favorite-command:hover, .favorite-command.active { border-color: #e2c45c; color: #846100; background: #fff8d8; }
 .detail-state { margin-bottom: 10px; }

@@ -104,6 +104,11 @@ const solvedRate = computed(() => {
   return tried ? Math.round((solved / tried) * 100) : 0;
 });
 
+function problemDisplayTitle(problem: any, fallback = '-') {
+  if (!problem) return fallback;
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || fallback}`.trim();
+}
+
 onMounted(async () => {
   try {
     const [profileRes, statsRes, settingsRes] = await Promise.allSettled([
@@ -563,7 +568,7 @@ void [
           <div v-if="stats.recentSubmissions?.length" class="submission-list">
             <button v-for="sub in stats.recentSubmissions" :key="sub.id" class="submission-row" @click="viewDetail(sub)">
               <span class="status-dot" :style="{ background: statusColors[sub.status] || '#8996a6' }">{{ statusLabels[sub.status] || sub.status }}</span>
-              <span class="sub-title">{{ sub.problem?.title || '-' }}</span>
+              <span class="sub-title">{{ problemDisplayTitle(sub.problem) }}</span>
               <span class="sub-meta">{{ sub.language }}</span>
             </button>
           </div>
@@ -577,7 +582,7 @@ void [
         <div v-else-if="acceptedProblems.length" class="accepted-list">
           <router-link v-for="item in acceptedProblems" :key="item.problemId" class="accepted-row" :to="`/problems/${item.problemId}`">
             <span class="accepted-source">{{ item.source || item.problem?.source || 'LOCAL' }}</span>
-            <span class="accepted-title">{{ item.problem?.title || item.problemId }}</span>
+            <span class="accepted-title">{{ problemDisplayTitle(item.problem, item.problemId) }}</span>
             <span class="accepted-difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
             <span class="accepted-remote">{{ item.remoteProblemId || item.problem?.sourceInfo?.remoteProblemId || '本地题' }}</span>
           </router-link>
@@ -591,7 +596,7 @@ void [
         <div v-else-if="allSubmissions.length" class="submission-list">
           <button v-for="sub in allSubmissions" :key="sub.id" class="submission-row" @click="viewDetail(sub)">
             <span class="status-dot" :style="{ background: statusColors[sub.status] || '#8996a6' }">{{ statusLabels[sub.status] || sub.status }}</span>
-            <span class="sub-title">{{ sub.problem?.title || '-' }}</span>
+            <span class="sub-title">{{ problemDisplayTitle(sub.problem) }}</span>
             <span class="sub-meta">{{ sub.language }}</span>
             <span class="sub-time" v-if="hasMetric(sub.timeUsed) || hasMetric(sub.memoryUsed)">{{ hasMetric(sub.timeUsed) ? `${sub.timeUsed}ms` : '-' }} / {{ hasMetric(sub.memoryUsed) ? formatMemoryKb(sub.memoryUsed) : '-' }}</span>
             <span class="sub-time" v-else>{{ sub.score }} 分</span>
@@ -677,7 +682,7 @@ void [
           <div class="modal-header"><h2>提交详情</h2><button @click="selectedSubmission = null">×</button></div>
           <div class="modal-body">
             <div class="detail-meta">
-              <span v-if="selectedSubmission.problem"><b>题目：</b>{{ selectedSubmission.problem.title }}</span>
+              <span v-if="selectedSubmission.problem"><b>题目：</b>{{ problemDisplayTitle(selectedSubmission.problem) }}</span>
               <span><b>状态：</b>{{ statusLabels[selectedSubmission.status] || selectedSubmission.status }}</span>
               <span><b>得分：</b>{{ selectedSubmission.score }}</span>
               <span v-if="hasMetric(selectedSubmission.timeUsed)"><b>用时：</b>{{ selectedSubmission.timeUsed }}ms</span>

@@ -258,23 +258,49 @@ describe('ProblemService createFull with judge data', () => {
     });
   });
 
-  it('searches published problems by title, internal ID, or remote problem metadata', async () => {
+  it('searches published problems by exact platform number when keyword is T-prefixed', async () => {
     prisma.problem.findMany.mockResolvedValue([]);
     prisma.problem.count.mockResolvedValue(0);
 
-    await service.findAll({ keyword: 'P10001', pageSize: 12 });
+    await service.findAll({ keyword: 'T26987', pageSize: 12 });
+
+    const expectedWhere = {
+      status: 'PUBLISHED',
+      problemNo: 26987,
+    };
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
+    expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('searches published problems by title, internal ID, or remote problem metadata for ordinary keywords', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ keyword: 'P1001', pageSize: 12 });
 
     const expectedWhere = {
       status: 'PUBLISHED',
       OR: [
-        { title: { contains: 'P10001', mode: 'insensitive' } },
-        { id: { contains: 'P10001', mode: 'insensitive' } },
-        { sourceInfo: { is: { remoteProblemId: { contains: 'P10001', mode: 'insensitive' } } } },
-        { sourceInfo: { is: { remoteUrl: { contains: 'P10001', mode: 'insensitive' } } } },
+        { title: { contains: 'P1001', mode: 'insensitive' } },
+        { id: { contains: 'P1001', mode: 'insensitive' } },
+        { sourceInfo: { is: { remoteProblemId: { contains: 'P1001', mode: 'insensitive' } } } },
+        { sourceInfo: { is: { remoteUrl: { contains: 'P1001', mode: 'insensitive' } } } },
       ],
     };
     expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere, take: 12 }));
     expect(prisma.problem.count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it('returns platform problem numbers in list and detail queries', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+    prisma.problem.findFirst.mockResolvedValue({ id: 'p1', problemNo: 42, status: 'PUBLISHED', versions: [] });
+
+    await service.findAll({ pageSize: 12 });
+    await service.findOne('p1');
+
+    expect(prisma.problem.findMany.mock.calls[0][0].select.problemNo).toBe(true);
+    expect(prisma.problem.findFirst.mock.calls[0][0].select.problemNo).toBe(true);
   });
 
   it('filters published problems by SWUFE Point difficulty values', async () => {

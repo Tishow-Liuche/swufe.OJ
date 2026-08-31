@@ -6,6 +6,11 @@ import api from '../api/client';
 const route = useRoute();
 const submission = ref<any>(null);
 
+function problemDisplayTitle(problem: any, fallback = '-') {
+  if (!problem) return fallback;
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || fallback}`.trim();
+}
+
 onMounted(async () => {
   const { data } = await api.get(`/api/submissions/${route.params.id}`);
   submission.value = data;
@@ -15,7 +20,7 @@ onMounted(async () => {
 <template>
   <div v-if="submission">
     <h2>提交详情</h2>
-    <p>题目: {{ submission.problem.title }}</p>
+    <p>题目: {{ problemDisplayTitle(submission.problem) }}</p>
     <p>状态: <strong>{{ submission.status }}</strong></p>
     <p>得分: {{ submission.score }} | 用时: {{ submission.timeUsed }}ms | 内存: {{ submission.memoryUsed }}KB</p>
     <p v-if="submission.compileMessage" class="compile-msg">{{ submission.compileMessage }}</p>

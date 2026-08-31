@@ -43,6 +43,7 @@ interface ProblemTag {
 
 interface ProblemItem {
   id: string;
+  problemNo?: number | null;
   title: string;
   source: string;
   sourceInfo?: {
@@ -395,6 +396,10 @@ function sourceLabel(value: string) {
   return sourceOptions.find((option) => option.value === value)?.label || value || '原创';
 }
 
+function platformProblemNo(problem: Pick<ProblemItem, 'problemNo'>) {
+  return problem.problemNo ? `T${problem.problemNo}` : 'T-';
+}
+
 function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('zh-CN').format(value || 0);
 }
@@ -659,7 +664,8 @@ function requireLogin(redirect: string) {
                   >
                     <td class="problem-title-cell">
                       <router-link :to="`/problems/${problem.id}`" class="problem-title-link">
-                        {{ problem.title }}
+                        <span class="problem-no-badge">{{ platformProblemNo(problem) }}</span>
+                        <span class="problem-title-text">{{ problem.title }}</span>
                       </router-link>
                       <span class="problem-source">{{ sourceLabel(problemPlatform(problem)) }}</span>
                       <ProblemStateBadges class="problem-state-line" :state="problem.state" compact />
@@ -703,7 +709,10 @@ function requireLogin(redirect: string) {
                 :style="{ animationDelay: `${index * 24}ms` }"
               >
                 <div class="mobile-problem-heading">
-                  <span class="mobile-problem-title">{{ problem.title }}</span>
+                  <span class="mobile-problem-title">
+                    <span class="problem-no-badge">{{ platformProblemNo(problem) }}</span>
+                    <span>{{ problem.title }}</span>
+                  </span>
                   <span class="difficulty-badge" :class="difficultyClass(problem.difficulty)">
                     {{ difficultyShortLabel(problem.difficulty) }}
                   </span>
@@ -1552,11 +1561,39 @@ function requireLogin(redirect: string) {
 }
 
 .problem-title-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   overflow: hidden;
   color: var(--ink);
   font-size: 14px;
   font-weight: 690;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-no-badge {
+  display: inline-flex;
+  min-width: 54px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid #bdd4e8;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #eef7ff, #f7fbff);
+  color: #1e5d93;
+  font-family: 'Manrope Variable', 'Noto Sans SC Variable', sans-serif;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .02em;
+}
+
+.problem-title-text,
+.mobile-problem-title > span:last-child {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2401,15 +2438,14 @@ a:focus-visible {
   }
 
   .mobile-problem-title {
-    display: -webkit-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
     overflow: hidden;
     font-size: 14px;
     font-weight: 700;
     line-height: 1.45;
-    overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
   }
 
   .mobile-tag-list {

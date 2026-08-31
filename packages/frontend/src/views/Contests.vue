@@ -13,7 +13,7 @@ type Contest = {
   teamMode: boolean; isRated: boolean; organizer?: { id: string; name: string };
   state: 'UPCOMING' | 'RUNNING' | 'ENDED';
   participant?: { isVirtual: boolean } | null;
-  problems: Array<{ id: string; problemId: string; order: number; score: number; problem: { id: string; title: string; difficulty: string } }>;
+  problems: Array<{ id: string; problemId: string; order: number; score: number; problem: { id: string; problemNo?: number | null; title: string; difficulty: string } }>;
   _count?: { problems: number; participants: number };
 };
 
@@ -52,6 +52,11 @@ const boardStats = computed(() => {
 });
 const labels: Record<string, string> = { ALL: '全部赛事', UPCOMING: '即将开始', RUNNING: '进行中', ENDED: '已结束' };
 const filterIcons: Record<string, any> = { ALL: ListFilter, UPCOMING: CalendarClock, RUNNING: PlayCircle, ENDED: Flag };
+
+function problemDisplayTitle(problem: any) {
+  if (!problem) return '题目已移除';
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || ''}`.trim();
+}
 
 function dateText(value?: string | null) {
   return value ? new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '未设置';
@@ -337,7 +342,7 @@ onUnmounted(() => {
           <div class="panel">
             <div class="panel-title">比赛题目 <small>{{ selected.problems.length }} PROBLEMS</small></div>
             <button v-for="(item, index) in selected.problems" :key="item.id" class="problem" :disabled="selected.state !== 'RUNNING' || !selected.participant" @click="enterProblem(item.problem.id)">
-              <strong>{{ String.fromCharCode(65 + index) }}</strong><span>{{ item.problem.title }}</span><small>{{ selected.mode === 'IOI' ? item.score + ' 分' : pointDifficultyShortLabel(item.problem.difficulty) }}</small>
+              <strong>{{ String.fromCharCode(65 + index) }}</strong><span>{{ problemDisplayTitle(item.problem) }}</span><small>{{ selected.mode === 'IOI' ? item.score + ' 分' : pointDifficultyShortLabel(item.problem.difficulty) }}</small>
             </button>
             <p v-if="selected.state !== 'RUNNING'" class="tip">比赛开始后可进入题目；赛后可通过虚拟比赛补题。</p>
           </div>
@@ -409,7 +414,7 @@ onUnmounted(() => {
             <button v-for="submission in contestSubmissions" :key="submission.id" type="button" class="submission-row" @click="openContestAcceptedSubmission({ viewableSubmissionId: submission.id })">
               <span class="submission-time">{{ timeText(submission.createdAt) }}</span>
               <span class="submission-user">{{ submission.user.nickname || submission.user.username }}</span>
-              <span class="submission-problem"><b>{{ submission.problem.label }}</b>{{ submission.problem.title }}</span>
+              <span class="submission-problem"><b>{{ submission.problem.label }}</b>{{ problemDisplayTitle(submission.problem) }}</span>
               <span class="submission-lang">{{ submission.language }}</span>
               <strong class="submission-status" :class="submission.status.toLowerCase()">{{ statusText(submission.status) }}</strong>
               <span class="submission-cost">{{ submission.timeUsed ?? '—' }} ms / {{ submission.memoryUsed ?? '—' }} KB</span>
@@ -446,7 +451,7 @@ onUnmounted(() => {
         <header><div><p class="eyebrow">SUBMISSION DETAIL</p><h2>比赛提交详情</h2></div><button type="button" @click="selectedSubmissionDetail = null">×</button></header>
         <div class="submission-detail-grid">
           <span><b>选手</b>{{ selectedSubmissionDetail.user?.nickname || selectedSubmissionDetail.user?.username }}</span>
-          <span><b>题目</b>{{ selectedSubmissionDetail.problem?.title }}</span>
+          <span><b>题目</b>{{ problemDisplayTitle(selectedSubmissionDetail.problem) }}</span>
           <span><b>结果</b>{{ statusText(selectedSubmissionDetail.status) }}</span>
           <span><b>语言</b>{{ selectedSubmissionDetail.language }}</span>
           <span><b>时限</b>{{ selectedSubmissionDetail.problem?.timeLimit || '-' }}ms</span>
@@ -472,7 +477,7 @@ onUnmounted(() => {
           <label>封榜设置<select v-model="form.freezeMode"><option value="NO_FREEZE">无封榜</option><option value="CUSTOM">指定封榜时间</option></select></label><label v-if="form.freezeMode === 'CUSTOM'">封榜时间<input v-model="form.freezeTime" type="datetime-local" /></label><label v-else class="freeze-hint">当前比赛全程实时公开排名</label><label class="check"><input v-model="form.allowUpsolve" type="checkbox" /> 允许赛后虚拟比赛</label>
           <label class="check"><input v-model="form.teamMode" type="checkbox" /> 团队公开赛</label><label class="check"><input v-model="form.isRated" type="checkbox" /> Rated（计入评级标识）</label>
         </div>
-        <div class="picker"><b>选择比赛题目</b><small>仅从比赛预备题库选择，可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problem.title }} <em>{{ pointDifficultyShortLabel(problem.difficulty) }}</em></label><p v-if="!problems.length">暂无比赛预备题。请先在录题或历史录题中将题目状态设为“比赛预备”。</p></div>
+        <div class="picker"><b>选择比赛题目</b><small>仅从比赛预备题库选择，可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problemDisplayTitle(problem) }} <em>{{ pointDifficultyShortLabel(problem.difficulty) }}</em></label><p v-if="!problems.length">暂无比赛预备题。请先在录题或历史录题中将题目状态设为“比赛预备”。</p></div>
         <footer><button type="button" class="cancel" @click="showCreator = false">取消</button><button class="gold" :disabled="actionLoading">创建比赛</button></footer>
       </form>
     </div>

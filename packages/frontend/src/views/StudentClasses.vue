@@ -26,6 +26,7 @@ interface Membership {
 
 interface AssignmentProblem {
   id: string;
+  problemNo?: number | null;
   title: string;
   source?: string;
   difficulty?: string;
@@ -69,6 +70,11 @@ onMounted(loadAll);
 
 function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
+}
+
+function problemDisplayTitle(problem: any, fallback = '题目已移除') {
+  if (!problem) return fallback;
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || fallback}`.trim();
 }
 
 function statusMeta(status: Membership['status']) {
@@ -236,7 +242,7 @@ async function applyToClass() {
               class="problem-row"
               :to="`/problems/${problem.id}`"
             >
-              <span class="problem-title">{{ problem.order }}. {{ problem.title }}</span>
+              <span class="problem-title">{{ problem.order }}. {{ problemDisplayTitle(problem) }}</span>
               <span class="problem-actions">
                 <i class="problem-status" :class="problemStatusClass(problem.status)">
                   {{ problemStatusText(problem.status) }}

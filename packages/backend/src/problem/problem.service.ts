@@ -169,12 +169,17 @@ export class ProblemService {
     where.status = 'PUBLISHED';
     if (keyword) {
       const search = String(keyword).trim();
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { id: { contains: search, mode: 'insensitive' } },
-        { sourceInfo: { is: { remoteProblemId: { contains: search, mode: 'insensitive' } } } },
-        { sourceInfo: { is: { remoteUrl: { contains: search, mode: 'insensitive' } } } },
-      ];
+      const platformNo = this.parsePlatformProblemNo(search);
+      if (platformNo) {
+        where.problemNo = platformNo;
+      } else {
+        where.OR = [
+          { title: { contains: search, mode: 'insensitive' } },
+          { id: { contains: search, mode: 'insensitive' } },
+          { sourceInfo: { is: { remoteProblemId: { contains: search, mode: 'insensitive' } } } },
+          { sourceInfo: { is: { remoteUrl: { contains: search, mode: 'insensitive' } } } },
+        ];
+      }
     }
     if (source) {
       if (source === 'LUOGU' || source === 'CODEFORCES' || source === 'QOJ') {
@@ -191,6 +196,7 @@ export class ProblemService {
         where,
         select: {
           id: true,
+          problemNo: true,
           title: true,
           source: true,
           difficulty: true,
@@ -255,10 +261,15 @@ export class ProblemService {
     if (status) where.status = status;
     if (keyword) {
       const search = String(keyword).trim();
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { id: { contains: search, mode: 'insensitive' } },
-      ];
+      const platformNo = this.parsePlatformProblemNo(search);
+      if (platformNo) {
+        where.problemNo = platformNo;
+      } else {
+        where.OR = [
+          { title: { contains: search, mode: 'insensitive' } },
+          { id: { contains: search, mode: 'insensitive' } },
+        ];
+      }
     }
 
     const [items, total] = await Promise.all([
@@ -266,6 +277,7 @@ export class ProblemService {
         where,
         select: {
           id: true,
+          problemNo: true,
           title: true,
           source: true,
           status: true,
@@ -307,6 +319,7 @@ export class ProblemService {
       where: { id, status: 'PUBLISHED' },
       select: {
         id: true,
+        problemNo: true,
         title: true,
         source: true,
         status: true,
@@ -702,5 +715,12 @@ export class ProblemService {
         throw new BadRequestException('ZIP 压缩比超过限制');
       }
     }
+  }
+
+  private parsePlatformProblemNo(search: string) {
+    const match = search.match(/^T\s*(\d+)$/i);
+    if (!match) return null;
+    const value = Number.parseInt(match[1], 10);
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
   }
 }

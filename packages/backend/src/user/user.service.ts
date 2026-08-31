@@ -167,6 +167,7 @@ export class UserService {
           problem: {
             select: {
               id: true,
+              problemNo: true,
               title: true,
               difficulty: true,
               source: true,
@@ -189,6 +190,7 @@ export class UserService {
           problem: {
             select: {
               id: true,
+              problemNo: true,
               title: true,
               difficulty: true,
               source: true,
@@ -425,7 +427,7 @@ export class UserService {
       select: {
         id: true, status: true, language: true,
         score: true, timeUsed: true, memoryUsed: true, createdAt: true,
-        problem: { select: { id: true, title: true, difficulty: true } },
+        problem: { select: { id: true, problemNo: true, title: true, difficulty: true } },
       },
     });
 
@@ -546,6 +548,7 @@ export class UserService {
             problem: {
               select: {
                 id: true,
+                problemNo: true,
                 title: true,
                 source: true,
                 difficulty: true,
@@ -640,6 +643,7 @@ export class UserService {
         }
         return {
           id: item.problem.id,
+          problemNo: item.problem.problemNo,
           title: item.problem.title,
           source: item.problem.source,
           difficulty: item.problem.difficulty,

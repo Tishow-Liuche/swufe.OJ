@@ -5,6 +5,11 @@ import api from '../api/client';
 const submissions = ref<any[]>([]);
 const loading = ref(true);
 
+function problemDisplayTitle(problem: any, fallback = '-') {
+  if (!problem) return fallback;
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || fallback}`.trim();
+}
+
 onMounted(async () => {
   const { data } = await api.get('/api/submissions', { params: { pageSize: 50 } });
   submissions.value = data.items;
@@ -29,7 +34,7 @@ onMounted(async () => {
       <tbody>
         <tr v-for="(s, i) in submissions" :key="s.id">
           <td>{{ i + 1 }}</td>
-          <td><router-link :to="`/problems/${s.problem.id}`">{{ s.problem.title }}</router-link></td>
+          <td><router-link :to="`/problems/${s.problem.id}`">{{ problemDisplayTitle(s.problem) }}</router-link></td>
           <td>{{ s.user.username }}</td>
           <td>{{ s.language }}</td>
           <td><router-link :to="`/submissions/${s.id}`">{{ s.status }}</router-link></td>

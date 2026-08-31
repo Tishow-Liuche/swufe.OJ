@@ -80,7 +80,7 @@ export class SubmissionService {
     const s = await this.prisma.submission.findUnique({
       where: { id },
       include: { cases: { orderBy: { caseIndex: 'asc' } },
-        problem: { select: { id: true, title: true, timeLimit: true, memoryLimit: true, source: true } },
+        problem: { select: { id: true, problemNo: true, title: true, timeLimit: true, memoryLimit: true, source: true } },
         user: { select: { id: true, username: true } }, remoteJob: true },
     });
     if (!s) throw new NotFoundException('Submission not found');
@@ -99,7 +99,7 @@ export class SubmissionService {
       this.prisma.submission.findMany({ where,
         select: { id: true, status: true, language: true, score: true, timeUsed: true,
           memoryUsed: true, createdAt: true,
-          problem: { select: { id: true, title: true, source: true } },
+          problem: { select: { id: true, problemNo: true, title: true, source: true } },
           user: { select: { id: true, username: true } } },
         skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: 'desc' } }),
       this.prisma.submission.count({ where }),
@@ -152,7 +152,7 @@ export class SubmissionService {
         data: {
           status: 'REMOTE_ERROR',
           score: 0,
-          compileMessage: 'QOJ 浏览器助手未在限定时间内完成真实提交；请确认脚本已更新到 v2.3 且 QOJ 已登录。',
+          compileMessage: 'QOJ 浏览器助手未在限定时间内完成真实提交；请确认脚本已更新到 v2.5 且 QOJ 已登录。',
           judgedAt: now,
         },
       });

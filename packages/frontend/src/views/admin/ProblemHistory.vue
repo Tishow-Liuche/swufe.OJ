@@ -6,6 +6,7 @@ import { pointDifficultyShortLabel } from '../../utils/pointDifficulty';
 
 interface AuthoredProblem {
   id: string;
+  problemNo?: number | null;
   title: string;
   status: string;
   difficulty?: string;
@@ -45,6 +46,10 @@ function judgeMode(problem: AuthoredProblem) {
 
 function testCount(problem: AuthoredProblem) {
   return currentVersion(problem)._count?.testCases || 0;
+}
+
+function problemDisplayTitle(problem: AuthoredProblem) {
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title}`.trim();
 }
 
 function statusLabel(value: string) {
@@ -142,7 +147,7 @@ onMounted(loadProblems);
         </div>
         <div v-for="problem in items" :key="problem.id" class="table-row">
           <div class="title-cell">
-            <strong>{{ problem.title }}</strong>
+            <strong>{{ problemDisplayTitle(problem) }}</strong>
             <small>{{ problem.id }} · {{ pointDifficultyShortLabel(problem.difficulty) }} · {{ problem.timeLimit }}ms / {{ problem.memoryLimit }}MB</small>
             <div class="tags">
               <span v-for="tag in problem.tags || []" :key="tag.name">{{ tag.name }}</span>

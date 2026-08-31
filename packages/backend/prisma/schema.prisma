@@ -221,6 +221,7 @@ model RemoteSubmissionTask {
 
 model Problem {
   id             String   @id @default(cuid())
+  problemNo      Int      @unique @default(autoincrement())
   createdById    String?
   title          String
   source         String   @default("LOCAL")

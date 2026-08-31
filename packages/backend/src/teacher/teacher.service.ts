@@ -359,7 +359,7 @@ export class TeacherService {
       include: {
         problems: {
           orderBy: { order: 'asc' },
-          include: { problem: { select: { id: true, title: true, source: true, difficulty: true } } },
+          include: { problem: { select: { id: true, problemNo: true, title: true, source: true, difficulty: true } } },
         },
         _count: { select: { students: true, problems: true } },
       },
@@ -373,7 +373,7 @@ export class TeacherService {
       include: {
         problems: {
           orderBy: { order: 'asc' },
-          include: { problem: { select: { id: true, title: true, source: true, difficulty: true } } },
+          include: { problem: { select: { id: true, problemNo: true, title: true, source: true, difficulty: true } } },
         },
       },
     });

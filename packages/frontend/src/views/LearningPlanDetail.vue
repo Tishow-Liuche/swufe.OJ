@@ -47,6 +47,11 @@ function openProblem(problemId: string) {
   void router.push(`/problems/${problemId}`);
 }
 
+function problemDisplayTitle(problem: any, fallback = '题目已移除') {
+  if (!problem) return fallback;
+  return `${problem.problemNo ? `T${problem.problemNo} ` : ''}${problem.title || fallback}`.trim();
+}
+
 onMounted(loadPlan);
 </script>
 
@@ -80,7 +85,7 @@ onMounted(loadPlan);
             <span class="order">{{ index + 1 }}</span>
             <CheckCircle2 v-if="item.solved" :size="18" />
             <Circle v-else :size="18" />
-            <span class="problem-copy"><strong>{{ item.problem?.title || '题目已移除' }}</strong><ProblemStateBadges :state="item.state" compact /></span>
+            <span class="problem-copy"><strong>{{ problemDisplayTitle(item.problem) }}</strong><ProblemStateBadges :state="item.state" compact /></span>
             <span class="difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
           </button>
         </div>
