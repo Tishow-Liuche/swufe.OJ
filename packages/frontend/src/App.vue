@@ -24,10 +24,9 @@ watch(() => auth.user?.id, () => void fetchNotificationUnread());
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown);
   window.addEventListener('swufe:notifications-changed', handleNotificationChanged);
+  void auth.restoreSession();
   void fetchNotificationUnread();
-  notificationPoll = window.setInterval(() => {
-    if (document.visibilityState === 'visible') void fetchNotificationUnread();
-  }, 180_000);
+  notificationPoll = window.setInterval(() => void fetchNotificationUnread(), 60_000);
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
@@ -109,16 +108,13 @@ async function logout() {
   <div class="app-shell">
     <header class="app-header" :class="{ 'home-header': isHomeRoute }">
       <div class="header-left">
-        <router-link to="/" class="logo" aria-label="SWUFE Singularity OJ 首页">
-          <img class="logo-seal" src="/swufe-seal.png" width="30" height="30" alt="" />
-          <span class="logo-text">SWUFE Singularity OJ</span>
-        </router-link>
+        <router-link to="/" class="logo" aria-label="SWUFE Singularity OJ 首页">SWUFE Singularity OJ</router-link>
         <nav class="desktop-nav" aria-label="主导航">
           <router-link :to="protectedNavigation('/problems')">题库</router-link>
           <router-link :to="protectedNavigation('/leaderboard')">排行榜</router-link>
           <router-link :to="protectedNavigation('/contests')">比赛</router-link>
           <router-link :to="protectedNavigation('/problem-lists')">学习</router-link>
-          <router-link :to="protectedNavigation('/community')">社区</router-link>
+          <router-link to="/community">社区</router-link>
           <router-link v-if="auth.isTeacher()" to="/teacher/classes">班级</router-link>
           <router-link v-if="auth.isStudent()" to="/classes">班级</router-link>
         </nav>
@@ -176,7 +172,7 @@ async function logout() {
         <router-link :to="protectedNavigation('/leaderboard')" @click="closeMobileMenu">排行榜</router-link>
         <router-link :to="protectedNavigation('/contests')" @click="closeMobileMenu">比赛</router-link>
         <router-link :to="protectedNavigation('/problem-lists')" @click="closeMobileMenu">学习</router-link>
-        <router-link :to="protectedNavigation('/community')" @click="closeMobileMenu">社区</router-link>
+        <router-link to="/community" @click="closeMobileMenu">社区</router-link>
         <router-link v-if="auth.isTeacher()" to="/teacher/classes" @click="closeMobileMenu">班级</router-link>
         <router-link v-if="auth.isStudent()" to="/classes" @click="closeMobileMenu">班级</router-link>
         <button type="button" @click="openSearch"><Search :size="17" />搜索题目</button>
@@ -201,8 +197,6 @@ async function logout() {
 </template>
 
 <style>
-@import './styles/workspace-sidebars.css';
-
 * {
   box-sizing: border-box;
   margin: 0;
@@ -279,9 +273,6 @@ body {
 
 .logo {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
   margin-right: 8px;
   color: #69c6ff;
   font-size: 19px;
@@ -291,21 +282,7 @@ body {
   white-space: nowrap;
 }
 
-.logo-seal {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  object-fit: contain;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 0 1px rgba(33, 100, 220, 0.12);
-}
-
-.logo-text {
-  position: relative;
-}
-
-.logo-text::after {
+.logo::after {
   position: absolute;
   top: 1px;
   right: -7px;

@@ -16,6 +16,7 @@
     "test:contest-reserved-preview": "node scripts/check-contest-reserved-preview.mjs",
     "test:profile-ui": "node scripts/check-profile-ui.mjs",
     "test:header-utilities": "node scripts/check-header-utilities.mjs",
+    "test:auth-session": "node scripts/check-auth-session-restore.mjs",
     "test:point-difficulty": "node scripts/check-point-difficulty.mjs",
     "test:problem-authoring": "node scripts/check-problem-authoring-samples.mjs",
     "preview": "vite preview",
