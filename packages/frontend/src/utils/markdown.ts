@@ -8,9 +8,35 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function decodeHtmlEntities(text: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+    le: '\\le',
+    ge: '\\ge',
+    times: '\\times',
+    middot: '\\cdot',
+    minus: '-',
+  };
+
+  return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g, (match, entity: string) => {
+    if (entity[0] === '#') {
+      const value = entity[1]?.toLowerCase() === 'x'
+        ? Number.parseInt(entity.slice(2), 16)
+        : Number.parseInt(entity.slice(1), 10);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : match;
+    }
+    return namedEntities[entity] ?? match;
+  });
+}
+
 function renderFormula(formula: string, displayMode: boolean): string {
   try {
-    return katex.renderToString(formula.trim(), {
+    return katex.renderToString(decodeHtmlEntities(formula).trim(), {
       throwOnError: false,
       displayMode,
     });
@@ -46,6 +72,27 @@ export function renderMarkdownWithMath(text?: string | null): string {
     raw = raw.replace(/`[^`\n]*`/g, (codeSpan: string) => {
       const key = `@@MD_CODE_${protectedIndex++}@@`;
       protectedMarkdown.set(key, codeSpan);
+      return key;
+    });
+
+    raw = raw.replace(/\$\$\$([\s\S]+?)\$\$\$/g, (_match: string, formula: string) => {
+      if (!formula.trim()) return _match;
+      const key = `@@MD_MATH_${mathIndex++}@@`;
+      renderedMath.set(key, renderFormula(formula, formula.includes('\n')));
+      return key;
+    });
+
+    raw = raw.replace(/\\\[([\s\S]+?)\\\]/g, (_match: string, formula: string) => {
+      if (!formula.trim()) return _match;
+      const key = `@@MD_MATH_${mathIndex++}@@`;
+      renderedMath.set(key, renderFormula(formula, true));
+      return key;
+    });
+
+    raw = raw.replace(/\\\(([\s\S]+?)\\\)/g, (_match: string, formula: string) => {
+      if (!formula.trim() || formula.includes('\n')) return _match;
+      const key = `@@MD_MATH_${mathIndex++}@@`;
+      renderedMath.set(key, renderFormula(formula, false));
       return key;
     });
 
