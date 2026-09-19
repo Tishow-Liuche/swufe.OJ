@@ -177,6 +177,7 @@ describe('ProblemService createFull with judge data', () => {
 
     expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { status: 'PUBLISHED', sourceInfo: { platform: 'ATCODER' } },
+      orderBy: { problemNo: 'asc' },
     }));
   });
 

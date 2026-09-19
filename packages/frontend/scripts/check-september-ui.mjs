@@ -19,6 +19,7 @@ await page.route('**/api/**', route => {
   else if (path === '/api/auth/password-recovery') body = { enabled: false };
   else if (path === '/api/problems/metadata') body = { total: 1, tags: [{ name: 'Constructive Algorithms', count: 1 }, { name: 'CSP-J 入门级', count: 1 }], difficulties: [], sources: [] };
   else if (path === '/api/problems') body = { items: [problem], total: 1 };
+  else if (path === '/api/problems/mine/created') body = { items: [problem, { ...problem, id: 'p2', problemNo: 2, title: '第二题' }] };
   else if (path === '/api/contests' || path === '/api/contests/mine') body = [contest];
   else if (path === '/api/contests/campus-ui') body = contest;
   else if (path.endsWith('/standings')) body = { rows: [], problems: [] };
@@ -51,12 +52,21 @@ try {
   assert.match(await accepted.innerText(), /T1/);
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('select').filter({ has: page.locator('option[value="FEMALE"]') }).waitFor();
+  profile.role = 'TEACHER';
+  await page.goto(base + '/contests');
+  await page.locator('.overview-meta').getByText('校赛私有赛', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '＋ 创建比赛', exact: true }).click();
+  await page.locator('.picker label').nth(0).click();
+  await page.locator('.picker label').nth(1).click();
+  await page.locator('.problem-order li').nth(1).getByRole('button', { name: '上移' }).click();
+  assert.match(await page.locator('.problem-order li').first().innerText(), /T2/);
+  await page.locator('select').filter({ has: page.locator('option[value="CAMPUS_PRIVATE"]') }).selectOption('CAMPUS_PRIVATE');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base + '/forgot-password');
   await page.locator('.recovery-card').waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
-  console.log('PASS: disabled SMS, translated searchable tags, new-tab T-number problem links, campus deep-link/reload, accepted contest links, gender setting, mobile layout, no runtime errors');
+  console.log('PASS: disabled SMS, translated searchable tags, new-tab T-number problem links, campus deep-link/reload, accepted contest links, gender setting, contest type and problem reorder, mobile layout, no runtime errors');
 } catch (error) {
   console.error('PAGE', page.url(), 'ERRORS', errors, 'TEXT', (await page.locator('body').innerText()).slice(0,2000));
   throw error;

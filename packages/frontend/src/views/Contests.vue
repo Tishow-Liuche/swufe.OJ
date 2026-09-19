@@ -460,7 +460,7 @@ onUnmounted(() => {
             <div class="overview-card-top"><span class="mode">{{ contest.mode }}</span><span class="state" :class="contest.state.toLowerCase()">{{ stateText(contest.state) }}</span></div>
             <h3>{{ contest.title }}</h3>
             <p>{{ contest.description || '查看比赛安排、题目与排名信息。' }}</p>
-            <div class="overview-meta"><span>#{{ contest.contestNo }}</span><span>{{ contest.organizer?.name || '平台赛事组' }}</span><span>{{ contest.teamMode ? '团队公开赛' : '个人公开赛' }}</span><span v-if="contest.isRated" class="rated">Rated</span></div>
+            <div class="overview-meta"><span>#{{ contest.contestNo }}</span><span>{{ contest.organizer?.name || '平台赛事组' }}</span><span>{{ contest.visibility === 'CAMPUS_PRIVATE' ? '校赛私有赛' : contest.teamMode ? '团队公开赛' : '个人公开赛' }}</span><span v-if="contest.isRated" class="rated">Rated</span></div>
             <span class="overview-enter">查看比赛 <span aria-hidden="true">→</span></span>
           </button>
         </div>
