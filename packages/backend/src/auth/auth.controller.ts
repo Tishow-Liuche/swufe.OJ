@@ -14,6 +14,7 @@ import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { PasswordRecoveryService } from './password-recovery.service';
 import { RegisterDto, LoginDto } from './dto';
 import { REFRESH_COOKIE, refreshTokenMaxAge } from './refresh-token';
 
@@ -22,12 +23,26 @@ export class AuthController {
   constructor(
     private auth: AuthService,
     private config: ConfigService,
+    private recovery: PasswordRecoveryService,
   ) {}
 
   @Post('register')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     return this.withRefreshCookie(res, await this.auth.register(dto));
+  }
+
+  @Get('password-recovery')
+  recoveryAvailability() { return this.recovery.availability(); }
+
+  @Post('password-recovery/code')
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  sendRecoveryCode(@Body() dto: { phone?: string }) { return this.recovery.send(dto.phone); }
+
+  @Post('password-recovery/reset')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  resetPassword(@Body() dto: { phone?: string; code?: string; password?: string }) {
+    return this.recovery.reset(dto.phone, dto.code, dto.password);
   }
 
   @Post('login')

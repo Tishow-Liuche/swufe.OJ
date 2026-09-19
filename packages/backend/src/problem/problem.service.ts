@@ -211,7 +211,7 @@ export class ProblemService {
         },
         skip: (currentPage - 1) * currentPageSize,
         take: currentPageSize,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { problemNo: 'asc' },
       }),
       this.prisma.problem.count({ where }),
     ]);

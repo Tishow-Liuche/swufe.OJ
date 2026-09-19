@@ -74,7 +74,7 @@ const settingsError = ref('');
 const avatarInput = ref<HTMLInputElement | null>(null);
 const avatarUploading = ref(false);
 const avatarError = ref('');
-const profileForm = reactive({ nickname: '', email: '', phone: '', studentId: '' });
+const profileForm = reactive({ nickname: '', email: '', phone: '', studentId: '', gender: '' });
 const accountForm = reactive({ codeforcesHandle: '', luoguHandle: '' });
 const cfSyncing = ref(false);
 const passwordForm = reactive({ currentPassword: '', password: '', confirmPassword: '' });
@@ -140,6 +140,7 @@ function fillSettings(data: any) {
   profileForm.email = p.email || '';
   profileForm.phone = p.phone || '';
   profileForm.studentId = p.studentId || '';
+  profileForm.gender = p.gender || '';
   accountForm.codeforcesHandle = data.externalAccounts?.codeforcesHandle || '';
   accountForm.luoguHandle = data.externalAccounts?.luoguHandle || '';
   awards.value = data.awards || [];
@@ -167,10 +168,11 @@ async function saveProfile() {
     return;
   }
   try {
-    const payload: Record<string, string> = {
+    const payload: Record<string, string | null> = {
       nickname: profileForm.nickname,
       email: profileForm.email,
       phone: profileForm.phone,
+      gender: profileForm.gender || null,
     };
     if (isStudentAccount.value && profileForm.studentId.trim()) {
       payload.studentId = profileForm.studentId.trim();
@@ -580,7 +582,7 @@ void [
         <div class="panel-title"><h2>已通过题目</h2><span>{{ acceptedProblems.length }} 题</span></div>
         <div v-if="acceptedLoading" class="empty-state">正在加载已通过题目…</div>
         <div v-else-if="acceptedProblems.length" class="accepted-list">
-          <router-link v-for="item in acceptedProblems" :key="item.problemId" class="accepted-row" :to="`/problems/${item.problemId}`">
+          <router-link v-for="item in acceptedProblems" :key="item.problem.id" class="accepted-row" :to="`/problems/${item.problem.id}`" target="_blank" rel="noopener">
             <span class="accepted-source">{{ item.source || item.problem?.source || 'LOCAL' }}</span>
             <span class="accepted-title">{{ problemDisplayTitle(item.problem, item.problemId) }}</span>
             <span class="accepted-difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
@@ -626,6 +628,7 @@ void [
         <article class="profile-panel">
           <div class="panel-title"><h2>基础资料</h2><UserRound :size="18" /></div>
           <label>昵称<input v-model="profileForm.nickname" placeholder="设置展示昵称" /></label>
+          <label>性别<select v-model="profileForm.gender"><option value="">未设置</option><option value="MALE">男</option><option value="FEMALE">女</option></select></label>
           <label v-if="isStudentAccount">学号<input v-model="profileForm.studentId" inputmode="numeric" maxlength="8" placeholder="绑定 8 位数字学号" /></label>
           <label>邮箱<input v-model="profileForm.email" type="email" placeholder="绑定邮箱" /></label>
           <label>电话<input v-model="profileForm.phone" placeholder="绑定电话号码" /></label>

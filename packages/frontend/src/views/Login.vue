@@ -473,6 +473,7 @@ async function submit() {
             </div>
           </template>
 
+          <router-link v-if="mode === 'login'" to="/forgot-password">忘记密码？</router-link>
           <p v-if="passwordChangedNotice" class="form-success" role="status">密码已修改，请使用新密码重新登录。</p>
           <p v-if="error" class="form-error" role="alert">{{ error }}</p>
 

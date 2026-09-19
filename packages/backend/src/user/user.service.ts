@@ -12,6 +12,7 @@ type ProfileUpdateInput = {
   email?: string;
   phone?: string | null;
   studentId?: string | null;
+  gender?: string | null;
 };
 
 type ExternalAccountUpdateInput = {
@@ -48,7 +49,7 @@ export class UserService {
       where: { id: userId },
       select: {
         id: true, username: true, email: true, nickname: true,
-        avatar: true, phone: true, role: true, school: true, studentId: true, requestedRole: true,
+        avatar: true, phone: true, role: true, school: true, studentId: true, gender: true, requestedRole: true,
         teacherApplicationStatus: true, mustChangePassword: true, createdAt: true,
       },
     });
@@ -81,6 +82,12 @@ export class UserService {
 
   async updateProfile(userId: string, data: ProfileUpdateInput) {
     const updateData: ProfileUpdateInput = {};
+    if (data.gender !== undefined) {
+      if (data.gender !== null && !['MALE', 'FEMALE'].includes(data.gender)) {
+        throw new BadRequestException('请选择男或女');
+      }
+      updateData.gender = data.gender;
+    }
     if (data.nickname !== undefined) updateData.nickname = this.cleanOptional(data.nickname);
     if (data.avatar !== undefined) updateData.avatar = this.cleanOptional(data.avatar);
     if (data.phone !== undefined) updateData.phone = this.cleanOptional(data.phone);
@@ -118,7 +125,7 @@ export class UserService {
       where: { id: userId }, data: updateData,
       select: {
         id: true, username: true, email: true, phone: true,
-        nickname: true, avatar: true, role: true, school: true, studentId: true,
+        nickname: true, avatar: true, role: true, school: true, studentId: true, gender: true,
       },
     });
     return this.withDisplayAvatar(profile);
@@ -203,6 +210,8 @@ export class UserService {
 
     const byProblem = new Map<string, any>();
     const put = (item: any) => {
+      if (!item.problem) return;
+      item.problemId = item.problem.id;
       const existing = byProblem.get(item.problem.id);
       if (!existing || new Date(item.acceptedAt).getTime() > new Date(existing.acceptedAt).getTime()) {
         byProblem.set(item.problem.id, item);

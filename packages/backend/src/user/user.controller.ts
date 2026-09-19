@@ -23,7 +23,7 @@ export class UserController {
   @UseGuards(AuthGuard('jwt'))
   updateProfile(
     @Req() req: any,
-    @Body() data: { nickname?: string | null; avatar?: string | null; email?: string; phone?: string | null; studentId?: string | null },
+    @Body() data: { nickname?: string | null; avatar?: string | null; email?: string; phone?: string | null; studentId?: string | null; gender?: string | null },
   ) {
     return this.userService.updateProfile(req.user.id, data);
   }

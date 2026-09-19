@@ -134,7 +134,9 @@ export class ContestStandingsCalculatorService {
 
   private row(participant: any, problems: any[], score: number, penalty: number, submissions: any[]) {
     return {
-      user: participant.user,
+      user: participant.studentId && participant.realName
+        ? { ...participant.user, nickname: `${participant.studentId}_${participant.realName}` }
+        : participant.user,
       userId: participant.userId,
       isVirtual: participant.isVirtual,
       solvedCount: problems.filter((problem) => problem.accepted).length,

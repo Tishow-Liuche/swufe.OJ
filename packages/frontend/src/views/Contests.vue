@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useStorage } from '@vueuse/core';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { CalendarClock, Flag, ListFilter, PanelLeftClose, PanelLeftOpen, PlayCircle, Trophy } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
@@ -18,6 +18,16 @@ type Contest = {
 };
 
 const router = useRouter();
+const route = useRoute();
+const campusForm = ref({ studentId: '', realName: '' });
+const campusVisibility = ref('PUBLIC');
+function moveProblem(index: number, delta: number) {
+  const next = index + delta;
+  if (next < 0 || next >= form.value.problemIds.length) return;
+  const ids = [...form.value.problemIds];
+  [ids[index], ids[next]] = [ids[next]!, ids[index]!];
+  form.value.problemIds = ids;
+}
 const auth = useAuthStore();
 const contests = ref<Contest[]>([]);
 const selected = ref<Contest | null>(null);
@@ -78,8 +88,15 @@ async function load() {
       error.value = '比赛服务已更新：登录后的报名、虚拟赛和个人赛事状态需要重启后端后才可使用。';
     }
     contests.value = data;
-    const next = selected.value ? data.find((item: Contest) => item.id === selected.value?.id) : null;
-    if (next) await selectContest(next);
+    if (route.params.id) {
+      const detail = await api.get('/api/contests/' + encodeURIComponent(String(route.params.id)));
+      selected.value = detail.data;
+      await refreshLiveBoard();
+      scheduleLiveBoardRefresh();
+    } else {
+      selected.value = null;
+      clearLiveBoardRefresh();
+    }
   } catch (e: any) {
     error.value = e.response?.status === 404
       ? '当前后端尚未加载比赛模块，请重启后端服务后重试。'
@@ -87,9 +104,7 @@ async function load() {
   } finally { loading.value = false; }
 }
 async function selectContest(contest: Contest) {
-  selected.value = contest; standings.value = []; standingsProblems.value = []; contestSubmissions.value = [];
-  await refreshLiveBoard();
-  scheduleLiveBoardRefresh(5000);
+  await router.push('/contests/' + encodeURIComponent(contest.id));
 }
 function showOverview(nextFilter: string) {
   filter.value = nextFilter;
@@ -98,6 +113,7 @@ function showOverview(nextFilter: string) {
   standingsProblems.value = [];
   contestSubmissions.value = [];
   clearLiveBoardRefresh();
+  if (route.params.id) void router.push('/contests');
 }
 async function refreshStandings() {
   if (!selected.value) return;
@@ -193,7 +209,7 @@ async function register() {
   const password = selected.value.visibility === 'PASSWORD' ? window.prompt('请输入比赛密码') || '' : '';
   actionLoading.value = true;
   try {
-    await api.post('/api/contests/' + selected.value.id + '/register', { password });
+    await api.post('/api/contests/' + selected.value.id + '/register', { password, ...campusForm.value });
     await load();
   } catch (e: any) { error.value = e.response?.data?.message || '报名失败'; }
   finally { actionLoading.value = false; }
@@ -209,7 +225,7 @@ async function virtualContest() {
   finally { actionLoading.value = false; }
 }
 function enterProblem(problemId: string) {
-  if (selected.value) router.push({ path: '/problems/' + problemId, query: { contestId: selected.value.id } });
+  if (selected.value) window.open(router.resolve({ path: '/problems/' + problemId, query: { contestId: selected.value.id } }).href, '_blank', 'noopener');
 }
 async function openCreator() {
   showCreator.value = true;
@@ -226,6 +242,7 @@ async function createContest() {
   try {
     await api.post('/api/teacher/contests', {
       ...form.value,
+      visibility: campusVisibility.value,
       startTime: iso(form.value.startTime), endTime: iso(form.value.endTime),
       registerStart: iso(form.value.registerStart), registerEnd: iso(form.value.registerEnd), freezeTime: form.value.freezeMode === 'NO_FREEZE' ? undefined : iso(form.value.freezeTime),
     });
@@ -248,6 +265,7 @@ onMounted(async () => {
   await load();
   scheduleLiveBoardRefresh(5000);
 });
+watch(() => route.params.id, () => void load());
 onUnmounted(() => {
   clearLiveBoardRefresh();
 });
@@ -316,7 +334,7 @@ onUnmounted(() => {
       <section v-if="selected" class="detail">
         <header class="detail-head">
           <div>
-            <div class="badges"><span class="mode">{{ selected.mode }}</span><span class="contest-kind">{{ selected.teamMode ? '团队公开赛' : '个人公开赛' }}</span><span v-if="selected.isRated" class="rated">Rated</span><span class="state" :class="selected.state.toLowerCase()">{{ stateText(selected.state) }}</span><span v-if="selected.participant?.isVirtual" class="virtual">虚拟参赛</span></div>
+            <div class="badges"><span class="mode">{{ selected.mode }}</span><span class="contest-kind">{{ selected.visibility === 'CAMPUS_PRIVATE' ? '校赛私有赛' : selected.teamMode ? '团队公开赛' : '个人公开赛' }}</span><span v-if="selected.isRated" class="rated">Rated</span><span class="state" :class="selected.state.toLowerCase()">{{ stateText(selected.state) }}</span><span v-if="selected.participant?.isVirtual" class="virtual">虚拟参赛</span></div>
             <h2>{{ selected.title }}</h2>
             <p>{{ selected.description || '一场等待你加入的编程挑战。' }}</p>
           </div>
@@ -326,6 +344,12 @@ onUnmounted(() => {
           <span v-else class="joined">✓ 已加入赛事</span>
         </header>
 
+        <form v-if="selected.visibility === 'CAMPUS_PRIVATE' && !selected.participant && selected.state !== 'ENDED'" class="campus-registration" @submit.prevent="register">
+          <p>校赛私有赛需先在<router-link to="/profile">个人中心</router-link>绑定学号，报名后榜单显示“学号_姓名”。</p>
+          <label>学号<input v-model="campusForm.studentId" required inputmode="numeric" maxlength="8" placeholder="与绑定学号一致" /></label>
+          <label>姓名<input v-model="campusForm.realName" required maxlength="40" autocomplete="name" placeholder="真实姓名" /></label>
+          <button class="gold" :disabled="actionLoading">确认报名</button>
+        </form>
         <div class="rules">
           <span>🗓 {{ dateText(selected.startTime) }} 至 {{ dateText(selected.endTime) }}</span>
           <span>⏱ {{ selected.mode === 'ACM' ? '错误罚时 ' + selected.penaltyTime + ' 分钟' : '按最高得分计分' }}</span>
@@ -335,7 +359,7 @@ onUnmounted(() => {
         <div class="contest-facts" aria-label="比赛基本信息">
           <div><small>比赛编号</small><strong>#{{ selected.contestNo }}</strong></div>
           <div><small>举办者</small><strong>{{ selected.organizer?.name || '平台赛事组' }}</strong></div>
-          <div><small>比赛类型</small><span><b>{{ selected.mode }}</b><b>{{ selected.teamMode ? '团队公开赛' : '个人公开赛' }}</b><b v-if="selected.isRated" class="rated">Rated</b></span></div>
+          <div><small>比赛类型</small><span><b>{{ selected.mode }}</b><b>{{ selected.visibility === 'CAMPUS_PRIVATE' ? '校赛私有赛' : selected.teamMode ? '团队公开赛' : '个人公开赛' }}</b><b v-if="selected.isRated" class="rated">Rated</b></span></div>
         </div>
 
         <div class="boards">
@@ -469,6 +493,7 @@ onUnmounted(() => {
         <header><div><p class="eyebrow">TEACHER CONSOLE</p><h2>创建一场比赛</h2></div><button type="button" @click="showCreator = false">×</button></header>
         <div class="form-grid">
           <label class="wide">比赛名称<input v-model="form.title" required placeholder="例如：2026 夏季算法挑战赛" /></label>
+          <label>比赛类型<select v-model="campusVisibility"><option value="PUBLIC">公开赛</option><option value="CAMPUS_PRIVATE">校赛私有赛</option></select></label>
           <label>计分模式<select v-model="form.mode"><option value="ACM">ACM / ICPC</option><option value="IOI">IOI / 得分制</option></select></label>
           <label>每次错误罚时<input v-model.number="form.penaltyTime" type="number" min="0" /></label>
           <label class="wide">比赛说明<textarea v-model="form.description" rows="3" placeholder="说明比赛范围、注意事项与参赛要求"></textarea></label>
@@ -478,6 +503,13 @@ onUnmounted(() => {
           <label class="check"><input v-model="form.teamMode" type="checkbox" /> 团队公开赛</label><label class="check"><input v-model="form.isRated" type="checkbox" /> Rated（计入评级标识）</label>
         </div>
         <div class="picker"><b>选择比赛题目</b><small>仅从比赛预备题库选择，可多选</small><label v-for="problem in problems" :key="problem.id"><input v-model="form.problemIds" type="checkbox" :value="problem.id" /> {{ problemDisplayTitle(problem) }} <em>{{ pointDifficultyShortLabel(problem.difficulty) }}</em></label><p v-if="!problems.length">暂无比赛预备题。请先在录题或历史录题中将题目状态设为“比赛预备”。</p></div>
+        <ol v-if="form.problemIds.length" class="problem-order" aria-label="比赛题目顺序">
+          <li v-for="(id, index) in form.problemIds" :key="id">
+            <span>{{ index + 1 }}. {{ problemDisplayTitle(problems.find(p => p.id === id)) }}</span>
+            <button type="button" :disabled="index === 0" @click="moveProblem(index, -1)">上移</button>
+            <button type="button" :disabled="index === form.problemIds.length - 1" @click="moveProblem(index, 1)">下移</button>
+          </li>
+        </ol>
         <footer><button type="button" class="cancel" @click="showCreator = false">取消</button><button class="gold" :disabled="actionLoading">创建比赛</button></footer>
       </form>
     </div>
@@ -485,6 +517,15 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.campus-registration { display:flex; flex-wrap:wrap; gap:12px; padding:16px; background:#f4f6f8; border:1px solid #d9e1e8; border-radius:8px; margin:20px 0; }
+.campus-registration p { flex-basis:100%; margin:0; }
+.campus-registration label { display:grid; gap:6px; }
+.campus-registration input { padding:9px; border:1px solid #bcc9d3; border-radius:5px; }
+.problem-order { padding:0; list-style:none; }
+.problem-order li { display:flex; gap:8px; align-items:center; padding:8px 0; }
+.problem-order span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.problem-order button { padding:6px 12px; border:1px solid #cbd5df; border-radius:5px; background:#f5f7fa; cursor:pointer; }
+.problem-order button:disabled { opacity:.4; cursor:default; }
 .contest-page { --ink:#18253a; --muted:#748197; --line:#e4eaf0; --navy:#173b66; --gold:#f6c15c; max-width:1180px; margin:auto; padding:26px 22px 64px; color:var(--ink); }
 .hero { position:relative; isolation:isolate; overflow:hidden; display:flex; justify-content:space-between; gap:30px; min-height:178px; padding:32px 40px; border-radius:26px; color:#fff; background:linear-gradient(120deg,#16385f,#2d6da2); box-shadow:0 18px 42px rgba(23,59,102,.18); }.hero:after { content:""; position:absolute; z-index:-1; inset:0; opacity:.25; background-image:radial-gradient(#fff 1px,transparent 1.6px); background-size:25px 25px; }.eyebrow { margin:0 0 7px; color:#f8cd77; font-size:11px; font-weight:900; letter-spacing:.15em; }.hero h1 { margin:0; font-size:42px; letter-spacing:-.05em; }.hero p:not(.eyebrow) { max-width:610px; margin:11px 0 0; color:#dfedfb; line-height:1.7; }.hero-actions { display:flex; flex-direction:column; justify-content:center; gap:9px; min-width:145px; }.gold,.ghost,.cancel { border:0; border-radius:11px; padding:11px 16px; font:inherit; font-weight:900; cursor:pointer; transition:.2s; }.gold { color:#16395f; background:var(--gold); box-shadow:0 7px 15px rgba(0,0,0,.12); }.gold:hover,.ghost:hover { transform:translateY(-2px); }.ghost { color:#edf7ff; background:rgba(255,255,255,.13); }.ring { position:absolute; z-index:-1; border:1px solid rgba(255,255,255,.23); border-radius:50%; }.one { width:260px; height:260px; top:-130px; right:-70px; }.two { width:450px; height:450px; bottom:-350px; right:-235px; }
 .notice { margin-top:20px; padding:11px 14px; color:#a44d35; background:#fff0eb; border-radius:10px; }.loading,.empty { display:grid; place-items:center; min-height:160px; color:var(--muted); border:1px dashed #cbd5df; border-radius:14px; }

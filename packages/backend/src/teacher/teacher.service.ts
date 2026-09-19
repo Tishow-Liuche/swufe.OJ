@@ -487,6 +487,9 @@ export class TeacherService {
   }) {
     const teacherId = typeof actor === 'string' ? actor : actor.id;
     const isAdmin = typeof actor !== 'string' && actor.role === 'ADMIN';
+    if (data.visibility && !['PUBLIC', 'PRIVATE', 'PASSWORD', 'CAMPUS_PRIVATE'].includes(data.visibility)) {
+      throw new BadRequestException('不支持的比赛类型');
+    }
     if (new Date(data.endTime) <= new Date(data.startTime)) {
       throw new ForbiddenException('比赛结束时间必须晚于开始时间');
     }

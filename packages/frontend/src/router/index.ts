@@ -6,10 +6,12 @@ const router = createRouter({
   routes: [
     { path: '/', component: () => import('../views/Home.vue') },
     { path: '/login', component: () => import('../views/Login.vue') },
+    { path: '/forgot-password', component: () => import('../views/ForgotPassword.vue') },
     { path: '/problems', component: () => import('../views/ProblemList.vue') },
     { path: '/problems/:id', component: () => import('../views/ProblemDetail.vue') },
     { path: '/leaderboard', component: () => import('../views/Leaderboard.vue') },
     { path: '/contests', component: () => import('../views/Contests.vue') },
+    { path: '/contests/:id', component: () => import('../views/Contests.vue'), meta: { requiresAuth: true } },
     { path: '/community', component: () => import('../views/CommunityHub.vue') },
     { path: '/problem-lists', component: () => import('../views/ProblemLists.vue'), meta: { requiresAuth: true } },
     { path: '/learning-plans/:id', component: () => import('../views/LearningPlanDetail.vue'), meta: { requiresAuth: true } },

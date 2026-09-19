@@ -37,8 +37,8 @@ export class ContestController {
 
   @Post(':id/register')
   @UseGuards(AuthGuard('jwt'))
-  register(@Param('id') id: string, @Req() req: any, @Body('password') password?: string) {
-    return this.contests.register(id, req.user, password);
+  register(@Param('id') id: string, @Req() req: any, @Body() dto: { password?: string; studentId?: string; realName?: string }) {
+    return this.contests.register(id, req.user, dto.password, dto);
   }
 
   @Post(':id/virtual')

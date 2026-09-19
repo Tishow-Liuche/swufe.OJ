@@ -85,7 +85,7 @@ export class ContestService {
 
   async listPublic() {
     const contests = await this.prisma.contest.findMany({
-      where: { visibility: 'PUBLIC' },
+      where: { visibility: { in: ['PUBLIC', 'CAMPUS_PRIVATE'] } },
       include: this.contestInclude,
       orderBy: { startTime: 'desc' },
     });
@@ -99,7 +99,7 @@ export class ContestService {
     const contests = await this.prisma.contest.findMany({
       where: {
         OR: [
-          { visibility: 'PUBLIC' },
+          { visibility: { in: ['PUBLIC', 'CAMPUS_PRIVATE'] } },
           { createdBy: viewer.id },
           { participants: { some: { userId: viewer.id } } },
         ],
@@ -132,7 +132,7 @@ export class ContestService {
 
     const participant = viewer ? (contest as any).participants?.[0] : null;
     const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
-    if (contest.visibility !== 'PUBLIC' && !participant && !canManage) {
+    if (!['PUBLIC', 'CAMPUS_PRIVATE'].includes(contest.visibility) && !participant && !canManage) {
       throw new ForbiddenException('无权查看该比赛');
     }
 
@@ -143,14 +143,14 @@ export class ContestService {
     }]))[0];
   }
 
-  async register(id: string, viewer: Viewer, password?: string) {
+  async register(id: string, viewer: Viewer, password?: string, identity?: { studentId?: string; realName?: string }) {
     const contest = await this.prisma.contest.findUnique({ where: { id } });
     if (!contest) throw new NotFoundException('比赛不存在');
     const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
     if (contest.visibility === 'PRIVATE' && !canManage) {
       throw new ForbiddenException('该比赛为私有比赛，只有举办者或管理员可以报名');
     }
-    if (contest.visibility !== 'PUBLIC' && contest.visibility !== 'PRIVATE' && !canManage && !contest.password) {
+    if (!['PUBLIC', 'PRIVATE', 'CAMPUS_PRIVATE'].includes(contest.visibility) && !canManage && !contest.password) {
       throw new ForbiddenException('无权报名该比赛');
     }
     const now = new Date();
@@ -165,9 +165,23 @@ export class ContestService {
       throw new ForbiddenException('比赛密码不正确');
     }
 
+    let campusIdentity: { studentId: string; realName: string } | undefined;
+    if (contest.visibility === 'CAMPUS_PRIVATE') {
+      const user = await this.prisma.user.findUnique({
+        where: { id: viewer.id }, select: { studentId: true },
+      });
+      if (!user?.studentId) throw new BadRequestException('请先在个人中心绑定学号');
+      const studentId = typeof identity?.studentId === 'string' ? identity.studentId.trim() : '';
+      const realName = typeof identity?.realName === 'string' ? identity.realName.trim() : '';
+      if (studentId !== user.studentId) throw new BadRequestException('报名学号必须与个人中心绑定的学号一致');
+      if (!realName || realName.length > 40 || /[\p{Cc}_]/u.test(realName)) {
+        throw new BadRequestException('请填写真实姓名（1～40字，不含下划线或控制字符）');
+      }
+      campusIdentity = { studentId, realName };
+    }
     const participant = await this.prisma.contestParticipant.upsert({
       where: { contestId_userId: { contestId: id, userId: viewer.id } },
-      create: { contestId: id, userId: viewer.id },
+      create: { contestId: id, userId: viewer.id, ...campusIdentity },
       update: {},
     });
     return { participant, state: this.stateOf(contest, participant) };

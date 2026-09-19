@@ -17,6 +17,7 @@ model User {
   nickname                 String?
   avatar                   String?
   studentId                String?  @unique
+  gender                   String?
   college                  String?
   phone                    String?
   mustChangePassword       Boolean  @default(false)
@@ -538,6 +539,8 @@ model ContestParticipant {
   id           String    @id @default(cuid())
   contestId    String
   userId       String
+  studentId    String?
+  realName     String?
   registeredAt DateTime  @default(now())
   isVirtual    Boolean   @default(false)
   virtualStart DateTime?

@@ -9,7 +9,7 @@ import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
 import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { BookOpen, MessageCircle } from '@lucide/vue';
+import { tagLabel } from '../utils/tagLabels';
 import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
 import { sanitizeStatementHtml } from '../security/sanitize-statement';
 import 'katex/dist/katex.min.css';
@@ -83,12 +83,12 @@ const statusLabels: Record<string, string> = {
   SYSTEM_ERROR: '系统错误', REMOTE_ERROR: 'RMR', REMOTE_REEOR: 'RMR', CANCELLED: '已取消',
 };
 const statusColors: Record<string, string> = {
-  ACCEPTED: '#27ae60', WRONG_ANSWER: '#e74c3c', TIME_LIMIT_EXCEEDED: '#f39c12',
-  RUNTIME_ERROR: '#9b59b6', COMPILE_ERROR: '#e67e22', MEMORY_LIMIT_EXCEEDED: '#f39c12',
+  ACCEPTED: '#527967', WRONG_ANSWER: '#a45555', TIME_LIMIT_EXCEEDED: '#967440',
+  RUNTIME_ERROR: '#79638b', COMPILE_ERROR: '#a17149', MEMORY_LIMIT_EXCEEDED: '#967440',
   CANCELLED: '#95a5a6',
-  PENDING: '#95a5a6', QUEUING: '#3498db', JUDGING: '#3498db',
-  SUBMITTING: '#3498db', COMPILING: '#3498db', RUNNING: '#3498db',
-  SYSTEM_ERROR: '#e74c3c', REMOTE_ERROR: '#e74c3c', REMOTE_REEOR: '#e74c3c',
+  PENDING: '#95a5a6', QUEUING: '#52758f', JUDGING: '#52758f',
+  SUBMITTING: '#52758f', COMPILING: '#52758f', RUNNING: '#52758f',
+  SYSTEM_ERROR: '#a45555', REMOTE_ERROR: '#a45555', REMOTE_REEOR: '#a45555',
 };
 
 function hasMetric(value: unknown) {
@@ -491,17 +491,17 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
         </div>
         <ProblemStateBadges v-if="problemState" class="detail-state" :state="problemState" />
         <div class="problem-meta">
-          <span class="meta-item">⏱ {{ problem.timeLimit }}ms</span>
-          <span class="meta-item">📦 {{ problem.memoryLimit }}MB</span>
-          <span class="meta-item">🎯 {{ pointDifficultyLabel(problem.difficulty) }}</span>
-          <span class="meta-item">📝 {{ (problem.tags || []).map((t: any) => t.name).join(', ') || '-' }}</span>
+          <span class="meta-item">时限 {{ problem.timeLimit }}ms</span>
+          <span class="meta-item">内存 {{ problem.memoryLimit }}MB</span>
+          <span class="meta-item">难度 {{ pointDifficultyLabel(problem.difficulty) }}</span>
+          <span class="meta-item">标签 {{ (problem.tags || []).map((t: any) => tagLabel(t.name)).join('、') || '-' }}</span>
         </div>
         <div class="problem-community-links">
           <RouterLink :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }">
-            <MessageCircle :size="16" />题目讨论
+            题目讨论
           </RouterLink>
           <RouterLink :to="{ path: '/community', query: { panel: 'solutions', problemId: problem.id, problemTitle: problem.title } }">
-            <BookOpen :size="16" />查看题解
+            查看题解
           </RouterLink>
         </div>
       </div>
@@ -536,7 +536,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
                 <option value="java">Java</option>
               </select>
               <button class="btn-submit" @click="submitCode" :disabled="submitting">
-                {{ submitting ? '提交中...' : '🚀 提交评测' }}
+                {{ submitting ? '提交中...' : '提交评测' }}
               </button>
             </div>
             <div ref="editorHost" class="cm-editor-host"></div>
@@ -570,10 +570,10 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
             </div>
           </div>
 
-          <div v-if="pollExhausted" class="card exhausted-card" style="border-left:4px solid #f39c12; background:#fff8e1;">
+          <div v-if="pollExhausted" class="card exhausted-card" style="border-left:4px solid #967440; background:#fff8e1;">
             <p style="margin:0; color:#e65100; font-size:14px;">
               Polling stopped — the backend has not returned a result within the time limit.
-              <a href="javascript:void(0)" style="text-decoration:underline; color:#3498db;"
+              <a href="javascript:void(0)" style="text-decoration:underline; color:#52758f;"
                  @click="refreshPage">Refresh the page</a> to check the latest status.
             </p>
           </div>
@@ -613,7 +613,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
     <div v-if="cfDialog" class="cf-overlay" @click.self="cfDialog = false">
       <div class="cf-dialog">
         <div class="cf-dialog-header">
-          <span>🔗 {{ cfData?.platform || '第三方 OJ' }} 远程提交</span>
+          <span>{{ cfData?.platform || '第三方 OJ' }} 远程提交</span>
           <button class="cf-close" @click="cfDialog = false">×</button>
         </div>
         <div class="cf-dialog-body">
@@ -643,10 +643,10 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
           </div>
           <div style="margin-top: 12px; display: flex; gap: 8px">
             <button class="cf-btn cf-btn-primary" @click="copyCfCode">
-              📋 再次复制代码
+              再次复制代码
             </button>
             <button class="cf-btn cf-btn-secondary" @click="retryOpenCf">
-              🔗 重新打开提交页面
+              重新打开提交页面
             </button>
           </div>
         </div>
@@ -767,7 +767,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .desc :deep(table) { border-collapse: collapse; margin: 12px 0; width: auto; }
 .desc :deep(th), .desc :deep(td) { border: 1px solid #ddd; padding: 6px 12px; text-align: left; }
 .desc :deep(th) { background: #f8f9fa; font-weight: 600; }
-.desc :deep(blockquote) { border-left: 3px solid #4fc3f7; padding: 8px 16px; margin: 12px 0; background: #f5f5f5; border-radius: 0 4px 4px 0; color: #555; }
+.desc :deep(blockquote) { border-left: 3px solid #52758f; padding: 8px 16px; margin: 12px 0; background: #f5f5f5; border-radius: 0 4px 4px 0; color: #555; }
 .desc :deep(hr) { border: none; border-top: 1px solid #eee; margin: 16px 0; }
 /* KaTeX overlay fix */
 .desc :deep(.katex) { font-size: 1.05em; }
@@ -806,8 +806,8 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .editor-card { padding: 0; overflow: hidden; }
 .editor-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #282c34; border-bottom: 1px solid #333; }
 .lang-select { padding: 6px 12px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; font-size: 13px; }
-.btn-submit { padding: 8px 20px; background: #4fc3f7; color: #1a1a2e; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; }
-.btn-submit:hover { background: #29b6f6; }
+.btn-submit { padding: 8px 20px; background: #52758f; color: #fff; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; }
+.btn-submit:hover { background: #425f75; }
 .btn-submit:disabled { opacity: 0.5; cursor: default; }
 .cm-editor-host { height: 420px; }
 .cm-editor-host :deep(.cm-editor) { height: 100%; }
@@ -834,7 +834,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .submission-cases table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
 .submission-cases th, .submission-cases td { padding: 8px; border-bottom: 1px solid #e5edf5; text-align: left; }
 
-.result-card { border-left: 4px solid #3498db; }
+.result-card { border-left: 4px solid #52758f; }
 .result-header { display: flex; align-items: center; gap: 12px; }
 .result-badge { padding: 4px 12px; border-radius: 4px; color: #fff; font-weight: bold; font-size: 16px; }
 .result-score { font-weight: bold; color: #1a1a2e; font-size: 16px; }
@@ -842,19 +842,19 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .compile-box { margin-top: 12px; background: #fff3e0; padding: 10px; border-radius: 4px; font-size: 12px; }
 .compile-box pre { margin: 0; white-space: pre-wrap; font-family: monospace; }
 .cases { margin-top: 12px; }
-.cases-toggle { cursor: pointer; font-size: 14px; color: #3498db; font-weight: 500; }
+.cases-toggle { cursor: pointer; font-size: 14px; color: #52758f; font-weight: 500; }
 .toggle-arrow { font-size: 10px; margin-left: 4px; }
 .cases-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .case-dot { width: 36px; height: 36px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: #fff; }
-.case-dot.ac { background: #27ae60; }
-.case-dot.wa { background: #e74c3c; }
-.error-msg, .error-card { color: #e74c3c; padding: 20px; text-align: center; }
+.case-dot.ac { background: #527967; }
+.case-dot.wa { background: #a45555; }
+.error-msg, .error-card { color: #a45555; padding: 20px; text-align: center; }
 .error-card { background: #fce4ec; }
 
-.external-card { border-left: 4px solid #e67e22; background: #fff8e1; }
+.external-card { border-left: 4px solid #a17149; background: #fff8e1; }
 .external-card h3 { color: #e65100; margin-bottom: 8px; }
 .external-card p { margin: 4px 0 10px; font-size: 14px; color: #666; }
-.luogu-link { display: inline-block; padding: 8px 16px; background: #3498db; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; margin: 8px 0; }
+.luogu-link { display: inline-block; padding: 8px 16px; background: #52758f; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; margin: 8px 0; }
 .luogu-link:hover { background: #2980b9; }
 .tip { font-size: 12px; color: #888; margin: 8px 0; }
 .fill-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid #ffe0b2; }
@@ -862,7 +862,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .fill-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .fill-row select, .fill-row input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 120px; }
 .fill-row input[placeholder] { width: 110px; }
-.btn-fill { padding: 6px 16px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.btn-fill { padding: 6px 16px; background: #527967; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .btn-fill:hover { background: #219a52; }
 
 /* 第三方 OJ 远程提交弹窗 */
@@ -883,12 +883,12 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .remove-only { border: 1px solid #cbd6e0; color: #526579; background: #f7f9fb; }
 .resolved-actions button:disabled { opacity: .58; cursor: wait; }
 .cf-step { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 14px; }
-.cf-step-num { width: 24px; height: 24px; border-radius: 50%; background: #3498db; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.cf-step-num { width: 24px; height: 24px; border-radius: 50%; background: #52758f; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .cf-step-text { flex: 1; }
 .cf-code-preview { margin-top: 8px; background: #1e1e1e; border-radius: 8px; padding: 12px; max-height: 200px; overflow: auto; }
 .cf-code-preview pre { margin: 0; color: #d4d4d4; font-size: 12px; font-family: Consolas, monospace; white-space: pre-wrap; }
 .cf-btn { padding: 8px 18px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.cf-btn-primary { background: #3498db; color: #fff; }
+.cf-btn-primary { background: #52758f; color: #fff; }
 .cf-btn-primary:hover { background: #2980b9; }
 .cf-btn-secondary { background: #f0f0f0; color: #333; border: 1px solid #ddd; }
 .cf-btn-secondary:hover { background: #e0e0e0; }

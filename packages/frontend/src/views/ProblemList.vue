@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useDebounceFn, useStorage } from '@vueuse/core';
 import { useRoute, useRouter } from 'vue-router';
+import { tagLabel } from '../utils/tagLabels';
 import {
   AlertCircle,
   ArrowUpRight,
@@ -160,10 +161,9 @@ const popularTagCounts = computed(() => tagCounts.value.slice(0, 9));
 const normalizedTagSearchKeyword = computed(() => tagSearchKeyword.value.trim().toLocaleLowerCase());
 const visibleTagCounts = computed(() => {
   const query = normalizedTagSearchKeyword.value;
-  if (!query) return popularTagCounts.value;
+  if (!query) return showTagDialog.value ? tagCounts.value : popularTagCounts.value;
   return tagCounts.value
-    .filter((item) => item.name.toLocaleLowerCase().includes(query))
-    .slice(0, 60);
+    .filter((item) => (item.name + ' ' + tagLabel(item.name)).toLocaleLowerCase().includes(query));
 });
 const tagSearchSummary = computed(() => {
   if (!normalizedTagSearchKeyword.value) return '输入关键词搜索全部标签';
@@ -368,7 +368,7 @@ function syncRouteQuery() {
 }
 
 function openProblem(problemId: string) {
-  void router.push(`/problems/${problemId}`);
+  window.open(router.resolve(`/problems/${problemId}`).href, '_blank', 'noopener');
 }
 
 function handleProblemRowClick(event: MouseEvent, problemId: string) {
@@ -663,7 +663,7 @@ function requireLogin(redirect: string) {
                     @click="handleProblemRowClick($event, problem.id)"
                   >
                     <td class="problem-title-cell">
-                      <router-link :to="`/problems/${problem.id}`" class="problem-title-link">
+                      <router-link :to="`/problems/${problem.id}`" class="problem-title-link" target="_blank" rel="noopener">
                         <span class="problem-no-badge">{{ platformProblemNo(problem) }}</span>
                         <span class="problem-title-text">{{ problem.title }}</span>
                       </router-link>
@@ -677,10 +677,9 @@ function requireLogin(redirect: string) {
                     </td>
                     <td class="tags-column">
                       <div class="tag-list">
-                        <span v-for="item in problem.tags.slice(0, 3)" :key="item.name" class="tag-chip">
-                          {{ item.name }}
+                        <span v-for="item in problem.tags" :key="item.name" class="tag-chip">
+                          {{ tagLabel(item.name) }}
                         </span>
-                        <span v-if="problem.tags.length > 3" class="tag-chip tag-more">+{{ problem.tags.length - 3 }}</span>
                       </div>
                     </td>
                     <td>
@@ -706,6 +705,7 @@ function requireLogin(redirect: string) {
                 :key="problem.id"
                 :to="`/problems/${problem.id}`"
                 class="mobile-problem-item"
+                target="_blank" rel="noopener"
                 :style="{ animationDelay: `${index * 24}ms` }"
               >
                 <div class="mobile-problem-heading">
@@ -719,8 +719,7 @@ function requireLogin(redirect: string) {
                 </div>
                 <ProblemStateBadges class="mobile-state-line" :state="problem.state" compact />
                 <div class="mobile-tag-list">
-                  <span v-for="item in problem.tags.slice(0, 2)" :key="item.name" class="tag-chip">{{ item.name }}</span>
-                  <span v-if="problem.tags.length > 2" class="tag-chip tag-more">+{{ problem.tags.length - 2 }}</span>
+                  <span v-for="item in problem.tags" :key="item.name" class="tag-chip">{{ tagLabel(item.name) }}</span>
                 </div>
                 <div class="mobile-problem-meta">
                   <span>{{ sourceLabel(problemPlatform(problem)) }}</span>
@@ -845,7 +844,7 @@ function requireLogin(redirect: string) {
                   :class="{ selected: selectedTag === item.name }"
                   @click="selectedTag = selectedTag === item.name ? '' : item.name"
                 >
-                  <span>{{ item.name }}</span>
+                  <span>{{ tagLabel(item.name) }}</span>
                   <strong>{{ item.count }}</strong>
                 </button>
               </div>
@@ -886,7 +885,7 @@ function requireLogin(redirect: string) {
           :class="{ selected: selectedTag === item.name }"
           @click="chooseTag(item.name)"
         >
-          <span>{{ item.name }}</span>
+          <span>{{ tagLabel(item.name) }}</span>
           <strong>{{ item.count }}</strong>
         </button>
       </div>
@@ -1665,6 +1664,7 @@ function requireLogin(redirect: string) {
 .tag-list,
 .mobile-tag-list {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   gap: 5px;
@@ -1672,6 +1672,9 @@ function requireLogin(redirect: string) {
 
 .tag-chip {
   min-height: 24px;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   padding: 3px 8px;
   border: 1px solid #dfe3e8;
   border-radius: 999px;
@@ -2089,9 +2092,10 @@ function requireLogin(redirect: string) {
 }
 
 .tag-dialog-cloud button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding: 8px 0;
 }
 
 .tag-dialog-cloud button strong {
