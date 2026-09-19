@@ -2,17 +2,21 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
 const browser = await chromium.launch({ headless: true, channel: 'chromium' });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const page = await context.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 const profile = { id: 'ui-test', username: 'ui-test', nickname: '界面验证', role: 'STUDENT', studentId: '42411036', gender: 'FEMALE', email: 'test@example.invalid' };
 const problem = { id: 'p1', problemNo: 1, title: '验证题目', difficulty: 'POINT_1', source: 'REMOTE', tags: [{ name: 'Constructive Algorithms' }], sourceInfo: { platform: 'CODEFORCES', remoteProblemId: '4A' }, _count: { submissions: 1 } };
 const contest = { id: 'campus-ui', title: '校赛验证', contestNo: 1, mode: 'ACM', visibility: 'CAMPUS_PRIVATE', state: 'UPCOMING', startTime: '2099-01-01T00:00:00Z', endTime: '2099-01-02T00:00:00Z', problems: [], participant: null, _count: { problems: 2, participants: 0 }, organizer: { name: '赛事组' } };
-await page.route('**/api/**', route => {
+await context.route('**/api/**', route => {
   const path = new URL(route.request().url()).pathname;
   let body = {};
   if (path === '/api/auth/refresh') body = { accessToken: 'ui-test-only' };
-  else if (path === '/api/user/profile') body = profile;
+  else if (path === '/api/user/profile') {
+    if (route.request().method() === 'PATCH') Object.assign(profile, route.request().postDataJSON());
+    body = profile;
+  }
   else if (path === '/api/user/settings') body = { profile, externalAccounts: [], awards: [] };
   else if (path === '/api/user/stats') body = { heatmap: [], recentSubmissions: [], difficultyDistribution: [] };
   else if (path === '/api/user/accepted-problems') body = { items: [{ problem, problemId: 'p1', contestId: 'campus-ui', source: 'LOCAL' }] };
@@ -53,6 +57,29 @@ try {
   assert.match(await accepted.innerText(), /T1/);
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('select').filter({ has: page.locator('option[value="FEMALE"]') }).waitFor();
+  for (const role of ['STUDENT', 'TEACHER', 'ADMIN']) {
+    profile.role = role; profile.studentId = '';
+    await page.goto(base + '/profile');
+    await page.getByRole('button', { name: '绑定学号', exact: true }).click();
+    await page.getByPlaceholder('绑定 8 位数字学号').fill('42411036');
+    await Promise.all([
+      page.waitForResponse(r => r.url().endsWith('/api/user/profile') && r.request().method() === 'GET'),
+      page.getByRole('button', { name: '保存基础资料', exact: true }).click(),
+    ]);
+    await page.reload();
+    await page.getByRole('button', { name: '修改学号', exact: true }).waitFor();
+    assert.match(await page.locator('.student-id-pill').innerText(), /42411036/);
+  }
+  await page.goto(base + '/contests');
+  for (const selector of ['.overview-card', '.contest-card']) {
+    const popupPromise = page.waitForEvent('popup');
+    await page.locator(selector).first().click();
+    const popup = await popupPromise;
+    await popup.waitForURL('**/contests/campus-ui');
+    await popup.locator('.campus-registration').waitFor();
+    assert.equal(new URL(page.url()).pathname, '/contests');
+    await popup.close();
+  }
   profile.role = 'TEACHER';
   await page.goto(base + '/contests');
   await page.locator('.overview-meta').getByText('校赛私有赛', { exact: true }).waitFor();

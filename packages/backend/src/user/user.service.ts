@@ -117,7 +117,6 @@ export class UserService {
         select: { id: true, role: true },
       });
       if (!current) throw new NotFoundException('用户不存在');
-      if (current.role !== 'STUDENT') throw new BadRequestException('仅学生账号可以绑定学号');
       const studentId = String(data.studentId || '').trim();
       if (!/^\d{8}$/.test(studentId)) throw new BadRequestException('学号必须为 8 位数字');
       const existing = await this.prisma.user.findFirst({

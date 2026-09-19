@@ -34,6 +34,10 @@ async function api(path, { token, method = 'GET', body, status = 200 } = {}) {
       startTime: new Date(Date.now() + 3600000).toISOString(), endTime: new Date(Date.now() + 7200000).toISOString(),
     } }); contests.push(c.id);
     const studentId = String(randomInt(90000000, 99999999));
+    const teacherId = String(Number(studentId) - 1);
+    const teacherProfile = await api('/user/profile', { token: tt, method: 'PATCH', body: { studentId: teacherId } });
+    assert.equal(teacherProfile.studentId, teacherId); assert.equal(teacherProfile.role, 'TEACHER');
+    await api('/user/profile', { token: st, method: 'PATCH', status: 400, body: { studentId: teacherId } });
     const failed = await api('/contests/' + c.id + '/register', { token: st, method: 'POST', status: 400, body: { studentId, realName: '验收同学' } });
     assert.match(failed.message, /绑定学号/);
     await api('/user/profile', { token: st, method: 'PATCH', body: { studentId, gender: 'FEMALE' } });

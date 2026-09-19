@@ -143,6 +143,15 @@ describe('UserService profile settings', () => {
     expect(result.studentId).toBe('42411036');
   });
 
+  it.each(['TEACHER', 'ADMIN'])('allows %s to bind their own student ID without changing role', async (role) => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', role });
+    prisma.user.findFirst.mockResolvedValue(null);
+    prisma.user.update.mockResolvedValue({ id: 'u1', role, studentId: '42411036' });
+    const result = await service.updateProfile('u1', { studentId: '42411036' });
+    expect(result.role).toBe(role);
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({ data: { studentId: '42411036' } }));
+  });
+
   it('rejects an invalid student ID while updating the profile', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'STUDENT' });
 

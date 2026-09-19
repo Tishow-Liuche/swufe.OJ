@@ -103,8 +103,8 @@ async function load() {
       : e.response?.data?.message || '比赛列表加载失败';
   } finally { loading.value = false; }
 }
-async function selectContest(contest: Contest) {
-  await router.push('/contests/' + encodeURIComponent(contest.id));
+function selectContest(contest: Contest) {
+  window.open(router.resolve('/contests/' + encodeURIComponent(contest.id)).href, '_blank', 'noopener');
 }
 function showOverview(nextFilter: string) {
   filter.value = nextFilter;
