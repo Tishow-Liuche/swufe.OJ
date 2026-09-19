@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../../api/client';
 import { contestKind, dateText, errorText, nextContestTransition, stateText, type Contest } from './contest';
@@ -8,6 +8,11 @@ const route = useRoute();
 const contest = ref<Contest | null>(null);
 const loading = ref(true);
 const error = ref('');
+const durationMinutes = computed(() => {
+  if (!contest.value) return '—';
+  const minutes = Math.round((Date.parse(contest.value.endTime) - Date.parse(contest.value.startTime)) / 60000);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : '—';
+});
 const tabs = [{ path: 'register', label: '报名' }, { path: 'problems', label: '比赛题目' }, { path: 'standings', label: '排名' }, { path: 'submissions', label: '提交记录' }];
 let controller: AbortController | undefined;
 let version = 0;
@@ -40,9 +45,17 @@ onUnmounted(() => { version++; controller?.abort(); clearTimeout(transitionTimer
     <div v-else-if="error" class="arena-error" role="alert">{{ error }} <button type="button" @click="load">重试</button></div>
     <template v-if="contest">
       <header class="arena-header">
-        <div class="arena-caption"><span>比赛 #{{ contest.contestNo }}</span><span class="contest-kind">{{ contestKind(contest) }}</span><span>{{ contest.mode }}</span><span class="arena-state" :class="contest.state.toLowerCase()">{{ stateText(contest.state) }}</span></div>
-        <h1>{{ contest.title }}</h1>
-        <div class="arena-meta"><span>{{ dateText(contest.startTime) }} — {{ dateText(contest.endTime) }}</span><span>举办者：{{ contest.organizer?.name || '平台赛事组' }}</span></div>
+        <div class="arena-identity">
+          <p class="arena-eyebrow">SWUFE · CONTEST ARENA</p>
+          <div class="arena-caption"><span>比赛 #{{ contest.contestNo }}</span><span class="contest-kind">{{ contestKind(contest) }}</span><span class="arena-state" :class="contest.state.toLowerCase()">{{ stateText(contest.state) }}</span></div>
+          <h1>{{ contest.title }}</h1>
+          <div class="arena-meta"><span>{{ dateText(contest.startTime) }} — {{ dateText(contest.endTime) }}</span><span>举办者：{{ contest.organizer?.name || '平台赛事组' }}</span></div>
+        </div>
+        <dl class="arena-highlights" aria-label="赛程信息">
+          <div><dt>比赛赛制</dt><dd>{{ contest.mode }}</dd></div>
+          <div><dt>比赛题目</dt><dd>{{ contest._count?.problems ?? contest.problems.length }}<small>题</small></dd></div>
+          <div><dt>比赛时长</dt><dd>{{ durationMinutes }}<small>分钟</small></dd></div>
+        </dl>
       </header>
       <nav class="arena-tabs" aria-label="比赛页面">
         <router-link v-for="tab in tabs" :key="tab.path" :to="`/contests/${contest.id}/${tab.path}`">{{ tab.label }}</router-link>

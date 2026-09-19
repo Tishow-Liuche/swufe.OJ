@@ -233,9 +233,9 @@ onMounted(load);
 /* Light workspace treatment for the contest hero and selected navigation. */
 .hero {
   border: 1px solid #dce5ef;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(31, 66, 104, 0.08);
-  color: #1f2a37;
+  background: radial-gradient(ellipse at 85% 20%,rgba(187,212,255,.65),transparent 55%),linear-gradient(118deg,#f9fcff,#edf5ff 46%,#d7e8ff);
+  box-shadow: 0 14px 32px rgba(49,102,180,.09);
+  color: #1b2b49;
 }
 .hero::after { opacity: 0; }
 .eyebrow { color: #3977aa; }
@@ -245,6 +245,10 @@ onMounted(load);
   background: #e7efff;
   color: #1f5eff;
 }
+.hero .gold { color:#fff; background:linear-gradient(135deg,#2f7cf2,#2163db); box-shadow:0 8px 18px rgba(38,103,217,.2); }
+.hero .eyebrow { color:#3571d9; }
+.contest-overview { background:#fff; border-color:#dde7f5; box-shadow:0 12px 30px rgba(37,73,128,.05); }
+.overview-card { border-color:#e1e9f5; background:linear-gradient(145deg,#fff,#f7faff); }
 .ring { border-color: #dce9ff; }
 .filters .active {
   background: #e7efff;
