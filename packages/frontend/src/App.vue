@@ -131,7 +131,7 @@ async function logout() {
             <router-link class="header-icon" to="/messages" title="个人私信" aria-label="个人私信"><Mail :size="19" /></router-link>
             <router-link class="header-icon notification-link" to="/notifications" title="通知中心" aria-label="通知中心"><Bell :size="19" /><i v-if="notificationUnread" class="header-notification-count">{{ notificationUnread > 99 ? '99+' : notificationUnread }}</i></router-link>
             <router-link class="header-avatar-link" to="/profile" title="个人中心" aria-label="个人中心">
-              <UserAvatar :name="auth.user?.nickname || auth.user?.username" :avatar="auth.user?.avatar" :size="32" />
+              <UserAvatar :key="auth.avatarRevision" :name="auth.user?.nickname || auth.user?.username" :avatar="auth.user?.avatar" :size="32" @load-error="auth.recoverAvatar" />
               <span>个人中心</span>
             </router-link>
           </div>

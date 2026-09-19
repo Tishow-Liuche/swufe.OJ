@@ -21,6 +21,9 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref('');
   const user = ref<AuthUser | null>(null);
   const loading = ref(false);
+  const avatarRevision = ref(0);
+  let avatarRecovery: { source: string; at: number; promise: Promise<void> | null } | null = null;
+  let avatarGeneration = 0;
   let profilePromise: Promise<void> | null = null;
   let restorePromise: Promise<boolean> | null = null;
 
@@ -31,6 +34,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function clearAuth() {
+    avatarGeneration++;
+    avatarRecovery = null;
     token.value = '';
     user.value = null;
     clearAccessToken();
@@ -41,6 +46,40 @@ export const useAuthStore = defineStore('auth', () => {
       await api.post('/api/auth/logout');
     } finally {
       clearAuth();
+    }
+  }
+
+  async function recoverAvatar(failedSource: string) {
+    if (!isLoggedIn() || !failedSource || user.value?.avatar !== failedSource) return;
+    if (avatarRecovery?.source === failedSource) {
+      if (avatarRecovery.promise) return avatarRecovery.promise;
+      if (Date.now() - avatarRecovery.at < 30_000) return;
+    }
+    const recovery = { source: failedSource, at: Date.now(), promise: null as Promise<void> | null };
+    avatarRecovery = recovery;
+    const generation = avatarGeneration;
+    const userId = user.value!.id;
+    const stillCurrent = () => generation === avatarGeneration && isLoggedIn()
+      && user.value?.id === userId && user.value.avatar === failedSource;
+    const pending = (async () => {
+      // S3 signatures use whole seconds; wait before requesting a fresh URL.
+      await new Promise(resolve => setTimeout(resolve, 1100));
+      if (!stillCurrent()) return;
+      try {
+        const { data } = await api.get('/api/user/profile', { preserveSessionOnFailure: true });
+        if (!stillCurrent() || data.id !== userId) return;
+        user.value!.avatar = data.avatar ?? null;
+        recovery.source = data.avatar ?? failedSource;
+        avatarRevision.value++;
+      } catch {
+        // An optional image failure must not clear the authenticated session.
+      }
+    })();
+    recovery.promise = pending;
+    try {
+      await pending;
+    } finally {
+      recovery.promise = null;
     }
   }
 
@@ -94,6 +133,8 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     user,
     loading,
+    avatarRevision,
+    recoverAvatar,
     setAuth,
     clearAuth,
     logout,

@@ -65,4 +65,14 @@ describe('API session client', () => {
     expect(request?.data).toBeUndefined();
     expect(request?.withCredentials).toBe(true);
   });
+  it('preserves the token when optional avatar recovery cannot refresh authentication', async () => {
+    setAccessToken('existing-token');
+    api.defaults.adapter = async config => { throw { config, response: { status: 401 } }; };
+    refreshClient.defaults.adapter = async () => { throw new Error('temporary network failure'); };
+    await expect(api.get('/api/user/profile', { preserveSessionOnFailure: true })).rejects.toBeDefined();
+    let seen: string | undefined;
+    api.defaults.adapter = async config => { seen = authorization(config); return response(config); };
+    await api.get('/api/protected');
+    expect(seen).toBe('Bearer existing-token');
+  });
 });

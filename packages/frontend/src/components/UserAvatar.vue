@@ -14,6 +14,11 @@ const props = withDefaults(defineProps<{
 });
 
 const imageFailed = ref(false);
+const emit = defineEmits<{ 'load-error': [source: string] }>();
+function onImageError() {
+  imageFailed.value = true;
+  if (props.avatar) emit('load-error', props.avatar);
+}
 const initials = computed(() => (props.name || 'OJ').trim().slice(0, 2).toUpperCase());
 const accessibleLabel = computed(() => props.label || `${props.name || '用户'}的头像`);
 
@@ -29,7 +34,7 @@ watch(() => props.avatar, () => {
     :aria-label="accessibleLabel"
     role="img"
   >
-    <img v-if="avatar && !imageFailed" :src="avatar" alt="" aria-hidden="true" @error="imageFailed = true" />
+    <img v-if="avatar && !imageFailed" :src="avatar" alt="" aria-hidden="true" @error="onImageError" />
     <span v-else aria-hidden="true">{{ initials }}</span>
   </span>
 </template>

@@ -538,7 +538,7 @@ void [
           </div>
         </div>
         <div class="hero-avatar">
-          <UserAvatar :name="displayName" :avatar="profile.avatar" :size="92" label="个人头像" />
+          <UserAvatar :key="auth.avatarRevision" :name="displayName" :avatar="auth.user?.avatar" :size="92" label="个人头像" @load-error="auth.recoverAvatar" />
         </div>
       </section>
 
@@ -631,7 +631,7 @@ void [
         <article class="profile-panel avatar-settings-card">
           <div class="panel-title"><h2>头像设置</h2><UserRound :size="18" /></div>
           <div class="avatar-settings-body">
-            <UserAvatar :name="displayName" :avatar="profile.avatar" :size="88" label="当前头像" />
+            <UserAvatar :key="auth.avatarRevision" :name="displayName" :avatar="auth.user?.avatar" :size="88" label="当前头像" @load-error="auth.recoverAvatar" />
             <div>
               <p class="hint">支持 JPG、PNG、WebP，最大 2MB。上传后顶部菜单栏和个人中心会同步更新。</p>
               <input ref="avatarInput" class="avatar-input" type="file" accept="image/png,image/jpeg,image/webp" @change="uploadAvatar" />

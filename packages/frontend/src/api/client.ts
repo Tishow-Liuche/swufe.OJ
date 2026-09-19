@@ -1,5 +1,12 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** Optional media recovery must never redirect or clear login on failure. */
+    preserveSessionOnFailure?: boolean;
+  }
+}
+
 const clientOptions = {
   baseURL: '',
   timeout: 10000,
@@ -70,8 +77,10 @@ api.interceptors.response.use(
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);
       } catch {
-        clearAccessToken();
-        redirectToLogin();
+        if (!original.preserveSessionOnFailure) {
+          clearAccessToken();
+          redirectToLogin();
+        }
       }
     }
 
