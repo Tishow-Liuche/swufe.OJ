@@ -2,8 +2,6 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join, extname } from 'path';
-import { readFileSync } from 'fs';
 import { AppModule } from './app.module';
 import { configureHttpSecurity } from './common/security-config';
 
@@ -11,7 +9,6 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   configureHttpSecurity(app, app.get(ConfigService));
-
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -20,37 +17,10 @@ async function bootstrap() {
     }),
   );
 
-  const frontendPath = join(process.cwd(), '..', 'frontend', 'dist');
-  const expressApp = app.getHttpAdapter().getInstance();
-
-  // 全局缓存控制头 — 开发阶段禁用所有缓存
-  expressApp.use((req: any, res: any, next: any) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    next();
-  });
-
-  // API 优先 → 静态文件 → SPA fallback
-  expressApp.use((req: any, res: any, next: any) => {
-    const url = req.originalUrl || req.url;
-    if (url.startsWith('/api/')) return next();
-
-    const ext = extname(url);
-    // 静态资源（有扩展名）走 express.static
-    if (ext) return next();
-
-    // SPA fallback：返回 index.html
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(readFileSync(join(frontendPath, 'index.html'), 'utf-8'));
-  });
-
-  // 静态文件中间件放在最后（有扩展名才到这里）
-  const express = require('express');
-  expressApp.use(express.static(frontendPath));
-
   const port = process.env.APP_PORT || 3000;
-  await app.listen(port);
-  console.log(`\n  🚀  SWUFE Singularity OJ（西财奇点OJ）→ http://localhost:${port}\n`);
+  const host = process.env.APP_HOST || '0.0.0.0';
+  await app.listen(port, host);
+  console.log(`SWUFE Singularity OJ API listening on http://${host}:${port}`);
 }
+
 bootstrap();

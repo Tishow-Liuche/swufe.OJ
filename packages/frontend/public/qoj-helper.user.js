@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - QOJ Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      2.3
+// @version      2.5
 // @description  Auto fill code, auto submit to QOJ, report result back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
 // @match        https://qoj.ac/*
@@ -22,8 +22,10 @@
   var DEFAULT_API = 'http://127.0.0.1:3000';
   var API_BASE_KEY = 'swufe_oj_api_base';
   var API = resolveApiBase();
+  var HELPER_VERSION = '2.5';
   var STATE_KEY = 'swufe_qoj_auto_state';
   var SUBMIT_ONCE_KEY_PREFIX = 'swufe_qoj_submit_once_';
+  var BLOCKED_REPORT_KEY_PREFIX = 'swufe_qoj_blocked_reported_';
   var SUBMIT_BUTTON_SELECTOR = '#button-submit-answer';
   var SUBMIT_PANEL_SELECTOR = '#tab-submit-answer, #submit-answer, #submit, .tab-pane[id*="submit"], [id*="submit-answer"]';
   var EDITOR_SELECTOR = '#input-answer_answer_editor, textarea[name="answer_answer"], textarea[name*="answer"][name*="editor"]';
@@ -68,11 +70,45 @@
   }
 
   function saveState(next) {
-    sv(STATE_KEY, JSON.stringify(next || {}));
+    var state = next || {};
+    state.helperVersion = HELPER_VERSION;
+    sv(STATE_KEY, JSON.stringify(state));
   }
 
   function clearState() {
     dv(STATE_KEY);
+  }
+
+  function isLaunchedFromSwufeOj() {
+    try {
+      return new URLSearchParams(location.search).has('swufeOjApi');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isActiveTaskState(state) {
+    var now = Math.floor(Date.now() / 1000);
+    return !!(
+      state &&
+      state.submissionId &&
+      state.problemId &&
+      state.token &&
+      (state.leaseNonce || state.submittedAt || state.reportedId) &&
+      (!state.submittedAt || state.submittedAt >= now - 1800)
+    );
+  }
+
+  function isQojResultTrackingPage() {
+    return /\/submission\//i.test(location.pathname) ||
+      /\/record\//i.test(location.pathname) ||
+      /\/submissions/i.test(location.pathname);
+  }
+
+  function shouldActivateHelper() {
+    var state = loadState();
+    if (isLaunchedFromSwufeOj()) return true;
+    return isQojResultTrackingPage() && isActiveTaskState(state);
   }
 
   function banner(text, bg) {
@@ -83,16 +119,20 @@
     node.textContent = 'QOJ Helper: ' + text;
     node.style.cssText = [
       'position:fixed',
-      'top:0',
-      'left:0',
-      'right:0',
+      'top:10px',
+      'right:12px',
       'z-index:2147483647',
-      'padding:12px 24px',
-      'text-align:center',
-      'font:15px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
+      'max-width:min(520px,calc(100vw - 24px))',
+      'padding:8px 12px',
+      'border-radius:999px',
+      'pointer-events:none',
+      'opacity:.78',
+      'text-align:left',
+      'font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
       'color:#fff',
       'background:' + (bg || '#2563eb'),
-      'box-shadow:0 2px 14px rgba(0,0,0,.3)'
+      'box-shadow:0 6px 20px rgba(0,0,0,.22)',
+      'backdrop-filter:blur(4px)'
     ].join(';');
     document.body.appendChild(node);
   }
@@ -189,6 +229,56 @@
     });
   }
 
+
+  function compactPageText() {
+    return ((document.title || '') + '\n' + ((document.body && document.body.innerText) || '')).replace(/\s+/g, ' ').trim().slice(0, 500);
+  }
+
+  function isLoggedIn() {
+    var text = compactPageText();
+    return /\bLogout\b/i.test(text) || !!document.querySelector('a[href*="/user/profile"], a[href*="/profile"], a[href*="logout"], form[action*="logout"]');
+  }
+
+  function isCaptchaOrVerificationPage() {
+    var text = compactPageText();
+    return /captcha|recaptcha|turnstile|verify|human|Cloudflare|Just a moment|验证码|人机验证|安全验证|请完成验证|请稍候/i.test(text) ||
+      !!document.querySelector('iframe[src*="captcha"], iframe[src*="turnstile"], iframe[src*="recaptcha"], .g-recaptcha, .cf-turnstile');
+  }
+
+  function reportBlockedForTask(task, failureCode, failureMessage) {
+    if (!task || !task.submissionId || !task.token) return;
+    var key = BLOCKED_REPORT_KEY_PREFIX + task.submissionId + '_' + failureCode;
+    if (gv(key, '')) return;
+    sv(key, String(Date.now()));
+    apiRequest('POST', '/api/qoj-submit-helper/' + task.submissionId + '/report-blocked', {
+      token: task.token,
+      leaseNonce: task.leaseNonce || undefined,
+      failureCode: failureCode,
+      failureMessage: failureMessage,
+      rawStatus: compactPageText()
+    }, function (err) {
+      if (err) {
+        console.warn('[QOJ Helper] report-blocked failed:', err);
+        dv(key);
+        return;
+      }
+      clearState();
+      banner(failureMessage + ' 已回传到 SWUFE OJ。', '#dc2626');
+    });
+  }
+
+  function reportBlockedForProblem(problemId, failureCode, failureMessage) {
+    var state = loadState();
+    if (state && state.submissionId && state.token) {
+      reportBlockedForTask(state, failureCode, failureMessage);
+      return;
+    }
+    apiRequest('GET', '/api/qoj-submit-helper/lookup?problemId=' + encodeURIComponent(problemId), null, function (err, task) {
+      if (!err && task && task.submissionId && task.token) {
+        reportBlockedForTask(task, failureCode, failureMessage);
+      }
+    });
+  }
   function leaseQojTaskWithRetry(task, previousLeaseNonce, attemptsLeft, cb) {
     apiRequest('POST', '/api/qoj-submit-helper/' + task.submissionId + '/lease', {
       token: task.token,
@@ -828,6 +918,17 @@
     var problemId = problemIdFromLocation();
     if (!problemId) return;
 
+    if (isCaptchaOrVerificationPage()) {
+      reportBlockedForProblem(problemId, 'VERIFICATION_REQUIRED', 'QOJ 正在要求验证码或安全验证，自动提交已阻塞。');
+      return;
+    }
+
+    if (!isLoggedIn()) {
+      reportBlockedForProblem(problemId, 'LOGIN_REQUIRED', 'QOJ 未登录，自动提交已停止。');
+      banner('Please log in to QOJ first, then submit again from SWUFE OJ.', '#dc2626');
+      return;
+    }
+
     banner('Fetching submit task from OJ...', '#2563eb');
     apiRequest('GET', '/api/qoj-submit-helper/lookup?problemId=' + encodeURIComponent(problemId), null, function (err, task) {
       if (err) {
@@ -884,6 +985,7 @@
 
           if (!submitPanelReady || !codeReady || !button) {
             if (attempts > 80) {
+              reportBlockedForTask(loadState(), 'FORM_TIMEOUT', !submitPanelReady ? 'QOJ 提交标签页未打开。' : (!codeReady ? 'QOJ 代码编辑器未就绪或代码未写入。' : 'QOJ 底部 Submit 按钮未找到。'));
               banner(!submitPanelReady ? 'Submit tab did not open.' : (!codeReady ? 'Code field is not ready or code was not inserted.' : 'Bottom Submit button was not found.'), '#dc2626');
               return;
             }
@@ -903,7 +1005,9 @@
     });
   }
 
-  if (/\/submission\//i.test(location.pathname) || /\/record\//i.test(location.pathname) || /\/submissions/i.test(location.pathname)) {
+  if (!shouldActivateHelper()) return;
+
+  if (isQojResultTrackingPage()) {
     watchResult();
     return;
   }

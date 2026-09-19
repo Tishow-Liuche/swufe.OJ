@@ -117,24 +117,24 @@
       <article class="card cf">
         <h2>Codeforces Helper</h2>
         <p>Fetches pending SWUFE OJ code, selects language, fills Codeforces source, clicks Submit, reports the Codeforces SID.</p>
-        <a class="btn" href="/cf-helper.user.js">Install / Update CF</a>
+        <a class="btn" href="/cf-helper.user.js?v=7.5">Install / Update CF</a>
       </article>
       <article class="card luogu">
         <h2>Luogu Helper</h2>
         <p>Opens Luogu submit panel, fills code, submits, polls verdict, and reports AC/WA/TLE/MLE/CE back to SWUFE OJ.</p>
-        <a class="btn" href="/luogu-helper.user.js">Install / Update Luogu</a>
+        <a class="btn" href="/luogu-helper.user.js?v=1.6">Install / Update Luogu</a>
       </article>
       <article class="card qoj">
         <h2>QOJ Helper</h2>
         <p>Opens the QOJ submit tab, fills code, clicks the real bottom <code>Submit</code> button, and reports the verdict.</p>
-        <a class="btn" href="/qoj-helper.user.js">Install / Update QOJ</a>
+        <a class="btn" href="/qoj-helper.user.js?v=2.5">Install / Update QOJ</a>
       </article>
     </section>
   </main>
 
   <script>
     function installAllHelpers() {
-      var urls = ['/cf-helper.user.js', '/luogu-helper.user.js', '/qoj-helper.user.js'];
+      var urls = ['/cf-helper.user.js?v=7.5', '/luogu-helper.user.js?v=1.6', '/qoj-helper.user.js?v=2.5'];
       var status = document.getElementById('installer-status');
       if (status) status.textContent = '正在依次打开三个脚本安装页，请在 Tampermonkey 页面点击 Install / Update。';
       urls.forEach(function (url, index) {

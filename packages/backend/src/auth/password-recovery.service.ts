@@ -53,7 +53,7 @@ export class PasswordRecoveryService implements OnModuleDestroy {
       "local n=redis.call('INCR',KEYS[2]); if n==1 then redis.call('EXPIRE',KEYS[2],86400) end return 1",
       2, key + ':cooldown', key + ':daily'));
     if (!allowed) throw new BadRequestException('发送过于频繁，请稍后再试');
-    const users = await this.prisma.user.findMany({ where: { phone }, select: { id: true, authVersion: true }, take: 2 });
+    const users = await this.prisma.user.findMany({ where: { phone, deletedAt: null }, select: { id: true, authVersion: true }, take: 2 });
     const response = { message: '若该手机号唯一绑定了账号，将收到验证码；验证码五分钟内有效', retryAfter: 60 };
     // Avoid account enumeration and ambiguous resets of historical duplicate phone numbers.
     if (users.length !== 1) return response;
@@ -90,7 +90,7 @@ export class PasswordRecoveryService implements OnModuleDestroy {
     const hashed = await bcrypt.hash(password, 12);
     await this.prisma.$transaction(async tx => {
       const changed = await tx.user.updateMany({
-        where: { id: userId, phone, authVersion: Number(version) },
+        where: { id: userId, phone, authVersion: Number(version), deletedAt: null },
         data: { password: hashed, mustChangePassword: false, authVersion: { increment: 1 } },
       });
       if (changed.count !== 1) throw new BadRequestException('账号信息已变更，请重新获取验证码');

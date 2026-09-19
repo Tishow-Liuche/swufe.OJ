@@ -169,6 +169,28 @@ describe('ProblemService createFull with judge data', () => {
     }));
   });
 
+  it('filters a metadata platform through its source record', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ source: 'ATCODER' });
+
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: 'PUBLISHED', sourceInfo: { platform: 'ATCODER' } },
+    }));
+  });
+
+  it('keeps the legacy remote source filter on the problem source field', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+
+    await service.findAll({ source: 'REMOTE' });
+
+    expect(prisma.problem.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: 'PUBLISHED', source: 'REMOTE' },
+    }));
+  });
+
   it('sanitizes statement HTML before it is persisted', async () => {
     prisma.problem.create.mockResolvedValue({ id: 'p-sanitized' });
 

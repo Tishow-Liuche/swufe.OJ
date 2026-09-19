@@ -182,7 +182,7 @@ export class ProblemService {
       }
     }
     if (source) {
-      if (source === 'LUOGU' || source === 'CODEFORCES' || source === 'QOJ') {
+      if (!['LOCAL', 'REMOTE'].includes(source)) {
         where.sourceInfo = { platform: source };
       } else {
         where.source = source;

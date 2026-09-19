@@ -14,11 +14,16 @@ export class HelperGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(private helper: HelperService) {}
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     const userId = client.handshake.query.userId as string;
     if (userId) {
-      this.socketMap.set(userId, client.id);
-      this.logger.log(`Helper connected: user=${userId}`);
+      try {
+        await this.helper.assertActiveUser(userId);
+        this.socketMap.set(userId, client.id);
+        this.logger.log(`Helper connected: user=${userId}`);
+      } catch {
+        client.disconnect(true);
+      }
     }
   }
 
@@ -33,7 +38,7 @@ export class HelperGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleRegister(@ConnectedSocket() client: Socket, @MessageBody() data: {
     userId: string; deviceId: string; token: string;
   }) {
-    // 验证 token（简化版：通过 userId 判断）
+    await this.helper.assertActiveUser(data.userId);
     const socketId = this.socketMap.get(data.userId);
     if (!socketId) {
       this.socketMap.set(data.userId, client.id);

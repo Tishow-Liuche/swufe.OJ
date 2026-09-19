@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Check, Clock3, X } from '@lucide/vue';
+import { Check, Clock3, Trash2, X } from '@lucide/vue';
 import api from '../../api/client';
+import { useAuthStore } from '../../stores/auth';
 
+const auth = useAuthStore();
 const users = ref<any[]>([]);
 const loading = ref(true);
 const msg = ref('');
@@ -11,6 +13,7 @@ const newPassword = ref('');
 const reviewing = ref('');
 const classApplications = ref<any[]>([]);
 const classReviewing = ref('');
+const deleting = ref('');
 
 onMounted(async () => { await Promise.all([loadUsers(), loadClassApplications()]); });
 
@@ -52,6 +55,15 @@ function applicationLabel(status: string) {
   }[status] || '未申请';
 }
 
+function roleLabel(user: any) {
+  if (user.teacherApplicationStatus === 'PENDING') return '学生（教师申请中）';
+  return user.role === 'ADMIN' ? '管理员' : user.role === 'TEACHER' ? '教师' : '学生';
+}
+
+function roleClass(user: any) {
+  return user.teacherApplicationStatus === 'PENDING' ? 'pending' : user.role?.toLowerCase();
+}
+
 async function resetPassword(userId: string) {
   try {
     await api.post(`/api/user/admin/${userId}/reset-password`, { password: newPassword.value });
@@ -59,6 +71,21 @@ async function resetPassword(userId: string) {
     showResetPwd.value = '';
     newPassword.value = '';
   } catch (e: any) { msg.value = '重置失败: ' + (e.response?.data?.message || e.message); }
+}
+
+async function deleteUser(user: any) {
+  if (user.id === auth.user?.id) return;
+  if (!window.confirm(`确定注销账号 ${user.username} 吗？该账号将无法登录，但历史教学和提交记录会保留。`)) return;
+  deleting.value = user.id;
+  try {
+    await api.delete(`/api/user/admin/${user.id}`);
+    msg.value = `账号 ${user.username} 已注销`;
+    await loadUsers();
+  } catch (e: any) {
+    msg.value = '注销失败: ' + (e.response?.data?.message || e.message);
+  } finally {
+    deleting.value = '';
+  }
 }
 
 async function loadClassApplications() {
@@ -114,7 +141,7 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
             <td><strong>{{ u.username }}</strong><small>{{ u.nickname || u.email }}</small></td>
             <td>{{ u.school || '-' }}</td>
             <td>
-              <span class="role-tag" :class="u.role?.toLowerCase()">{{ u.role === 'ADMIN' ? '管理员' : u.role === 'TEACHER' ? '教师' : '学生' }}</span>
+              <span class="role-tag" :class="roleClass(u)">{{ roleLabel(u) }}</span>
             </td>
             <td>
               <div class="application-cell">
@@ -144,7 +171,11 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
             <td>{{ u._count?.submissions || 0 }}</td>
             <td>{{ u.createdAt?.slice(0, 10) }}</td>
             <td class="actions">
-              <select @change="setRole(u.id, ($event.target as HTMLSelectElement).value)" :value="u.role">
+              <select
+                :disabled="u.teacherApplicationStatus === 'PENDING' || deleting === u.id"
+                @change="setRole(u.id, ($event.target as HTMLSelectElement).value)"
+                :value="u.role"
+              >
                 <option value="STUDENT">学生</option>
                 <option value="TEACHER">教师</option>
                 <option value="ADMIN">管理员</option>
@@ -155,6 +186,15 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
                 <button class="btn-sm btn-green" @click="resetPassword(u.id)">确认</button>
                 <button class="btn-sm" @click="showResetPwd = ''">取消</button>
               </span>
+              <button
+                v-if="u.id !== auth.user?.id"
+                type="button"
+                class="icon-action danger"
+                title="注销用户"
+                aria-label="注销用户"
+                :disabled="deleting === u.id"
+                @click="deleteUser(u)"
+              ><Trash2 :size="15" aria-hidden="true" /></button>
             </td>
           </tr>
         </tbody>
@@ -179,6 +219,7 @@ h2 { margin-bottom: 16px; }
 .role-tag.admin { background: #fce4ec; color: #c62828; }
 .role-tag.teacher { background: #e3f2fd; color: #1565c0; }
 .role-tag.student { background: #e8f5e9; color: #2e7d32; }
+.role-tag.pending { background: #fff3df; color: #9b5d08; }
 .application-cell, .review-actions { display: flex; align-items: center; gap: 6px; }
 .application-tag { padding: 2px 7px; border-radius: 3px; background: #eef1f4; color: #68717e; font-size: 11px; white-space: nowrap; }
 .application-tag.pending { background: #fff3df; color: #9b5d08; }
@@ -187,6 +228,7 @@ h2 { margin-bottom: 16px; }
 .icon-action { display: inline-grid; width: 28px; height: 28px; place-items: center; border: 1px solid #d9dee5; border-radius: 50%; background: #fff; cursor: pointer; }
 .icon-action.approve { color: #13724d; }
 .icon-action.reject { color: #b13931; }
+.icon-action.danger { color: #b13931; }
 .icon-action:hover:not(:disabled) { background: #f0f3f6; }
 .icon-action:disabled { opacity: 0.45; cursor: wait; }
 .actions { display: flex; gap: 8px; align-items: center; }

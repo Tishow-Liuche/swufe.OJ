@@ -1,10 +1,16 @@
-﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { FileUploadService } from '../common/file-upload.service';
 import { CfAcceptedSyncService } from '../codeforces/cf-accepted-sync.service';
-import { Optional } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { normalizePointDifficulty } from '../problem/point-difficulty';
+import {
+  assignmentLifecycleLabel,
+  requiredSolveCount,
+  statusLabelZh,
+} from '../teacher/assignment-progress';
+import { AssignmentProgressService } from '../teacher/assignment-progress.service';
 
 type ProfileUpdateInput = {
   nickname?: string | null;
@@ -42,6 +48,7 @@ export class UserService {
     private prisma: PrismaService,
     private readonly fileUpload: FileUploadService,
     @Optional() private cfAcceptedSync?: CfAcceptedSyncService,
+    @Optional() private assignmentProgress?: AssignmentProgressService,
   ) {}
 
   async getProfile(userId: string) {
@@ -53,7 +60,10 @@ export class UserService {
         teacherApplicationStatus: true, mustChangePassword: true, createdAt: true,
       },
     });
-    return this.withDisplayAvatar(profile);
+    const effectiveProfile = profile?.teacherApplicationStatus === 'PENDING'
+      ? { ...profile, role: 'STUDENT' }
+      : profile;
+    return this.withDisplayAvatar(effectiveProfile);
   }
 
   async getSettings(userId: string) {
@@ -90,7 +100,17 @@ export class UserService {
     }
     if (data.nickname !== undefined) updateData.nickname = this.cleanOptional(data.nickname);
     if (data.avatar !== undefined) updateData.avatar = this.cleanOptional(data.avatar);
-    if (data.phone !== undefined) updateData.phone = this.cleanOptional(data.phone);
+    if (data.phone !== undefined) {
+      const phone = this.cleanOptional(data.phone);
+      if (phone) {
+        if (!/^1[3-9]\d{9}$/.test(phone)) throw new BadRequestException('请输入有效的中国大陆手机号码');
+        const existing = await this.prisma.user.findFirst({
+          where: { phone, id: { not: userId }, deletedAt: null }, select: { id: true },
+        });
+        if (existing) throw new BadRequestException('该手机号已绑定其他账号');
+      }
+      updateData.phone = phone;
+    }
     if (data.studentId !== undefined) {
       const current = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -167,6 +187,7 @@ export class UserService {
           id: true,
           problemId: true,
           language: true,
+          contestSubmissions: { take: 1, select: { contestId: true } },
           timeUsed: true,
           memoryUsed: true,
           judgedAt: true,
@@ -222,6 +243,7 @@ export class UserService {
       put({
         source: 'LOCAL',
         submissionId: submission.id,
+        contestId: submission.contestSubmissions?.[0]?.contestId || null,
         language: submission.language,
         acceptedAt: submission.judgedAt || submission.createdAt,
         timeUsed: submission.timeUsed,
@@ -469,6 +491,7 @@ export class UserService {
             teacherId: true,
             status: true,
             course: { select: { name: true } },
+            _count: { select: { members: { where: { status: 'APPROVED' } } } },
           },
         },
       },
@@ -491,6 +514,166 @@ export class UserService {
       class: membership.class,
       teacher: teacherById.get(membership.class.teacherId) || null,
     }));
+  }
+
+  async getClassAssignments(userId: string, classId: string) {
+    const membership = await this.prisma.classMember.findUnique({
+      where: { classId_userId: { classId, userId } },
+      select: { status: true },
+    });
+    if (!membership || membership.status !== 'APPROVED') {
+      throw new ForbiddenException('仅正式班级成员可以查看作业');
+    }
+
+    const cls = await this.prisma.class.findUnique({
+      where: { id: classId },
+      select: { id: true, name: true },
+    });
+    if (!cls) throw new NotFoundException('班级不存在');
+
+    const assignments = await this.prisma.assignment.findMany({
+      where: { classId },
+      include: {
+        problems: {
+          where: { problem: { status: 'PUBLISHED' } },
+          orderBy: { order: 'asc' },
+          include: {
+            problem: { select: { id: true, title: true, source: true, difficulty: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Mid-join safety: ensure enrollment rows exist for this student.
+    if (assignments.length) {
+      await this.prisma.assignmentStudent.createMany({
+        data: assignments.map((assignment) => ({
+          assignmentId: assignment.id,
+          userId,
+          status: 'NOT_STARTED',
+          score: 0,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    const now = new Date();
+    const results = [];
+    for (const assignment of assignments) {
+      const problems = assignment.problems.map((item) => ({
+        ...item.problem,
+        order: item.order,
+        score: item.score,
+      }));
+
+      let progress = {
+        solvedCount: 0,
+        totalProblems: problems.length,
+        requiredCount: problems.length,
+        completed: false,
+        late: false,
+        score: 0,
+        maxScore: problems.reduce((sum, item) => sum + item.score, 0),
+        status: 'NOT_STARTED' as string,
+        statusLabel: statusLabelZh('NOT_STARTED'),
+        submittedAt: null as Date | null,
+        completedAt: null as Date | null,
+        problems: problems.map((problem) => ({
+          problemId: problem.id,
+          solved: false,
+          late: false,
+          earnedScore: 0,
+        })),
+      };
+
+      if (this.assignmentProgress) {
+        // Persist authoritative status/score on each student view (idempotent).
+        await this.assignmentProgress.recomputeStudent(assignment.id, userId, now);
+        const computed = await this.assignmentProgress.calculate(
+          {
+            id: assignment.id,
+            startTime: assignment.startTime,
+            endTime: assignment.endTime,
+            allowLate: assignment.allowLate,
+            latePenalty: assignment.latePenalty,
+            passCondition: assignment.passCondition,
+            countExternalAc: assignment.countExternalAc,
+            problems: assignment.problems.map((item) => ({
+              problemId: item.problemId,
+              score: item.score,
+              order: item.order,
+            })),
+          },
+          userId,
+          now,
+        );
+        const enrollment = await this.prisma.assignmentStudent.findUnique({
+          where: { assignmentId_userId: { assignmentId: assignment.id, userId } },
+        });
+        const status = enrollment?.status === 'SETTLED' ? 'SETTLED' : computed.status;
+        progress = {
+          solvedCount: computed.solvedCount,
+          totalProblems: computed.totalProblems,
+          requiredCount: computed.requiredCount,
+          completed: computed.completed || status === 'SETTLED',
+          late: computed.late,
+          score: enrollment?.status === 'SETTLED' ? enrollment.score : computed.score,
+          maxScore: computed.maxScore,
+          status,
+          statusLabel: statusLabelZh(status),
+          submittedAt: enrollment?.submittedAt ?? computed.submittedAt,
+          completedAt: enrollment?.completedAt ?? computed.completedAt,
+          problems: computed.problems.map((item) => ({
+            problemId: item.problemId,
+            solved: item.solved,
+            late: item.late,
+            earnedScore: item.earnedScore,
+          })),
+        };
+      }
+
+      const solvedMap = new Map(progress.problems.map((item) => [item.problemId, item]));
+      results.push({
+        id: assignment.id,
+        title: assignment.title,
+        description: assignment.description,
+        startTime: assignment.startTime,
+        endTime: assignment.endTime,
+        allowLate: assignment.allowLate,
+        latePenalty: assignment.latePenalty,
+        passCondition: assignment.passCondition,
+        countExternalAc: assignment.countExternalAc,
+        createdAt: assignment.createdAt,
+        lifecycle: assignmentLifecycleLabel(
+          assignment.startTime,
+          assignment.endTime,
+          now,
+          assignment.allowLate,
+        ),
+        problems: problems.map((problem) => ({
+          ...problem,
+          solved: solvedMap.get(problem.id)?.solved ?? false,
+          late: solvedMap.get(problem.id)?.late ?? false,
+          earnedScore: solvedMap.get(problem.id)?.earnedScore ?? 0,
+        })),
+        progress: {
+          solvedCount: progress.solvedCount,
+          totalProblems: progress.totalProblems,
+          requiredCount: progress.requiredCount,
+          completed: progress.completed,
+          late: progress.late,
+          score: progress.score,
+          maxScore: progress.maxScore,
+          status: progress.status,
+          statusLabel: progress.statusLabel,
+          submittedAt: progress.submittedAt,
+          completedAt: progress.completedAt,
+        },
+      });
+    }
+
+    return { class: cls, assignments: results };
   }
 
   async applyToClass(userId: string, joinCodeInput: string) {
@@ -605,6 +788,9 @@ export class UserService {
     ];
     const assignmentStartTimes = assignments.map((assignment) => assignment.startTime.getTime());
     const assignmentEndTimes = assignments.map((assignment) => assignment.endTime.getTime());
+    // When any assignment allows late submit, do not cap the query by endTime,
+    // otherwise post-deadline ACs are dropped and still show as 未提交.
+    const anyAllowLate = assignments.some((assignment) => assignment.allowLate);
     const submissions = problemIds.length
       ? await this.prisma.submission.findMany({
           where: {
@@ -612,7 +798,7 @@ export class UserService {
             problemId: { in: problemIds },
             createdAt: {
               gte: new Date(Math.min(...assignmentStartTimes)),
-              lte: new Date(Math.max(...assignmentEndTimes)),
+              ...(anyAllowLate ? {} : { lte: new Date(Math.max(...assignmentEndTimes)) }),
             },
           },
           select: {
@@ -639,9 +825,12 @@ export class UserService {
       let solved = 0;
       let latestAcceptedAt: Date | null = null;
       const problems = assignment.problems.map((item) => {
-        const attempts = (submissionsByProblem.get(item.problem.id) || []).filter((submission) =>
-          submission.createdAt >= assignment.startTime && submission.createdAt <= assignment.endTime,
-        );
+        const attempts = (submissionsByProblem.get(item.problem.id) || []).filter((submission) => {
+          if (submission.createdAt < assignment.startTime) return false;
+          // Within window always counts; after end only when teacher allows late.
+          if (submission.createdAt <= assignment.endTime) return true;
+          return Boolean(assignment.allowLate);
+        });
         const accepted = attempts.find((submission) => submission.status === 'ACCEPTED');
         const best = accepted || attempts[0];
         if (accepted) {
@@ -649,6 +838,10 @@ export class UserService {
           if (!latestAcceptedAt || accepted.createdAt > latestAcceptedAt) {
             latestAcceptedAt = accepted.createdAt;
           }
+        }
+        let displayStatus = best ? best.status : 'NOT_SUBMITTED';
+        if (accepted) {
+          displayStatus = accepted.createdAt > assignment.endTime ? 'LATE_ACCEPTED' : 'ACCEPTED';
         }
         return {
           id: item.problem.id,
@@ -659,24 +852,29 @@ export class UserService {
           sourceInfo: item.problem.sourceInfo,
           order: item.order,
           score: item.score,
-          status: best ? best.status : 'NOT_SUBMITTED',
+          status: displayStatus,
           attempts: attempts.length,
           bestSubmissionId: best?.id || null,
           bestScore: best?.score ?? 0,
           timeUsed: best?.timeUsed ?? null,
           memoryUsed: best?.memoryUsed ?? null,
           submittedAt: best?.createdAt ?? null,
+          late: Boolean(accepted && accepted.createdAt > assignment.endTime),
         };
       });
       const cls = classById.get(assignment.classId);
       const enrollment = enrollmentByAssignment.get(assignment.id);
       const total = problems.length;
-      const completed = total > 0 && solved === total;
+      const requiredCount = requiredSolveCount(total, assignment.passCondition);
+      const completed = ['COMPLETED', 'LATE', 'SETTLED'].includes(enrollment?.status || '')
+        || (requiredCount > 0 && solved >= requiredCount);
       const lifecycle = now < assignment.startTime
         ? 'NOT_STARTED'
-        : now > assignment.endTime
-          ? 'ENDED'
-          : 'ACTIVE';
+        : now <= assignment.endTime
+          ? 'ACTIVE'
+          : assignment.allowLate
+            ? 'LATE_OPEN'
+            : 'ENDED';
       return {
         id: assignment.id,
         classId: assignment.classId,
@@ -684,8 +882,15 @@ export class UserService {
         description: assignment.description,
         startTime: assignment.startTime,
         endTime: assignment.endTime,
+        allowLate: Boolean(assignment.allowLate),
         lifecycle,
-        enrollmentStatus: completed ? 'COMPLETED' : enrollment?.status || 'PENDING',
+        enrollmentStatus: completed
+          ? (enrollment?.status === 'SETTLED'
+            ? 'SETTLED'
+            : enrollment?.status === 'LATE' || (latestAcceptedAt && latestAcceptedAt > assignment.endTime)
+              ? 'LATE'
+              : 'COMPLETED')
+          : enrollment?.status || 'PENDING',
         submittedAt: enrollment?.submittedAt || null,
         completedAt: enrollment?.completedAt || (completed ? latestAcceptedAt : null),
         class: cls ? {
@@ -695,7 +900,7 @@ export class UserService {
           course: cls.course,
         } : { id: assignment.classId, name: '未知班级', status: 'UNKNOWN', course: null },
         teacher: cls ? teacherById.get(cls.teacherId) || null : null,
-        progress: { total, solved, completed },
+        progress: { total, solved, requiredCount, completed },
         problems,
       };
     });
@@ -765,6 +970,7 @@ export class UserService {
 
   async listUsers() {
     return this.prisma.user.findMany({
+      where: { deletedAt: null },
       select: {
         id: true, username: true, email: true, nickname: true,
         role: true, school: true, requestedRole: true,
@@ -775,20 +981,42 @@ export class UserService {
     });
   }
 
-  async setRole(userId: string, role: string) {
+  async setRole(adminId: string, userId: string, role: string) {
     if (!['STUDENT', 'TEACHER', 'ADMIN'].includes(role)) {
       throw new BadRequestException('无效的角色: ' + role);
     }
-    const applicationData = role === 'TEACHER'
-      ? { requestedRole: 'TEACHER', teacherApplicationStatus: 'APPROVED' }
-      : { requestedRole: 'STUDENT', teacherApplicationStatus: 'NOT_REQUIRED' };
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: { role, ...applicationData },
-      select: {
-        id: true, username: true, role: true, requestedRole: true,
-        teacherApplicationStatus: true,
-      },
+    return this.withSerializableTransaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true, teacherApplicationStatus: true, deletedAt: true },
+      });
+      if (!user || user.deletedAt) throw new NotFoundException('用户不存在');
+      if (user.teacherApplicationStatus === 'PENDING') {
+        throw new BadRequestException('教师申请待审核，请使用教师申请审核操作');
+      }
+      if (user.role === 'ADMIN' && role !== 'ADMIN') {
+        if (adminId === userId) {
+          throw new BadRequestException('不能降低当前登录的管理员权限');
+        }
+        const activeAdminCount = await tx.user.count({
+          where: { role: 'ADMIN', deletedAt: null },
+        });
+        if (activeAdminCount <= 1) {
+          throw new BadRequestException('不能降低最后一个管理员账号的权限');
+        }
+      }
+
+      const applicationData = role === 'TEACHER'
+        ? { requestedRole: 'TEACHER', teacherApplicationStatus: 'APPROVED' }
+        : { requestedRole: 'STUDENT', teacherApplicationStatus: 'NOT_REQUIRED' };
+      return tx.user.update({
+        where: { id: userId },
+        data: { role, ...applicationData },
+        select: {
+          id: true, username: true, role: true, requestedRole: true,
+          teacherApplicationStatus: true,
+        },
+      });
     });
   }
 
@@ -811,11 +1039,14 @@ export class UserService {
     }
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { requestedRole: true },
+      select: { requestedRole: true, teacherApplicationStatus: true, deletedAt: true },
     });
-    if (!user) throw new NotFoundException('用户不存在');
+    if (!user || user.deletedAt) throw new NotFoundException('用户不存在');
     if (user.requestedRole !== 'TEACHER') {
       throw new BadRequestException('该用户没有提交教师身份申请');
+    }
+    if (user.teacherApplicationStatus !== 'PENDING') {
+      throw new BadRequestException('该教师申请不在待审核状态');
     }
     return this.prisma.user.update({
       where: { id: userId },
@@ -828,6 +1059,61 @@ export class UserService {
         teacherApplicationStatus: true,
       },
     });
+  }
+
+  async deleteUser(adminId: string, userId: string) {
+    if (adminId === userId) {
+      throw new BadRequestException('不能删除当前登录的管理员账号');
+    }
+    return this.withSerializableTransaction(async (tx) => {
+      const target = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, username: true, role: true, deletedAt: true },
+      });
+      if (!target || target.deletedAt) throw new NotFoundException('用户不存在');
+
+      if (target.role === 'ADMIN') {
+        const activeAdminCount = await tx.user.count({
+          where: { role: 'ADMIN', deletedAt: null },
+        });
+        if (activeAdminCount <= 1) {
+          throw new BadRequestException('不能删除最后一个管理员账号');
+        }
+      }
+
+      await tx.userSession.deleteMany({ where: { userId } });
+      await tx.helperDevice.updateMany({
+        where: { userId },
+        data: { status: 'REVOKED' },
+      });
+      const deletedUser = await tx.user.update({
+        where: { id: userId },
+        data: { deletedAt: new Date(), authVersion: { increment: 1 } },
+        select: { id: true, username: true, deletedAt: true },
+      });
+      return { success: true, userId: deletedUser.id, username: deletedUser.username };
+    });
+  }
+
+  private async withSerializableTransaction<T>(
+    operation: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+      } catch (error) {
+        const isSerializationConflict = (
+          typeof error === 'object'
+          && error !== null
+          && 'code' in error
+          && error.code === 'P2034'
+        );
+        if (!isSerializationConflict || attempt === 2) throw error;
+      }
+    }
+    throw new Error('无法完成管理员权限变更');
   }
 
   async changeOwnPassword(userId: string, input: string | PasswordChangeInput) {

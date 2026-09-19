@@ -89,12 +89,13 @@ const passwordChecks = computed(() => ({
 const passwordScore = computed(() => Object.values(passwordChecks.value).filter(Boolean).length);
 const passwordLabel = computed(() => ['尚未输入', '较弱', '可用', '安全'][passwordScore.value]);
 const passwordChangedNotice = computed(() => route.query.passwordChanged === '1');
+const campusAccountPattern = /^[\p{L}\p{N}_-]{1,20}$/u;
 const usernameHint = computed(() => {
   const username = registerForm.value.username;
   if (!username) return '';
   if (username.trim() !== username) return '用户名不能包含首尾空格';
-  if (username.length < 3 || username.length > 20) return '用户名长度需为 3–20 个字符';
-  if (!/^[A-Za-z0-9_-]+$/.test(username)) return '仅支持字母、数字、下划线和连字符';
+  if (username.length < 1 || username.length > 20) return '用户名长度需为 1–20 个字符';
+  if (!campusAccountPattern.test(username)) return '仅支持汉字、字母、数字、下划线和连字符';
   return '';
 });
 
@@ -104,7 +105,7 @@ const canSubmit = computed(() => {
     return Boolean(loginForm.value.account.trim() && loginForm.value.password);
   }
   return Boolean(
-    /^[A-Za-z0-9_-]{3,20}$/.test(registerForm.value.username.trim())
+    campusAccountPattern.test(registerForm.value.username.trim())
     && registerForm.value.email.trim()
     && resolvedSchool.value.length >= 2
     && (registerForm.value.requestedRole !== 'STUDENT' || /^\d{8}$/.test(registerForm.value.studentId.trim()))
@@ -191,7 +192,9 @@ async function submit() {
   <div class="auth-page">
     <div class="auth-frame">
       <router-link to="/" class="auth-brand" aria-label="返回 SWUFE Singularity OJ 首页">
-        <span class="brand-mark"><BookOpenCheck :size="22" aria-hidden="true" /></span>
+        <span class="brand-mark">
+          <img class="brand-seal" src="/swufe-seal.png" width="34" height="34" alt="" />
+        </span>
         <span>
           <strong>SWUFE Singularity OJ</strong>
           <small>西财奇点OJ · 校园算法训练平台</small>
@@ -286,10 +289,9 @@ async function submit() {
                     v-model="registerForm.username"
                     type="text"
                     autocomplete="username"
-                    minlength="3"
+                    minlength="1"
                     maxlength="20"
-                    pattern="[A-Za-z0-9_-]+"
-                    placeholder="3-20 位字母、数字或 _ -"
+                    placeholder="1-20 位，支持汉字、字母、数字或 _ -"
                     required
                   />
                 </span>
@@ -538,6 +540,16 @@ async function submit() {
   width: 40px;
   height: 40px;
   border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #d7e2f5;
+}
+
+.brand-seal {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  display: block;
 }
 
 .auth-brand > span:last-child {

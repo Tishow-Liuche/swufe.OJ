@@ -1,10 +1,8 @@
 import { Module } from '@nestjs/common';
-import { BullModule, getQueueToken } from '@nestjs/bullmq';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { getQueueToken } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SubmissionService } from './submission.service';
 import { SubmissionController } from './submission.controller';
-import { JudgeProcessor } from './judge.processor';
 import { CfHelperController } from './cf-helper.controller';
 import { LuoguHelperController } from '../luogu/luogu-helper.controller';
 import { QojHelperController } from '../qoj/qoj-helper.controller';
@@ -14,33 +12,16 @@ import { CodeforcesModule } from '../codeforces/cf.module';
 import { LuoguModule } from '../luogu/luogu.module';
 import { LearningModule } from '../learning/learning.module';
 import { QojModule } from '../qoj/qoj.module';
+import { TeacherModule } from '../teacher/teacher.module';
+import { registerJudgeQueue } from './judge-queue';
 import { ContestCacheService } from '../contest/contest-cache.service';
 
-export function createRedisConnectionOptions(c: ConfigService) {
-  const port = Number(c.getOrThrow<string>('REDIS_PORT'));
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error('REDIS_PORT must be a valid TCP port');
-  }
-  const password = c.get<string>('REDIS_PASSWORD');
-  return {
-    host: c.getOrThrow<string>('REDIS_HOST'),
-    port,
-    ...(password ? { password } : {}),
-  };
-}
+export { createRedisConnectionOptions } from './judge-queue';
 
 @Module({
   imports: [
-    JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule, QojModule,
-    BullModule.registerQueueAsync({
-      name: 'judge', imports: [ConfigModule], inject: [ConfigService],
-      useFactory: (c: ConfigService) => {
-        return {
-          connection: createRedisConnectionOptions(c),
-          defaultJobOptions: { removeOnComplete: 100, removeOnFail: 200, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-        };
-      },
-    }),
+    JudgeModule, HelperModule, CodeforcesModule, LuoguModule, LearningModule, QojModule, TeacherModule,
+    registerJudgeQueue(),
   ],
   controllers: [SubmissionController, CfHelperController, LuoguHelperController, QojHelperController],
   providers: [
@@ -50,8 +31,7 @@ export function createRedisConnectionOptions(c: ConfigService) {
       useFactory: async (queue: Queue) => new ContestCacheService((await queue.client) as any),
     },
     SubmissionService,
-    JudgeProcessor,
   ],
-  exports: [SubmissionService, ContestCacheService, BullModule],
+  exports: [SubmissionService, ContestCacheService],
 })
 export class SubmissionModule {}

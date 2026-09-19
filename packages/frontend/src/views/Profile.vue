@@ -438,6 +438,20 @@ function hasMetric(value: unknown) {
   return value !== null && value !== undefined;
 }
 
+/** In-progress judge statuses should not display a provisional 0 score. */
+const JUDGING_STATUSES = new Set([
+  'PENDING', 'QUEUING', 'COMPILING', 'RUNNING', 'JUDGING', 'SUBMITTING',
+]);
+
+function isJudgingStatus(status?: string | null) {
+  return Boolean(status && JUDGING_STATUSES.has(status));
+}
+
+function shouldShowScore(status?: string | null, score?: unknown) {
+  if (isJudgingStatus(status)) return false;
+  return score !== undefined && score !== null;
+}
+
 function formatMemoryKb(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? `${(n / 1024).toFixed(1)}MB` : '-';
@@ -582,7 +596,7 @@ void [
         <div class="panel-title"><h2>已通过题目</h2><span>{{ acceptedProblems.length }} 题</span></div>
         <div v-if="acceptedLoading" class="empty-state">正在加载已通过题目…</div>
         <div v-else-if="acceptedProblems.length" class="accepted-list">
-          <router-link v-for="item in acceptedProblems" :key="item.problem.id" class="accepted-row" :to="`/problems/${item.problem.id}`" target="_blank" rel="noopener">
+          <router-link v-for="item in acceptedProblems" :key="item.problem.id" class="accepted-row" :to="{ path: `/problems/${item.problem.id}`, query: item.contestId ? { contestId: item.contestId } : {} }" target="_blank" rel="noopener">
             <span class="accepted-source">{{ item.source || item.problem?.source || 'LOCAL' }}</span>
             <span class="accepted-title">{{ problemDisplayTitle(item.problem, item.problemId) }}</span>
             <span class="accepted-difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
@@ -601,7 +615,7 @@ void [
             <span class="sub-title">{{ problemDisplayTitle(sub.problem) }}</span>
             <span class="sub-meta">{{ sub.language }}</span>
             <span class="sub-time" v-if="hasMetric(sub.timeUsed) || hasMetric(sub.memoryUsed)">{{ hasMetric(sub.timeUsed) ? `${sub.timeUsed}ms` : '-' }} / {{ hasMetric(sub.memoryUsed) ? formatMemoryKb(sub.memoryUsed) : '-' }}</span>
-            <span class="sub-time" v-else>{{ sub.score }} 分</span>
+            <span class="sub-time" v-else-if="shouldShowScore(sub.status, sub.score)">{{ sub.score }} 分</span>
           </button>
         </div>
         <div v-else class="empty-state">暂无提交记录。</div>
@@ -687,7 +701,7 @@ void [
             <div class="detail-meta">
               <span v-if="selectedSubmission.problem"><b>题目：</b>{{ problemDisplayTitle(selectedSubmission.problem) }}</span>
               <span><b>状态：</b>{{ statusLabels[selectedSubmission.status] || selectedSubmission.status }}</span>
-              <span><b>得分：</b>{{ selectedSubmission.score }}</span>
+              <span v-if="shouldShowScore(selectedSubmission.status, selectedSubmission.score)"><b>得分：</b>{{ selectedSubmission.score }}</span>
               <span v-if="hasMetric(selectedSubmission.timeUsed)"><b>用时：</b>{{ selectedSubmission.timeUsed }}ms</span>
               <span v-if="hasMetric(selectedSubmission.memoryUsed)"><b>内存：</b>{{ formatMemoryKb(selectedSubmission.memoryUsed) }}</span>
               <span><b>语言：</b>{{ selectedSubmission.language }}</span>
@@ -868,7 +882,7 @@ void [
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
   margin: 18px 0;
 }

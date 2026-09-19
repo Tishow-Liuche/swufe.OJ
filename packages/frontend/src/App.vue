@@ -24,6 +24,7 @@ watch(() => auth.user?.id, () => void fetchNotificationUnread());
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown);
   window.addEventListener('swufe:notifications-changed', handleNotificationChanged);
+  void auth.restoreSession();
   void fetchNotificationUnread();
   notificationPoll = window.setInterval(() => void fetchNotificationUnread(), 60_000);
 });

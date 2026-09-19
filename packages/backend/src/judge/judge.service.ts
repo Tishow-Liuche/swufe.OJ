@@ -43,7 +43,15 @@ interface RunResult {
   output: string;
 }
 
-const LANGUAGE_CONFIG: Record<string, { extension: string; compileCommand: string[]; runCommand: string[] }> = {
+interface LanguageConfig {
+  extension: string;
+  compileCommand: string[];
+  runCommand: string[];
+  sourceFile?: string;
+  artifactFile?: string;
+}
+
+const LANGUAGE_CONFIG: Record<string, LanguageConfig> = {
   cpp: {
     extension: 'cpp',
     compileCommand: ['/usr/bin/g++', '-O2', '-std=c++17', '-o', 'main', 'main.cpp'],
@@ -61,8 +69,10 @@ const LANGUAGE_CONFIG: Record<string, { extension: string; compileCommand: strin
   },
   java: {
     extension: 'java',
-    compileCommand: ['/usr/bin/javac', 'Main.java'],
-    runCommand: ['/usr/bin/java', 'Main'],
+    sourceFile: 'Main.java',
+    artifactFile: 'main.jar',
+    compileCommand: ['/bin/sh', '-c', '/usr/bin/javac Main.java && /usr/bin/jar cf main.jar Main*.class'],
+    runCommand: ['/usr/bin/java', '-cp', 'main.jar', 'Main'],
   },
 };
 
@@ -99,7 +109,8 @@ export class JudgeService {
       return { success: true, fileId: undefined, message: '' };
     }
 
-    const sourceFile = `main.${langConfig.extension}`;
+    const sourceFile = langConfig.sourceFile || `main.${langConfig.extension}`;
+    const artifactFile = langConfig.artifactFile || 'main';
     const request: GoJudgeRequest = {
       cmd: [{
         args: langConfig.compileCommand,
@@ -114,7 +125,7 @@ export class JudgeService {
         procLimit: 50,
         copyIn: { [sourceFile]: { content: code } },
         copyOut: ['stdout', 'stderr'],
-        copyOutCached: ['main'],     // Cache compiled binary
+        copyOutCached: [artifactFile],
       }],
     };
 
@@ -128,7 +139,7 @@ export class JudgeService {
       const result = results[0];
 
       if (result.status === 'Accepted') {
-        const fileId = result.fileIds?.['main'] || result.fileIds?.['Main'] || result.fileIds?.['Main.class'];
+        const fileId = result.fileIds?.[artifactFile];
         return { success: true, fileId, message: '' };
       }
 
@@ -151,16 +162,48 @@ export class JudgeService {
     compileFileId?: string,
     sourceCode?: string,
   ): Promise<RunResult> {
+    return this.runWithFiles(
+      language,
+      input,
+      timeLimitMs,
+      memoryLimitMb,
+      compileFileId,
+      sourceCode,
+    );
+  }
+
+  /** Run code with optional companion files for special judges. */
+  async runWithFiles(
+    language: string,
+    input: string,
+    timeLimitMs: number,
+    memoryLimitMb: number,
+    compileFileId?: string,
+    sourceCode?: string,
+    files: Record<string, string> = {},
+  ): Promise<RunResult> {
     const langConfig = LANGUAGE_CONFIG[language];
-    const cpuLimit = timeLimitMs * 1_000_000;     // ms → ns
-    const memoryLimit = memoryLimitMb * 1024 * 1024; // MB → bytes
+    if (!langConfig) {
+      return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: 'Unsupported language' };
+    }
+
+    const cpuLimit = timeLimitMs * 1_000_000;
+    const memoryLimit = memoryLimitMb * 1024 * 1024;
 
     const copyIn: Record<string, { content: string } | { fileId: string }> = {};
+    const artifactFile = langConfig.artifactFile || 'main';
 
     if (compileFileId) {
-      copyIn['main'] = { fileId: compileFileId };
+      copyIn[artifactFile] = { fileId: compileFileId };
     } else if (language === 'python' && sourceCode) {
       copyIn['main.py'] = { content: sourceCode };
+    }
+
+    for (const [name, content] of Object.entries(files)) {
+      if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
+        return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: `Invalid SPJ file name: ${name}` };
+      }
+      copyIn[name] = { content: content ?? '' };
     }
 
     const request: GoJudgeRequest = {

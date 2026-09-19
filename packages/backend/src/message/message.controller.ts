@@ -12,6 +12,11 @@ export class MessageController {
     return this.messages.searchContacts(req.user.id, keyword);
   }
 
+  @Get('contacts/:id')
+  getContact(@Req() req: any, @Param('id') id: string) {
+    return this.messages.getContact(req.user.id, id);
+  }
+
   @Get('conversations')
   listConversations(@Req() req: any) {
     return this.messages.listConversations(req.user.id);

@@ -1,9 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { NativeJudgeService } from '../judge/native-judge.service';
+import { JudgeService } from '../judge/judge.service';
 import { LearningService } from '../learning/learning.service';
+import { AssignmentProgressService } from '../teacher/assignment-progress.service';
 import { ContestCacheService } from '../contest/contest-cache.service';
 
 interface JudgeJob {
@@ -31,17 +32,26 @@ interface RunResult {
 interface ProblemTestCaseForJudge {
   input: string;
   expectedOutput: string;
+  isSample?: boolean;
 }
 
-@Processor('judge')
+const MAX_STORED_OUTPUT_CHARS = 32_768;
+
+const configuredConcurrency = Number.parseInt(process.env.JUDGE_WORKER_CONCURRENCY || '1', 10);
+const judgeConcurrency = Number.isInteger(configuredConcurrency) && configuredConcurrency > 0
+  ? configuredConcurrency
+  : 1;
+
+@Processor('judge', { concurrency: judgeConcurrency })
 export class JudgeProcessor extends WorkerHost {
   private readonly logger = new Logger(JudgeProcessor.name);
 
   constructor(
     private prisma: PrismaService,
-    private judge: NativeJudgeService,
+    private judge: JudgeService,
     private learning: LearningService,
-    private contestCache: ContestCacheService,
+    @Optional() private assignmentProgress?: AssignmentProgressService,
+    @Optional() private contestCache?: ContestCacheService,
   ) {
     super();
   }
@@ -70,7 +80,7 @@ export class JudgeProcessor extends WorkerHost {
           where: { id: data.submissionId },
           data: {
             status: 'COMPILE_ERROR',
-            compileMessage: compileResult.message,
+              compileMessage: this.truncateOutput(compileResult.message),
             judgedAt: new Date(),
           },
         });
@@ -140,9 +150,9 @@ export class JudgeProcessor extends WorkerHost {
             status: caseStatus,
             timeUsed: result.timeUsed,
             memoryUsed: result.memoryUsed,
-            input: tc.input,
-            expectedOutput: useSpj ? '[SPJ]' : tc.expectedOutput,
-            actualOutput: result.output,
+            input: tc.isSample ? tc.input : null,
+            expectedOutput: useSpj ? '[SPJ]' : tc.isSample ? tc.expectedOutput : null,
+            actualOutput: this.truncateOutput(result.output),
           },
         });
 
@@ -156,6 +166,7 @@ export class JudgeProcessor extends WorkerHost {
       if (compileResult.fileId) this.judge.deleteFile(compileResult.fileId).catch(() => {});
       if (checkerCompileResult?.fileId) this.judge.deleteFile(checkerCompileResult.fileId).catch(() => {});
 
+      const judgedAt = new Date();
       await this.prisma.submission.update({
         where: { id: data.submissionId },
         data: {
@@ -163,11 +174,24 @@ export class JudgeProcessor extends WorkerHost {
           score: finalScore,
           timeUsed: maxTime,
           memoryUsed: maxMemory,
-          judgedAt: new Date(),
+          judgedAt,
         },
       });
       await this.finishTask(data.submissionId);
       await this.learning.recordSubmissionResult(data.submissionId, finalStatus);
+      if (finalStatus === 'ACCEPTED' && this.assignmentProgress) {
+        const submission = await this.prisma.submission.findUnique({
+          where: { id: data.submissionId },
+          select: { userId: true, problemId: true },
+        });
+        if (submission) {
+          await this.assignmentProgress.onLocalAccepted(
+            submission.userId,
+            submission.problemId,
+            judgedAt,
+          );
+        }
+      }
       this.logger.log(`Submission ${data.submissionId}: ${finalStatus} (${finalScore}分)`);
       return { status: finalStatus, score: finalScore };
     } catch (error: any) {
@@ -184,28 +208,18 @@ export class JudgeProcessor extends WorkerHost {
     testCase: ProblemTestCaseForJudge,
     data: JudgeJob,
   ) {
-    const runWithFiles = (this.judge as any).runWithFiles?.bind(this.judge);
-    const checkerResult: RunResult = runWithFiles
-      ? await runWithFiles(
-          checker.language || 'python',
-          userOutput,
-          data.timeLimit,
-          data.memoryLimit,
-          checkerCompileResult.fileId,
-          checker.sourceCode || '',
-          {
-            input: testCase.input,
-            output: testCase.expectedOutput || '',
-            user_output: userOutput,
-          },
-        )
-      : await this.judge.run(
+    const checkerResult: RunResult = await this.judge.runWithFiles(
       checker.language || 'python',
       userOutput,
       data.timeLimit,
       data.memoryLimit,
       checkerCompileResult.fileId,
       checker.sourceCode || '',
+      {
+        input: testCase.input,
+        output: testCase.expectedOutput || '',
+        user_output: userOutput,
+      },
     );
     return this.checkerAccepted(checkerResult) ? 'ACCEPTED' : 'WRONG_ANSWER';
   }
@@ -219,6 +233,13 @@ export class JudgeProcessor extends WorkerHost {
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
       .replace(/[ \t\n]+$/g, '');
+  }
+
+  private truncateOutput(output: string): string {
+    const value = String(output ?? '');
+    return value.length <= MAX_STORED_OUTPUT_CHARS
+      ? value
+      : `${value.slice(0, MAX_STORED_OUTPUT_CHARS)}\n[output truncated]`;
   }
 
   private checkerAccepted(result: RunResult): boolean {
@@ -241,15 +262,11 @@ export class JudgeProcessor extends WorkerHost {
     await this.prisma.judgeTask
       .update({ where: { submissionId: id }, data: { finishedAt: new Date() } })
       .catch(() => {});
-    await this.invalidateContestCache(id);
-  }
-
-  private async invalidateContestCache(submissionId: string) {
     const contestSubmission = await this.prisma.contestSubmission
-      .findUnique({ where: { submissionId }, select: { contestId: true } })
+      .findUnique({ where: { submissionId: id }, select: { contestId: true } })
       .catch(() => null);
     if (contestSubmission?.contestId) {
-      await this.contestCache.invalidateContest(contestSubmission.contestId);
+      await this.contestCache?.invalidateContest(contestSubmission.contestId);
     }
   }
 }

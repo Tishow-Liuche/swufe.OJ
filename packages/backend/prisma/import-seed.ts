@@ -23,7 +23,7 @@ interface SeedProblem {
 
 async function main() {
   const dataPath = path.join(__dirname, 'problem-seed.json');
-  const problems: SeedProblem[] = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+  const problems: SeedProblem[] = JSON.parse(fs.readFileSync(dataPath, 'utf-8').replace(/^\uFEFF/, ''));
 
   console.log(`Loading ${problems.length} problems from problem-seed.json...`);
   let created = 0, skipped = 0;

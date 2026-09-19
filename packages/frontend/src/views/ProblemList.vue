@@ -589,7 +589,7 @@ function requireLogin(redirect: string) {
 
           <button type="button" class="tag-dialog-trigger" @click="openTagDialog">
             <Tag :size="17" aria-hidden="true" />
-            <span>{{ selectedTag || '全部标签' }}</span>
+            <span>{{ selectedTag ? tagLabel(selectedTag) : '全部标签' }}</span>
           </button>
 
           <button v-if="hasFilters" type="button" class="reset-button" @click="resetFilters">
@@ -610,7 +610,7 @@ function requireLogin(redirect: string) {
               <span v-if="keyword" class="filter-chip">“{{ keyword }}”</span>
               <span v-if="difficulty" class="filter-chip">{{ difficultyShortLabel(difficulty) }}</span>
               <span v-if="source" class="filter-chip">{{ sourceLabel(source) }}</span>
-              <span v-if="selectedTag" class="filter-chip">{{ selectedTag }}</span>
+              <span v-if="selectedTag" class="filter-chip">{{ tagLabel(selectedTag) }}</span>
             </div>
           </div>
 

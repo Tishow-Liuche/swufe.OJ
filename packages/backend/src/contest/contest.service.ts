@@ -48,7 +48,7 @@ export class ContestService {
     return 'RUNNING';
   }
 
-  private async withOrganizers(contests: any[]) {
+  private async withOrganizers(contests: any[], viewer?: Viewer) {
     const organizerIds = [...new Set(contests.map((contest) => contest.createdBy))];
     const users = await this.prisma.user.findMany({
       where: { id: { in: organizerIds } },
@@ -57,8 +57,13 @@ export class ContestService {
     const byId = new Map(users.map((user) => [user.id, user]));
     return contests.map((contest) => {
       const { password: _password, ...safeContest } = contest;
+      const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
+      const hideProblems = !canManage && (new Date() < contest.startTime ||
+        (contest.visibility === 'CAMPUS_PRIVATE' && !contest.participant));
       return {
       ...safeContest,
+      problems: hideProblems ? [] : contest.problems,
+      _count: { ...contest._count, problems: contest.problems?.length || 0 },
       organizer: byId.get(contest.createdBy)
         ? { id: contest.createdBy, name: byId.get(contest.createdBy)!.nickname || byId.get(contest.createdBy)!.username }
         : { id: contest.createdBy, name: '平台赛事组' },
@@ -117,7 +122,7 @@ export class ContestService {
         participant: participant || null,
         state: this.stateOf(contest, participant),
       };
-    }));
+    }), viewer);
   }
 
   async getContest(id: string, viewer?: Viewer) {
@@ -140,7 +145,7 @@ export class ContestService {
       ...contest,
       participant: participant || null,
       state: this.stateOf(contest, participant),
-    }]))[0];
+    }], viewer))[0];
   }
 
   async register(id: string, viewer: Viewer, password?: string, identity?: { studentId?: string; realName?: string }) {
@@ -308,6 +313,9 @@ export class ContestService {
     const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
     const participant = (contest as any).participants?.[0];
     if (!canManage && !participant) throw new ForbiddenException('请先报名或开始虚拟比赛');
+    if (!canManage && this.stateOf(contest, participant) === 'UPCOMING') {
+      throw new ForbiddenException('比赛尚未开始');
+    }
     return contestProblem.problem;
   }
 
@@ -331,7 +339,7 @@ export class ContestService {
         },
       },
     });
-    if (!contest) throw new NotFoundException('比赛不存在');
+    if (!contest) throw new NotFoundException('?????');
     this.assertCanViewStandings(contest, viewer);
     const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
     if (!canManage) {

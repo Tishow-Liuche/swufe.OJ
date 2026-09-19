@@ -41,6 +41,14 @@ describe('protected route session restore', () => {
     expect(router.currentRoute.value.path).toBe('/profile');
   });
 
+  it('redirects an anonymous visitor away from the community', async () => {
+    await router.push('/community');
+
+    expect(auth.restoreSession).toHaveBeenCalledOnce();
+    expect(router.currentRoute.value.path).toBe('/login');
+    expect(router.currentRoute.value.query.redirect).toBe('/community');
+  });
+
   it('does not expose administrator routes to an authenticated teacher', async () => {
     auth.token = 'teacher-token';
     auth.user = {};
@@ -50,5 +58,13 @@ describe('protected route session restore', () => {
     await router.push('/admin/users');
 
     expect(router.currentRoute.value.path).toBe('/problems');
+  });
+
+  it('registers joining a class as a protected student page', () => {
+    const route = router.resolve('/classes/join');
+
+    expect(route.matched).toHaveLength(1);
+    expect(route.meta.requiresAuth).toBe(true);
+    expect(route.meta.requiresStudent).toBe(true);
   });
 });

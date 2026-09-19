@@ -27,19 +27,33 @@ import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
+import FilterSelect from '../components/FilterSelect.vue';
 import ProblemStateBadges from '../components/ProblemStateBadges.vue';
 import { useAuthStore } from '../stores/auth';
-import { pointDifficultyOrder, pointDifficultyShortLabel } from '../utils/pointDifficulty';
+import {
+  pointDifficultyOptions,
+  pointDifficultyOrder,
+  pointDifficultyShortLabel,
+} from '../utils/pointDifficulty';
 
 type Tab = 'practice' | 'plans' | 'lists' | 'library';
 type LibraryView = 'summary' | 'favorites' | 'wrong';
 type ListSort = 'difficulty' | 'number' | 'joined';
+type CatalogProblem = {
+  id: string;
+  title: string;
+  source?: string;
+  difficulty?: string | null;
+  tags?: Array<{ name: string }>;
+  sourceInfo?: { remoteProblemId?: string; platform?: string } | null;
+  state?: any;
+};
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const activeTab = ref<Tab>('practice');
-const sidebarCollapsed = useStorage('swufe-oj:learning-sidebar-collapsed', false);
+const sidebarCollapsed = useStorage('swufe-oj:learning-sidebar-collapsed-v2', true);
 const loading = ref(true);
 const saving = ref(false);
 const savingPlanId = ref('');
@@ -53,11 +67,24 @@ const selectedList = ref<any>(null);
 const listForm = ref({ name: '', description: '', isPublic: true });
 const listModalOpen = ref(false);
 const listSearch = ref('');
-const listProblems = ref<any[]>([]);
+const listProblems = ref<CatalogProblem[]>([]);
 const listProblemsLoading = ref(false);
 const listProblemsLoaded = ref(false);
 const listSort = ref<ListSort>('difficulty');
 const listSortDirection = ref<'asc' | 'desc'>('asc');
+const catalogPage = ref(1);
+const catalogPageSize = 10;
+const catalogTotal = ref(0);
+const catalogSource = ref('');
+const catalogDifficulty = ref('');
+const catalogTag = ref('');
+const catalogMetadata = ref<{
+  tags: Array<{ name: string; count: number }>;
+  sources: Array<{ source: string; count: number }>;
+} | null>(null);
+const catalogSelected = ref<CatalogProblem[]>([]);
+const catalogAdding = ref(false);
+let catalogSearchSerial = 0;
 
 const plans = ref<any[]>([]);
 const dashboard = ref<any>(null);
@@ -107,6 +134,26 @@ const sortDirectionLabel = computed(() => {
   return listSortDirection.value === 'desc' ? '最新加入优先' : '最早加入优先';
 });
 const fullLibraryItems = computed(() => (libraryView.value === 'favorites' ? favorites.value : wrongBook.value));
+const catalogTotalPages = computed(() => Math.max(1, Math.ceil(catalogTotal.value / catalogPageSize)));
+const catalogSelectedIds = computed(() => new Set(catalogSelected.value.map((item) => item.id)));
+const catalogPageFullySelected = computed(() => {
+  if (!listProblems.value.length) return false;
+  return listProblems.value.every((item) => catalogSelectedIds.value.has(item.id));
+});
+const catalogSourceOptions = computed(() => [
+  { value: '', label: '全部来源' },
+  ...(catalogMetadata.value?.sources || []).map((item) => ({
+    value: item.source,
+    label: item.source === 'LOCAL' ? `原创 (${item.count})` : `${item.source} (${item.count})`,
+  })),
+]);
+const catalogTagOptions = computed(() => [
+  { value: '', label: '全部标签' },
+  ...(catalogMetadata.value?.tags || []).slice(0, 80).map((item) => ({
+    value: item.name,
+    label: `${item.name} (${item.count})`,
+  })),
+]);
 
 function message(text: string) {
   notice.value = text;
@@ -170,6 +217,7 @@ async function reloadLearning() {
 
 async function selectList(id: string) {
   selectedListId.value = id;
+  catalogSelected.value = [];
   try {
     selectedList.value = (await api.get(`/api/problem-lists/${id}`)).data;
     listForm.value = {
@@ -177,10 +225,13 @@ async function selectList(id: string) {
       description: selectedList.value.description || '',
       isPublic: selectedList.value.isPublic,
     };
-    if (selectedListOwned.value) await loadListProblemOptions();
-    else {
+    if (selectedListOwned.value) {
+      if (!catalogMetadata.value) await loadCatalogMetadata();
+      await loadListProblemOptions(catalogPage.value || 1);
+    } else {
       listProblems.value = [];
       listProblemsLoaded.value = false;
+      catalogTotal.value = 0;
     }
   } catch (err: any) {
     fail(err, '题单加载失败');
@@ -237,44 +288,141 @@ async function deleteList() {
   }
 }
 
-async function loadListProblemOptions(keyword = '') {
+async function loadCatalogMetadata() {
+  try {
+    const { data } = await api.get('/api/problems/metadata');
+    catalogMetadata.value = {
+      tags: data?.tags || [],
+      sources: data?.sources || [],
+    };
+  } catch {
+    catalogMetadata.value = { tags: [], sources: [] };
+  }
+}
+
+async function loadListProblemOptions(page = catalogPage.value) {
   if (!selectedListOwned.value) return;
+  const requestId = ++catalogSearchSerial;
   listProblemsLoading.value = true;
   listProblemsLoaded.value = false;
-  listProblems.value = [];
   try {
-    const { data } = await api.get('/api/problems', {
-      params: { keyword: keyword.trim() || undefined, pageSize: 30, status: 'PUBLISHED' },
-    });
-    const selectedIds = new Set(selectedListItems.value.map((item: any) => item.problemId));
-    listProblems.value = await attachProblemStates(
-      (data.items || []).filter((problem: any) => !selectedIds.has(problem.id)),
+    const params: Record<string, string | number> = {
+      page,
+      pageSize: catalogPageSize,
+      status: 'PUBLISHED',
+    };
+    if (listSearch.value.trim()) params.keyword = listSearch.value.trim();
+    if (catalogSource.value) params.source = catalogSource.value;
+    if (catalogDifficulty.value) params.difficulty = catalogDifficulty.value;
+    if (catalogTag.value) params.tag = catalogTag.value;
+
+    const { data } = await api.get('/api/problems', { params });
+    if (requestId !== catalogSearchSerial) return;
+
+    const alreadyInList = new Set(selectedListItems.value.map((item: any) => item.problemId));
+    const items = (data.items || []).filter((problem: any) => !alreadyInList.has(problem.id));
+    listProblems.value = await attachProblemStates(items);
+    catalogTotal.value = data.total || 0;
+    catalogPage.value = Math.min(
+      data.page || page,
+      Math.max(1, Math.ceil((data.total || 0) / catalogPageSize) || 1),
     );
     listProblemsLoaded.value = true;
   } catch (err: any) {
-    fail(err, '题目加载失败');
+    if (requestId === catalogSearchSerial) fail(err, '题目加载失败');
   } finally {
-    listProblemsLoading.value = false;
+    if (requestId === catalogSearchSerial) listProblemsLoading.value = false;
   }
+}
+
+function resetCatalogPage() {
+  catalogPage.value = 1;
+  void loadListProblemOptions(1);
+}
+
+function selectCatalogDifficulty(value: string) {
+  catalogDifficulty.value = value;
+  resetCatalogPage();
+}
+
+function problemSourceLabel(problem: CatalogProblem) {
+  if (problem.sourceInfo?.platform) return problem.sourceInfo.platform;
+  if (problem.source === 'LOCAL') return '原创';
+  return problem.source || '未知来源';
+}
+
+function toggleCatalogProblem(problem: CatalogProblem) {
+  if (catalogSelectedIds.value.has(problem.id)) {
+    catalogSelected.value = catalogSelected.value.filter((item) => item.id !== problem.id);
+    return;
+  }
+  catalogSelected.value = [...catalogSelected.value, problem];
+}
+
+function toggleCatalogCurrentPage() {
+  if (catalogPageFullySelected.value) {
+    const pageIds = new Set(listProblems.value.map((item) => item.id));
+    catalogSelected.value = catalogSelected.value.filter((item) => !pageIds.has(item.id));
+    return;
+  }
+  const merged = new Map(catalogSelected.value.map((item) => [item.id, item]));
+  for (const problem of listProblems.value) merged.set(problem.id, problem);
+  catalogSelected.value = Array.from(merged.values());
+}
+
+function removeCatalogSelection(problemId: string) {
+  catalogSelected.value = catalogSelected.value.filter((item) => item.id !== problemId);
+}
+
+function clearCatalogSelection() {
+  catalogSelected.value = [];
 }
 
 async function attachProblemStates(problems: any[]) {
   if (!problems.length) return problems;
-  const { data } = await api.post('/api/learning/problem-states', {
-    problemIds: problems.map((problem) => problem.id),
-  });
-  return problems.map((problem) => ({ ...problem, state: data[problem.id] }));
+  try {
+    const { data } = await api.post('/api/learning/problem-states', {
+      problemIds: problems.map((problem) => problem.id),
+    });
+    return problems.map((problem) => ({ ...problem, state: data[problem.id] }));
+  } catch {
+    return problems;
+  }
 }
 
 async function addToList(problemId: string) {
   if (!selectedList.value) return;
   try {
     await api.post(`/api/problem-lists/${selectedList.value.id}/items`, { problemId });
-    listSearch.value = '';
+    catalogSelected.value = catalogSelected.value.filter((item) => item.id !== problemId);
     await selectList(selectedList.value.id);
     message('题目已加入题单');
   } catch (err: any) {
     fail(err, '题目加入失败');
+  }
+}
+
+async function addSelectedToList() {
+  if (!selectedList.value || !catalogSelected.value.length) return;
+  catalogAdding.value = true;
+  let added = 0;
+  let failed = 0;
+  try {
+    for (const problem of catalogSelected.value) {
+      try {
+        await api.post(`/api/problem-lists/${selectedList.value.id}/items`, { problemId: problem.id });
+        added += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    catalogSelected.value = [];
+    await selectList(selectedList.value.id);
+    if (failed && added) message(`已加入 ${added} 题，${failed} 题失败`);
+    else if (failed) fail(null, `${failed} 题加入失败`);
+    else message(`已加入 ${added} 题到题单`);
+  } finally {
+    catalogAdding.value = false;
   }
 }
 
@@ -356,8 +504,18 @@ async function removeWrong(problemId: string) {
 
 onMounted(async () => {
   const requestedTab = String(route.query.tab || '');
-  if (['practice', 'plans', 'lists', 'library'].includes(requestedTab)) activeTab.value = requestedTab as Tab;
-  await loadAll();
+  const requestedView = String(route.query.view || '');
+  if (['practice', 'plans', 'lists', 'library'].includes(requestedTab)) {
+    activeTab.value = requestedTab as Tab;
+  }
+  if (requestedTab === 'library' && ['summary', 'favorites', 'wrong'].includes(requestedView)) {
+    libraryView.value = requestedView as LibraryView;
+  } else if (requestedView === 'favorites' || requestedView === 'wrong') {
+    // Allow deep-links that only set view=favorites|wrong
+    activeTab.value = 'library';
+    libraryView.value = requestedView as LibraryView;
+  }
+  await Promise.all([loadAll(), loadCatalogMetadata()]);
 });
 </script>
 
@@ -555,20 +713,191 @@ onMounted(async () => {
               <p v-else class="public-description">{{ selectedList.description || '暂无题单说明。' }}</p>
 
               <template v-if="selectedListOwned">
-                <div class="subheading"><div><h3>添加题目</h3><span>从已发布题目中搜索</span></div></div>
-                <form class="search-inline" @submit.prevent="loadListProblemOptions(listSearch)">
-                  <input v-model="listSearch" placeholder="输入题号或题目名称">
-                  <button class="secondary-btn" type="submit"><Search :size="16" />搜索</button>
-                </form>
-                <div class="problem-catalog">
-                  <div class="catalog-heading"><span>可加入题目</span><small>当前显示 {{ listProblems.length }} 题</small></div>
-                  <div v-if="listProblemsLoading" class="problem-search-empty">正在加载题目...</div>
-                  <div v-else-if="listProblems.length" class="search-results">
-                    <button v-for="problem in listProblems" :key="problem.id" @click="addToList(problem.id)">
-                      <span><strong>{{ problemDisplayTitle(problem) }}</strong><small>{{ pointDifficultyShortLabel(problem.difficulty) }}</small><ProblemStateBadges :state="problem.state" compact /></span><b>加入</b>
-                    </button>
+                <div class="subheading">
+                  <div>
+                    <h3>添加题目</h3>
+                    <span>仿照老师布置作业：筛选题库后勾选加入</span>
                   </div>
-                  <div v-else-if="listProblemsLoaded" class="problem-search-empty">没有更多可加入的已发布题目。</div>
+                  <span class="catalog-selected-count">已选 {{ catalogSelected.length }} 题</span>
+                </div>
+
+                <div class="list-assignment-workspace" aria-label="题单选题">
+                  <section class="list-problem-bank">
+                    <header class="list-bank-heading">
+                      <div>
+                        <strong>题库</strong>
+                        <span>支持关键词、来源、标签、难度筛选</span>
+                      </div>
+                      <span>{{ listProblemsLoading ? '加载中' : `共 ${catalogTotal} 题` }}</span>
+                    </header>
+
+                    <div class="list-filter-row">
+                      <label class="list-keyword">
+                        <Search :size="16" />
+                        <input
+                          v-model="listSearch"
+                          placeholder="搜索题目标题、编号"
+                          @keyup.enter="resetCatalogPage"
+                        >
+                      </label>
+                      <FilterSelect
+                        v-model="catalogSource"
+                        :options="catalogSourceOptions"
+                        label="按来源筛选"
+                        @update:model-value="resetCatalogPage"
+                      />
+                      <FilterSelect
+                        v-model="catalogTag"
+                        :options="catalogTagOptions"
+                        label="按标签筛选"
+                        @update:model-value="resetCatalogPage"
+                      />
+                      <button class="secondary-btn" type="button" @click="resetCatalogPage">
+                        <Search :size="16" />搜索
+                      </button>
+                    </div>
+
+                    <div class="list-difficulty-filter" role="group" aria-label="按难度筛选">
+                      <button
+                        type="button"
+                        :class="{ active: !catalogDifficulty }"
+                        :aria-pressed="!catalogDifficulty"
+                        @click="selectCatalogDifficulty('')"
+                      >
+                        全部难度
+                      </button>
+                      <button
+                        v-for="item in pointDifficultyOptions"
+                        :key="item.value"
+                        type="button"
+                        :class="{ active: catalogDifficulty === item.value }"
+                        :aria-pressed="catalogDifficulty === item.value"
+                        @click="selectCatalogDifficulty(item.value)"
+                      >
+                        {{ item.level }}
+                      </button>
+                    </div>
+
+                    <div v-if="listProblemsLoading" class="problem-search-empty">正在加载题库...</div>
+                    <template v-else>
+                      <div v-if="listProblems.length" class="list-catalog-table-wrap">
+                        <table class="list-catalog-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <input
+                                  type="checkbox"
+                                  :checked="catalogPageFullySelected"
+                                  :aria-label="catalogPageFullySelected ? '取消选择当前页' : '选择当前页'"
+                                  @change="toggleCatalogCurrentPage"
+                                >
+                              </th>
+                              <th>题目</th>
+                              <th>来源</th>
+                              <th>难度</th>
+                              <th>状态</th>
+                              <th></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="problem in listProblems"
+                              :key="problem.id"
+                              class="list-catalog-row"
+                              :class="{ selected: catalogSelectedIds.has(problem.id) }"
+                              @click="toggleCatalogProblem(problem)"
+                            >
+                              <td @click.stop>
+                                <input
+                                  type="checkbox"
+                                  :checked="catalogSelectedIds.has(problem.id)"
+                                  :aria-label="`选择 ${problem.title}`"
+                                  @change="toggleCatalogProblem(problem)"
+                                >
+                              </td>
+                              <td>
+                                <strong>{{ problem.title }}</strong>
+                                <small v-if="problem.sourceInfo?.remoteProblemId">{{ problem.sourceInfo.remoteProblemId }}</small>
+                              </td>
+                              <td>{{ problemSourceLabel(problem) }}</td>
+                              <td>{{ pointDifficultyShortLabel(problem.difficulty) }}</td>
+                              <td><ProblemStateBadges :state="problem.state" compact /></td>
+                              <td>
+                                <button class="text-btn" type="button" @click.stop="addToList(problem.id)">快速加入</button>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div v-else-if="listProblemsLoaded" class="problem-search-empty">
+                        没有符合筛选条件的可加入题目。
+                      </div>
+                    </template>
+
+                    <footer class="list-catalog-pagination">
+                      <button
+                        type="button"
+                        :disabled="catalogPage <= 1 || listProblemsLoading"
+                        @click="loadListProblemOptions(catalogPage - 1)"
+                      >
+                        上一页
+                      </button>
+                      <span>第 {{ catalogPage }} / {{ catalogTotalPages }} 页</span>
+                      <button
+                        type="button"
+                        :disabled="catalogPage >= catalogTotalPages || listProblemsLoading"
+                        @click="loadListProblemOptions(catalogPage + 1)"
+                      >
+                        下一页
+                      </button>
+                    </footer>
+                  </section>
+
+                  <aside class="list-problem-set" aria-label="待加入题单">
+                    <header>
+                      <div>
+                        <strong>待加入题单</strong>
+                        <span>已选 {{ catalogSelected.length }} 题</span>
+                      </div>
+                      <button
+                        v-if="catalogSelected.length"
+                        type="button"
+                        class="clear-problem-set"
+                        @click="clearCatalogSelection"
+                      >
+                        清空
+                      </button>
+                    </header>
+                    <div v-if="catalogSelected.length" class="problem-set-list">
+                      <article v-for="problem in catalogSelected" :key="problem.id">
+                        <div>
+                          <strong>{{ problem.title }}</strong>
+                          <span>{{ problemSourceLabel(problem) }} · {{ pointDifficultyShortLabel(problem.difficulty) }}</span>
+                        </div>
+                        <button
+                          type="button"
+                          title="移除"
+                          :aria-label="`移除 ${problem.title}`"
+                          @click="removeCatalogSelection(problem.id)"
+                        >
+                          <X :size="15" />
+                        </button>
+                      </article>
+                    </div>
+                    <div v-else class="problem-set-empty">从左侧题库勾选题目</div>
+                    <footer class="builder-footer">
+                      <span>可批量加入当前题单</span>
+                      <button
+                        class="primary-btn"
+                        type="button"
+                        :disabled="!catalogSelected.length || catalogAdding"
+                        @click="addSelectedToList"
+                      >
+                        <Plus :size="16" />
+                        {{ catalogAdding ? '加入中…' : `加入 ${catalogSelected.length || ''} 题` }}
+                      </button>
+                    </footer>
+                  </aside>
                 </div>
               </template>
 
@@ -740,66 +1069,123 @@ onMounted(async () => {
 .sidebar-collapsed .workspace-nav button > span, .sidebar-collapsed .workspace-nav button > b { display: none; }
 
 .learning-main { min-width: 0; flex: 1; padding: 26px 28px 72px; }
-.learning-header, .learning-content { width: min(1180px, 100%); margin-right: auto; margin-left: auto; }
-.learning-header { min-height: 142px; padding: 26px 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgba(31, 66, 104, .07); }
-.eyebrow, .section-kicker { color: #3977aa; font-size: 10px; font-weight: 850; letter-spacing: 0; }
-.learning-header h1 { margin: 7px 0 8px; color: #1f2a37; font-size: 34px; line-height: 1.1; letter-spacing: 0; }
-.learning-header p, .page-toolbar p { color: var(--muted); font-size: 13px; }
+.learning-header, .learning-content { width: min(1440px, 100%); margin-right: auto; margin-left: auto; }
+.learning-header {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  min-height: 178px;
+  padding: 32px 40px;
+  border: 1px solid #dce5ef;
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(31, 66, 104, .08);
+  color: #1f2a37;
+}
+.eyebrow, .section-kicker { color: #3977aa; font-size: 11px; font-weight: 900; letter-spacing: .15em; }
+.learning-header h1 { margin: 0; color: #1f2a37; font-size: 42px; line-height: 1.1; letter-spacing: -.05em; }
+.learning-header p, .page-toolbar p { max-width: 610px; margin: 11px 0 0; color: #66778a; font-size: 14px; line-height: 1.7; }
+.learning-header .eyebrow { margin: 0 0 7px; }
 .learning-content { margin-top: 22px; }
 .loading-state, .section-empty, .empty-state { padding: 42px 18px; color: var(--muted); text-align: center; }
-.section-empty { border: 1px dashed #cbd7e2; background: #f9fbfc; font-size: 13px; }
-.section-empty.compact { padding: 26px 12px; border: 0; background: transparent; }
+.section-empty { border: 1px dashed #cbd7e2; border-radius: 18px; background: #f9fbfc; font-size: 13px; }
+.section-empty.compact { padding: 26px 12px; border: 0; border-radius: 0; background: transparent; }
 .notice { position: fixed; z-index: 180; top: 72px; right: 24px; display: flex; align-items: center; gap: 12px; max-width: 420px; padding: 12px 16px; border: 1px solid; border-radius: 7px; box-shadow: 0 10px 28px rgba(31, 48, 67, .14); font-size: 13px; }
 .notice.success { border-color: #a7dbc6; color: #166044; background: #f0fbf6; }
 .notice.error { border-color: #efc0bd; color: #9d342e; background: #fff5f4; }
 .notice button { display: grid; place-items: center; border: 0; color: inherit; background: transparent; cursor: pointer; }
 
-.metric-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
-.metric-strip > div { display: flex; min-width: 0; min-height: 92px; align-items: baseline; gap: 7px; padding: 22px 26px; border-left: 4px solid #4f83d8; }
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 7px 20px rgba(31, 66, 104, .04);
+}
+.metric-strip > div { display: flex; min-width: 0; min-height: 96px; align-items: center; gap: 10px; padding: 24px 28px; }
 .metric-strip > div + div { box-shadow: inset 1px 0 var(--line); }
-.metric-strip > div:nth-child(2) { border-left-color: #3c9b79; }
-.metric-strip > div:nth-child(3) { border-left-color: #c58a32; }
-.metric-strip span { margin-right: auto; align-self: center; color: #617287; font-size: 13px; font-weight: 700; }
+.metric-strip span { margin-right: auto; color: #617287; font-size: 14px; font-weight: 700; }
 .metric-strip strong { color: #1f4f82; font-size: 34px; line-height: 1; }
 .metric-strip > div:nth-child(2) strong { color: #23785b; }
 .metric-strip > div:nth-child(3) strong { color: #95651e; }
-.metric-strip small { color: #8996a5; font-size: 12px; }
+.metric-strip small { color: #8996a5; font-size: 13px; }
 .practice-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 16px; }
-.workspace-panel, .page-section, .active-section, .list-detail { border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgba(31, 66, 104, .04); }
-.workspace-panel { min-width: 0; padding: 22px; }
+.workspace-panel, .page-section, .active-section, .list-detail {
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 7px 20px rgba(31, 66, 104, .04);
+}
+.workspace-panel { min-width: 0; padding: 24px 24px 18px; }
 .section-heading, .page-toolbar, .detail-heading, .subheading, .subsection-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.section-heading { margin-bottom: 17px; }
-.section-heading h2, .page-toolbar h2, .detail-heading h2 { margin-top: 4px; color: #26384d; font-size: 20px; letter-spacing: 0; }
-.section-count { color: #718094; font-size: 11px; font-weight: 750; }
+.section-heading { margin-bottom: 14px; }
+.section-heading h2, .page-toolbar h2, .detail-heading h2 { margin-top: 6px; color: #26384d; font-size: 20px; letter-spacing: 0; line-height: 1.25; }
+.section-count { color: #718094; font-size: 12px; font-weight: 750; }
 .problem-rows { border-top: 1px solid var(--line); }
-.problem-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; min-height: 59px; align-items: center; gap: 10px; width: 100%; border: 0; border-bottom: 1px solid #e9eef3; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.problem-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  min-height: 76px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 4px;
+  border: 0;
+  border-bottom: 1px solid #e9eef3;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
 .problem-row:hover { background: #f8fafc; }
-.problem-index, .order-number { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: #68798c; background: #edf2f6; font-size: 11px; }
-.problem-copy { display: grid; min-width: 0; gap: 3px; }
-.problem-copy strong { overflow: hidden; color: #295b8d; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.problem-copy small { color: #8a97a6; font-size: 10px; }
-.difficulty { padding: 4px 7px; border-radius: 5px; color: #557086; background: #eef3f7; font-size: 10px; white-space: nowrap; }
-.empty-state { display: grid; justify-items: center; gap: 7px; }
+.problem-index, .order-number { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 8px; color: #68798c; background: #edf2f6; font-size: 12px; font-weight: 750; }
+.problem-copy { display: grid; min-width: 0; gap: 6px; }
+.problem-copy strong { overflow: hidden; color: #295b8d; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.35; }
+.problem-copy small { color: #8a97a6; font-size: 12px; line-height: 1.4; }
+.problem-copy :deep(.state-badges),
+.problem-copy :deep(.problem-state-badges) { margin-top: 1px; }
+.difficulty { padding: 5px 9px; border-radius: 7px; color: #557086; background: #eef3f7; font-size: 11px; white-space: nowrap; }
+.empty-state { display: grid; justify-items: center; gap: 8px; padding: 18px 8px; }
 .empty-state svg { color: #5d8f78; }
 .empty-state strong { color: #44586c; font-size: 13px; }
-.empty-state p { font-size: 11px; }
+.empty-state p { font-size: 12px; line-height: 1.5; }
 .empty-state.compact { padding: 28px 10px; }
 .continue-list { border-top: 1px solid var(--line); }
-.continue-list button { display: flex; min-height: 62px; align-items: center; gap: 12px; width: 100%; border: 0; border-bottom: 1px solid #e9eef3; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.continue-list button {
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 4px;
+  border: 0;
+  border-bottom: 1px solid #e9eef3;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
 .continue-list button:hover { background: #f8fafc; }
-.continue-list button > span { display: grid; min-width: 0; flex: 1; gap: 4px; }
-.continue-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.continue-list small { color: #8794a3; font-size: 10px; }
-.continue-list b { color: #2c70b1; font-size: 15px; }
-.continue-list .continue-expand { min-height: 40px; justify-content: center; color: #316d9f; font-size: 10px; font-weight: 800; }
-.library-entry { display: flex; min-height: 60px; align-items: center; gap: 11px; width: 100%; margin-top: 16px; padding: 10px 13px; border: 1px solid #bfd1e2; border-radius: 7px; color: #225d91; text-align: left; background: #f4f8fc; cursor: pointer; }
+.continue-list button > span { display: grid; min-width: 0; flex: 1; gap: 6px; }
+.continue-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.35; }
+.continue-list small { color: #8794a3; font-size: 12px; line-height: 1.4; }
+.continue-list b { flex: 0 0 auto; color: #2c70b1; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.continue-list .continue-expand { min-height: 44px; justify-content: center; color: #316d9f; font-size: 12px; font-weight: 800; }
+.library-entry { display: flex; min-height: 64px; align-items: center; gap: 12px; width: 100%; margin-top: 16px; padding: 12px 14px; border: 1px solid #bfd1e2; border-radius: 14px; color: #225d91; text-align: left; background: #f4f8fc; cursor: pointer; }
 .library-entry:hover { border-color: #8fb3d2; background: #eaf2f9; }
-.library-entry span { display: grid; gap: 2px; }
-.library-entry strong { font-size: 12px; }
-.library-entry small { color: #7a8999; font-size: 9px; }
+.library-entry span { display: grid; gap: 4px; }
+.library-entry strong { font-size: 13px; line-height: 1.35; }
+.library-entry small { color: #7a8999; font-size: 11px; line-height: 1.4; }
 .active-section { margin-top: 18px; padding: 22px; }
 .plan-grid, .public-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.plan-card, .list-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.plan-card, .list-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 18px; background: #fff; }
 .plan-card { display: flex; }
 .plan-card:hover, .list-card:hover, .list-card.selected { border-color: #91b4d3; box-shadow: 0 9px 22px rgba(35, 77, 113, .08); }
 .card-main { min-width: 0; flex: 1; padding: 17px; border: 0; color: inherit; text-align: left; background: transparent; cursor: pointer; }
@@ -839,20 +1225,268 @@ textarea { resize: vertical; }
 .switch-label { display: flex; min-height: 40px; align-items: center; gap: 8px; white-space: nowrap; }
 .switch-label input { width: 16px; margin: 0; accent-color: var(--blue); }
 .public-description { padding: 18px 0; border-bottom: 1px solid var(--line); color: #6f7f90; font-size: 12px; }
-.subheading { margin: 21px 0 11px; }
-.search-inline { display: flex; gap: 8px; }
-.search-inline input { min-width: 0; flex: 1; margin: 0; }
-.problem-catalog { margin-top: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: #f8fafc; }
-.catalog-heading { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px; color: #34536f; font-size: 11px; font-weight: 800; }
-.catalog-heading small { color: #8492a2; font-size: 9px; }
-.search-results { max-height: 250px; overflow-y: auto; border-top: 1px solid var(--line); background: #fff; }
-.search-results button { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 13px; border: 0; border-bottom: 1px solid #e9eef3; color: inherit; text-align: left; background: transparent; cursor: pointer; }
-.search-results button:hover { background: #eef4ff; }
-.search-results button > span { display: grid; min-width: 0; gap: 4px; }
-.search-results strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.search-results small { color: #7d8b9b; font-size: 9px; }
-.search-results b { color: var(--blue); font-size: 10px; }
-.problem-search-empty { padding: 24px 14px; border-top: 1px solid var(--line); color: #7d8b9b; text-align: center; font-size: 11px; }
+.subheading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 21px 0 11px; }
+.catalog-selected-count {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #245f94;
+  background: #edf5fc;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.list-assignment-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 14px;
+  margin-top: 10px;
+  align-items: start;
+}
+.list-problem-bank,
+.list-problem-set {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.list-problem-bank { padding: 12px; }
+.list-bank-heading,
+.list-problem-set > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.list-bank-heading > div,
+.list-problem-set > header > div { display: grid; gap: 2px; }
+.list-bank-heading strong,
+.list-problem-set strong { color: #29475f; font-size: 13px; }
+.list-bank-heading span,
+.list-problem-set header span { color: #7c8998; font-size: 10px; }
+.list-bank-heading > span {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #245f94;
+  background: #edf5fc;
+  font-size: 10px;
+  font-weight: 800;
+}
+.list-filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(120px, .9fr) minmax(120px, .9fr) auto;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: center;
+}
+.list-keyword {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #d5dee8;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #718094;
+}
+.list-keyword input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.list-difficulty-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.list-difficulty-filter button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d5dee8;
+  border-radius: 999px;
+  background: #fff;
+  color: #526579;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.list-difficulty-filter button.active,
+.list-difficulty-filter button:hover {
+  border-color: #9fc0de;
+  color: #1f5eff;
+  background: #eef5ff;
+}
+.list-catalog-table-wrap {
+  margin-top: 12px;
+  overflow: auto;
+  border: 1px solid #dce5ed;
+  border-radius: 10px;
+}
+.list-catalog-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+}
+.list-catalog-table th,
+.list-catalog-table td {
+  padding: 10px 11px;
+  border-bottom: 1px solid #eaf0f5;
+  color: #53677b;
+  text-align: left;
+  font-size: 11px;
+}
+.list-catalog-table th {
+  color: #718094;
+  background: #f8fafc;
+  font-size: 10px;
+}
+.list-catalog-table th:first-child,
+.list-catalog-table td:first-child {
+  width: 34px;
+  text-align: center;
+}
+.list-catalog-row {
+  cursor: pointer;
+  transition: background .14s;
+}
+.list-catalog-row:hover { background: #f7fbff; }
+.list-catalog-row.selected { background: #eef5ff; }
+.list-catalog-table td strong {
+  display: block;
+  color: #304a64;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.list-catalog-table td small {
+  display: block;
+  margin-top: 3px;
+  color: #8794a2;
+  font-size: 9px;
+}
+.list-catalog-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.list-catalog-pagination button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #d5dee8;
+  border-radius: 8px;
+  background: #fff;
+  color: #3f5870;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.list-catalog-pagination button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.list-problem-set {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 320px;
+  padding: 12px;
+  background: #f8fafc;
+}
+.list-problem-set .clear-problem-set {
+  border: 0;
+  background: transparent;
+  color: #b45309;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.problem-set-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+.problem-set-list article {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e1e9f1;
+  border-radius: 9px;
+  background: #fff;
+}
+.problem-set-list article strong {
+  display: block;
+  color: #2d4660;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.problem-set-list article span {
+  display: block;
+  margin-top: 3px;
+  color: #8291a1;
+  font-size: 10px;
+}
+.problem-set-list button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+  color: #7b8794;
+  cursor: pointer;
+}
+.problem-set-empty {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  margin-top: 12px;
+  color: #8b98a7;
+  font-size: 12px;
+  text-align: center;
+}
+.builder-footer {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.builder-footer > span {
+  color: #7d8b9b;
+  font-size: 10px;
+}
+.builder-footer .primary-btn {
+  width: 100%;
+  justify-content: center;
+}
+.problem-search-empty {
+  margin-top: 12px;
+  padding: 18px 12px;
+  color: #8090a0;
+  text-align: center;
+  font-size: 12px;
+  border: 1px dashed #d5dee8;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+@media (max-width: 980px) {
+  .list-assignment-workspace { grid-template-columns: 1fr; }
+  .list-filter-row { grid-template-columns: 1fr; }
+}
 .problem-heading { align-items: flex-end; }
 .sort-toolbar { display: flex; gap: 5px; padding: 4px; border: 1px solid #dce4ec; border-radius: 7px; background: #f0f3f6; }
 .sort-modes { display: flex; gap: 3px; }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - Luogu Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      1.4
+// @version      1.6
 // @description  Auto fill code, auto submit to Luogu, report result back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
 // @match        https://www.luogu.com.cn/*
@@ -23,10 +23,11 @@
 var DEFAULT_API = 'http://127.0.0.1:3000';
 var API_BASE_KEY = 'swufe_oj_api_base';
 var API = resolveApiBase();
-var HELPER_VERSION = '1.4';
+var HELPER_VERSION = '1.6';
 var STATE_KEY = 'swufe_luogu_auto_state';
 var SUBMIT_ONCE_KEY_PREFIX = 'swufe_luogu_submit_once_';
 var LOGIN_REQUIRED_KEY = 'swufe_luogu_login_required_at';
+var BLOCKED_REPORT_KEY_PREFIX = 'swufe_luogu_blocked_reported_';
 
 function gv(k, d) { return GM_getValue(k, d != null ? d : ''); }
 function sv(k, v) { GM_setValue(k, v); }
@@ -67,7 +68,10 @@ function clearState() {
 
 function markLoginRequired() {
   var st = loadState();
-  if (st.submissionId || st.submittedAt || st.leaseNonce || st.reportedId) clearState();
+  if (st && st.submissionId) {
+    st.stage = 'LOGIN_REQUIRED';
+    saveState(st);
+  }
   sv(LOGIN_REQUIRED_KEY, String(Date.now()));
 }
 
@@ -85,6 +89,24 @@ function isActiveTaskState(st) {
   );
 }
 
+function isLaunchedFromSwufeOj() {
+  try {
+    return new URLSearchParams(location.search).has('swufeOjApi');
+  } catch (_) {
+    return false;
+  }
+}
+
+function isLuoguResultTrackingPage() {
+  return /\/record\//i.test(location.pathname) || /\/submission\//i.test(location.pathname);
+}
+
+function shouldActivateHelper() {
+  var st = loadState();
+  if (isLaunchedFromSwufeOj()) return true;
+  return isLuoguResultTrackingPage() && isActiveTaskState(st);
+}
+
 function banner(text, bg) {
   var old = document.getElementById('oj-lg-helper-banner');
   if (old) old.remove();
@@ -92,9 +114,10 @@ function banner(text, bg) {
   d.id = 'oj-lg-helper-banner';
   d.textContent = text;
   d.style.cssText =
-    'position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:12px 24px;' +
-    'text-align:center;font:15px sans-serif;color:#fff;background:' + bg + ';' +
-    'box-shadow:0 2px 14px rgba(0,0,0,.3);';
+    'position:fixed;top:10px;right:12px;z-index:2147483647;max-width:min(520px,calc(100vw - 24px));' +
+    'padding:8px 12px;border-radius:999px;pointer-events:none;opacity:.78;' +
+    'text-align:left;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#fff;background:' + bg + ';' +
+    'box-shadow:0 6px 20px rgba(0,0,0,.22);backdrop-filter:blur(4px);';
   document.body.appendChild(d);
 }
 
@@ -119,6 +142,51 @@ function apiRequest(method, url, data, cb) {
   });
 }
 
+
+function compactPageText() {
+  return ((document.title || '') + '\n' + ((document.body && document.body.innerText) || '')).replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+
+function isCaptchaOrVerificationPage() {
+  var text = compactPageText();
+  return /captcha|recaptcha|turnstile|verify|human|Cloudflare|Just a moment|验证码|人机验证|安全验证|滑动验证|请完成验证|请稍候/i.test(text) ||
+    !!document.querySelector('iframe[src*="captcha"], iframe[src*="turnstile"], iframe[src*="recaptcha"], .g-recaptcha, .cf-turnstile');
+}
+
+function reportBlockedForTask(task, failureCode, failureMessage) {
+  if (!task || !task.submissionId || !task.token) return;
+  var key = BLOCKED_REPORT_KEY_PREFIX + task.submissionId + '_' + failureCode;
+  if (gv(key, '')) return;
+  sv(key, String(Date.now()));
+  apiRequest('POST', '/api/luogu-submit-helper/' + task.submissionId + '/report-blocked', {
+    token: task.token,
+    leaseNonce: task.leaseNonce || undefined,
+    failureCode: failureCode,
+    failureMessage: failureMessage,
+    rawStatus: compactPageText()
+  }, function(err) {
+    if (err) {
+      console.warn('[Luogu Helper] report-blocked failed:', err);
+      dv(key);
+      return;
+    }
+    clearState();
+    banner(failureMessage + ' 已回传到 SWUFE OJ。', '#e74c3c');
+  });
+}
+
+function reportBlockedForProblem(pid, failureCode, failureMessage) {
+  var st = loadState();
+  if (st && st.submissionId && st.token) {
+    reportBlockedForTask(st, failureCode, failureMessage);
+    return;
+  }
+  apiRequest('GET', '/api/luogu-submit-helper/lookup?problemId=' + encodeURIComponent(pid), null, function(err, task) {
+    if (!err && task && task.submissionId && task.token) {
+      reportBlockedForTask(task, failureCode, failureMessage);
+    }
+  });
+}
 function problemIdFromLocation() {
   var m = location.pathname.match(/\/problem\/([A-Z]\d+[A-Z0-9-]*)/i);
   return m ? m[1].toUpperCase() : '';
@@ -423,8 +491,14 @@ function startSubmitFlow() {
   var pid = problemIdFromLocation();
   if (!pid) return;
 
+  if (isCaptchaOrVerificationPage()) {
+    reportBlockedForProblem(pid, 'VERIFICATION_REQUIRED', '洛谷正在要求验证码或安全验证，自动提交已阻塞。');
+    return;
+  }
+
   if (!isLoggedIn()) {
     markLoginRequired();
+    reportBlockedForProblem(pid, 'LOGIN_REQUIRED', '洛谷未登录，自动提交已停止。');
     banner('请先登录洛谷，然后刷新此页继续自动提交。', '#e74c3c');
     return;
   }
@@ -484,6 +558,7 @@ function startSubmitFlow() {
         var button = findSubmitButton();
         if (!codeOk || !button) {
           if (attempts > 80) {
+            reportBlockedForTask(loadState(), 'FORM_TIMEOUT', '洛谷提交表单、代码编辑器或提交按钮长时间未就绪。');
             banner('洛谷提交表单未就绪，请刷新洛谷页面重试。', '#e74c3c');
             return;
           }
@@ -507,7 +582,9 @@ function startSubmitFlow() {
   });
 }
 
-if (/\/record\//i.test(location.pathname) || /\/submission\//i.test(location.pathname)) {
+if (!shouldActivateHelper()) return;
+
+if (isLuoguResultTrackingPage()) {
   if (isActiveTaskState(loadState())) watchResult();
   else {
     clearState();
