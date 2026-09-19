@@ -17,7 +17,7 @@ await page.route('**/api/**', route => {
   else if (path === '/api/user/stats') body = { heatmap: [], recentSubmissions: [], difficultyDistribution: [] };
   else if (path === '/api/user/accepted-problems') body = { items: [{ problem, problemId: 'p1', contestId: 'campus-ui', source: 'LOCAL' }] };
   else if (path === '/api/auth/password-recovery') body = { enabled: false };
-  else if (path === '/api/problems/metadata') body = { total: 1, tags: [{ name: 'Constructive Algorithms', count: 1 }, { name: 'CSP-J 入门级', count: 1 }], difficulties: [], sources: [] };
+  else if (path === '/api/problems/metadata') body = { total: 1, tags: [{ name: 'Constructive Algorithms', count: 1 }, { name: 'CSP-J 入门级', count: 1 }, ...Array.from({ length: 50 }, (_, i) => ({ name: '测试标签' + i, count: 1 }))], difficulties: [], sources: [] };
   else if (path === '/api/problems') body = { items: [problem], total: 1 };
   else if (path === '/api/problems/mine/created') body = { items: [problem, { ...problem, id: 'p2', problemNo: 2, title: '第二题' }] };
   else if (path === '/api/contests' || path === '/api/contests/mine') body = [contest];
@@ -37,6 +37,7 @@ try {
   await link.waitFor(); assert.equal(await link.getAttribute('target'), '_blank');
   assert.match(await link.innerText(), /T1/);
   await page.locator('.tag-dialog-trigger').click();
+  assert((await page.locator('.tag-cloud button').count()) <= 9, 'Opening all tags must not expand the sidebar');
   await page.getByRole('dialog').getByText('非专业级软件能力认证入门级', { exact: true }).waitFor();
   await page.getByRole('dialog').locator('input').fill('constructive');
   await page.getByRole('dialog').getByText('构造', { exact: true }).click();

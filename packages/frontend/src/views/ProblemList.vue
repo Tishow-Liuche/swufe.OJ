@@ -838,7 +838,7 @@ function requireLogin(redirect: string) {
               </label>
               <div class="tag-cloud">
                 <button
-                  v-for="item in visibleTagCounts"
+                  v-for="item in visibleTagCounts.slice(0, 9)"
                   :key="item.name"
                   type="button"
                   :class="{ selected: selectedTag === item.name }"
