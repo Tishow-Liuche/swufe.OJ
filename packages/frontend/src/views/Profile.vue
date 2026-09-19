@@ -18,7 +18,6 @@ import {
   Save,
   Settings,
   ShieldCheck,
-  Sparkles,
   Target,
   Trash2,
   UserRound,
@@ -487,7 +486,6 @@ void [
   Save,
   Settings,
   ShieldCheck,
-  Sparkles,
   Target,
   Trash2,
   UserRound,
@@ -527,7 +525,7 @@ void [
     <template v-else-if="profile && stats">
       <section class="profile-hero">
         <div class="hero-copy">
-          <p class="eyebrow"><Sparkles :size="16" /> SINGULARITY PROFILE</p>
+          <p class="eyebrow">SINGULARITY PROFILE</p>
           <h1>{{ displayName }}</h1>
           <p class="username">@{{ profile.username }}</p>
           <div class="identity-row">

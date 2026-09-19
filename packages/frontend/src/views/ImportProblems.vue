@@ -251,7 +251,7 @@ async function syncQojBatch() {
 
     <!-- 洛谷一键导入 -->
     <div class="card">
-      <h3>📥 洛谷 P1000-P1010 一键导入</h3>
+      <h3>洛谷 P1000-P1010 一键导入</h3>
       <p class="card-desc">包含 11 道经典题目，涵盖入门级到提高组，来自洛谷官方题库。</p>
       <div class="quick-scan">
         <div v-for="p in luoguSeedData" :key="p.title" class="problem-preview">
@@ -296,7 +296,7 @@ async function syncQojBatch() {
 
     <!-- 手动输入 -->
     <div class="card">
-      <h3>✍️ 手动添加题目</h3>
+      <h3>手动添加题目</h3>
       <div class="form-grid">
         <div class="form-group full">
           <label>题目标题</label>

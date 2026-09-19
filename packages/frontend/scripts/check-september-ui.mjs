@@ -26,6 +26,8 @@ await context.route('**/api/**', route => {
   else if (path === '/api/problems/mine/created') body = { items: [problem, { ...problem, id: 'p2', problemNo: 2, title: '第二题' }] };
   else if (path === '/api/contests' || path === '/api/contests/mine') body = [contest];
   else if (path === '/api/contests/campus-ui') body = contest;
+  else if (path === '/api/stats') body = { problemCount: 26987, submissionCount: 123456, userCount: 500 };
+  else if (path === '/api/leaderboard') body = [{ id: profile.id, username: profile.username, nickname: profile.nickname, solvedCount: 42, submissionCount: 66 }];
   else if (path.endsWith('/standings')) body = { rows: [], problems: [] };
   else if (path.endsWith('/submissions')) body = { items: [] };
   else if (path.includes('notifications')) body = { items: [], unreadCount: 0 };
@@ -75,7 +77,7 @@ try {
     const popupPromise = page.waitForEvent('popup');
     await page.locator(selector).first().click();
     const popup = await popupPromise;
-    await popup.waitForURL('**/contests/campus-ui');
+    await popup.waitForURL('**/contests/campus-ui/register');
     await popup.locator('.campus-registration').waitFor();
     assert.equal(new URL(page.url()).pathname, '/contests');
     await popup.close();
@@ -93,6 +95,14 @@ try {
   await page.goto(base + '/forgot-password');
   await page.locator('.recovery-card').waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const [path, selector] of [['/', '.hero-title'], ['/leaderboard', '.rank-switcher'], ['/profile', '.student-id-action']]) {
+      await page.goto(base + path); await page.locator(selector).waitFor();
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), path + ' must fit viewport');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCREENSHOT_DIR + '/restrained-' + (path.slice(1) || 'home') + '-' + width + '.png' });
+    }
+  }
   assert.deepEqual(errors, []);
   console.log('PASS: disabled SMS, translated searchable tags, new-tab T-number problem links, campus deep-link/reload, accepted contest links, gender setting, contest type and problem reorder, mobile layout, no runtime errors');
 } catch (error) {

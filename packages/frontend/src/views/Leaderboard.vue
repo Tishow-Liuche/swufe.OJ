@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { BarChart3, Sparkles, Target, Trophy } from '@lucide/vue';
 import api from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
 
@@ -22,19 +21,16 @@ const scopeMeta = computed(() => ({
     title: '全站过题数排名',
     kicker: 'SOLVE COUNT',
     desc: '按照全站真实 AC 题目数排名，提交数与用户名作为并列时的辅助排序。',
-    icon: Target,
   },
   CONTEST: {
     title: contest.value?.title || '比赛排名',
     kicker: 'CONTEST STANDINGS',
     desc: '查看单场比赛榜单。ACM 模式展示过题数与罚时，IOI 模式展示得分。',
-    icon: Trophy,
   },
   OVERALL: {
     title: '综合排名',
     kicker: 'SINGULARITY SCORE',
     desc: '按本 OJ 提交 AC 的题目难度计做题分，比赛分当前为 0。',
-    icon: Sparkles,
   },
 })[scope.value]);
 
@@ -130,10 +126,6 @@ function selectContest(value: string) {
   void load();
 }
 
-function rankMedal(rank: number) {
-  return rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
-}
-
 onMounted(async () => {
   await loadContests();
   await load();
@@ -144,32 +136,26 @@ onMounted(async () => {
   <main class="leaderboard-page">
     <section class="leaderboard-hero">
       <div>
-        <p class="eyebrow"><BarChart3 :size="16" /> LEADERBOARD</p>
+        <p class="eyebrow">LEADERBOARD</p>
         <h1>{{ currentScopeTitle }}</h1>
         <p>{{ currentScopeDesc }}</p>
-      </div>
-      <div class="hero-orb">
-        <component :is="scopeMeta.icon" :size="54" />
       </div>
     </section>
 
     <section class="rank-switcher" aria-label="排行榜类型">
       <button :class="{ active: scope === 'GLOBAL' }" @click="switchScope('GLOBAL')">
-        <Target :size="18" />
         <span>
           <strong>全站过题数排名</strong>
           <small>按 AC 题目数排序</small>
         </span>
       </button>
       <button :class="{ active: scope === 'CONTEST' }" @click="switchScope('CONTEST')">
-        <Trophy :size="18" />
         <span>
           <strong>比赛排名</strong>
           <small>选择一场比赛查看榜单</small>
         </span>
       </button>
       <button :class="{ active: scope === 'OVERALL' }" @click="switchScope('OVERALL')">
-        <Sparkles :size="18" />
         <span>
           <strong>综合排名</strong>
           <small>做题分 + 比赛分</small>
@@ -200,8 +186,7 @@ onMounted(async () => {
       </div>
       <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="{ top: row.rank <= 3, contest: scope === 'CONTEST', overall: scope === 'OVERALL' }">
         <span class="rank">
-          <i v-if="rankMedal(row.rank)">{{ rankMedal(row.rank) }}</i>
-          <b v-else>{{ row.rank }}</b>
+          <b>{{ row.rank }}</b>
         </span>
         <span class="user">
           <strong>{{ row.nickname || row.username }}</strong>
@@ -258,17 +243,6 @@ onMounted(async () => {
   box-shadow: 0 18px 38px rgba(47, 99, 180, .12);
 }
 
-.leaderboard-hero::after {
-  position: absolute;
-  right: -110px;
-  bottom: -140px;
-  width: 360px;
-  height: 300px;
-  border: 1px solid rgba(255, 255, 255, .72);
-  border-radius: 50%;
-  content: '';
-}
-
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -294,20 +268,6 @@ onMounted(async () => {
   line-height: 1.8;
 }
 
-.hero-orb {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  width: 116px;
-  height: 116px;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, .8);
-  border-radius: 32px;
-  background: linear-gradient(145deg, rgba(255,255,255,.72), rgba(116, 168, 246, .38));
-  color: #256dde;
-  box-shadow: 0 18px 32px rgba(47, 108, 213, .16);
-}
-
 .rank-switcher {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -318,7 +278,7 @@ onMounted(async () => {
 .rank-switcher button {
   display: grid;
   min-height: 86px;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 16px;
@@ -340,24 +300,9 @@ onMounted(async () => {
   box-shadow: 0 14px 28px rgba(38, 91, 178, .12);
 }
 
-.rank-switcher button > svg {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  padding: 10px;
-  border-radius: 13px;
-  background: #eef5ff;
-  color: #2c6edb;
-}
-
 .rank-switcher button.active {
   color: #fff;
   background: linear-gradient(135deg, #2f7cf2, #235fd3);
-}
-
-.rank-switcher button.active > svg {
-  background: rgba(255,255,255,.18);
-  color: #fff;
 }
 
 .rank-switcher strong,
@@ -457,11 +402,6 @@ onMounted(async () => {
   background: linear-gradient(90deg, #fffaf0, #fff);
 }
 
-.rank i {
-  font-size: 24px;
-  font-style: normal;
-}
-
 .rank b {
   color: #98a4b1;
 }
@@ -515,12 +455,6 @@ onMounted(async () => {
     align-items: flex-start;
     flex-direction: column;
     padding: 28px;
-  }
-
-  .hero-orb {
-    width: 82px;
-    height: 82px;
-    border-radius: 24px;
   }
 
   .rank-switcher {

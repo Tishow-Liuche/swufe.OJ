@@ -1,45 +1,15 @@
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const contests = readFileSync(resolve(__dirname, '../src/views/Contests.vue'), 'utf8');
-const leaderboard = readFileSync(resolve(__dirname, '../src/views/Leaderboard.vue'), 'utf8');
-
-function assert(condition, message) {
-  if (!condition) {
-    console.error(message);
-    process.exitCode = 1;
-  }
-}
-
-assert(
-  leaderboard.includes("filter((item: any) => item.state === 'ENDED')"),
-  'Leaderboard contest picker must only show ended contests.',
-);
-assert(
-  contests.includes('/submissions') && contests.includes('contestSubmissions'),
-  'Contest page must load and render live contest submission records.',
-);
-assert(
-  contests.includes('standingsProblems') && contests.includes('.score-cell.first-blood'),
-  'Contest page must render ICPC-style per-problem standing cells with first blood styling.',
-);
-assert(
-  contests.includes('cellClass') && contests.includes('cellText'),
-  'Contest page must compute accepted/wrong/pending cell classes and text.',
-);
-assert(
-  contests.includes('boardStats') && contests.includes('rank-legend') && contests.includes('board-summary'),
-  'Contest live board must include contest-style summary stats and a color legend.',
-);
-assert(
-  contests.includes('submission-head') && contests.includes('submission-status.system_error'),
-  'Contest submission feed must render a table header and cover system error styling.',
-);
-assert(
-  contests.includes('.score-cell.first-blood::after') && contests.includes('FB'),
-  'Contest live board must visually mark first blood cells.',
-);
-
-if (!process.exitCode) console.log('Contest live board check passed');
+const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
+const standings = read('../src/views/contest/ContestStandings.vue');
+const submissions = read('../src/views/contest/ContestSubmissions.vue');
+const css = read('../src/styles/contest-arena.css');
+const leaderboard = read('../src/views/Leaderboard.vue');
+assert(leaderboard.includes("filter((item: any) => item.state === 'ENDED')"), 'Only ended contests in leaderboard picker');
+assert(standings.includes('/standings') && !standings.includes('/submissions`'), 'Standings has its own feed');
+assert(submissions.includes('/submissions') && !submissions.includes('/standings'), 'Submissions has its own feed');
+assert(standings.includes('cellText') && standings.includes('first-blood') && standings.includes('arena-legend'), 'ICPC cells and legend');
+assert(css.includes('.first-blood') && css.includes('.wrong') && css.includes('.pending'), 'Verdict styles');
+assert(submissions.includes('<thead>') && submissions.includes('verdictClass(submission.status)'), 'Semantic table with verdict classes');
+assert(standings.includes('viewableSubmissionId'), 'Source details use server authorization');
+console.log('Contest live board structural check passed; run check-contest-arena.mjs for browser behavior');

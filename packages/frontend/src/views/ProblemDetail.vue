@@ -554,7 +554,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
             <div v-if="result.compileMessage" class="compile-box"><pre>{{ result.compileMessage }}</pre></div>
             <div v-if="result.cases?.length" class="cases">
               <div class="cases-toggle" @click="showAllCases = !showAllCases">
-                📊 测试点详情 ({{ result.cases.filter((c: any) => c.status === 'ACCEPTED').length }}/{{ result.cases.length }} 通过)
+                测试点详情 ({{ result.cases.filter((c: any) => c.status === 'ACCEPTED').length }}/{{ result.cases.length }} 通过)
                 <span class="toggle-arrow">{{ showAllCases ? '▼' : '▶' }}</span>
               </div>
               <div v-if="showAllCases" class="cases-grid">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, CheckCircle2, FilePenLine, Sparkles, Star } from '@lucide/vue';
+import { AlertTriangle, CheckCircle2, FilePenLine, Star } from '@lucide/vue';
 
 defineProps<{
   state?: {
@@ -21,7 +21,7 @@ defineProps<{
       <FilePenLine :size="12" />写过未通过
     </span>
     <span v-else class="state-badge fresh" title="还没有代码或提交记录">
-      <Sparkles :size="12" />新题目
+      新题目
     </span>
     <span v-if="state.favorite" class="state-badge favorite" title="已收藏"><Star :size="12" />收藏</span>
     <span v-if="state.wrong" class="state-badge wrong" title="错题"><AlertTriangle :size="12" />错题</span>

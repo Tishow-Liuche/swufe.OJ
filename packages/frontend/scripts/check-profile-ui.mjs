@@ -34,9 +34,9 @@ for (const token of [
   '/api/user/avatar',
   'uploadAvatar',
   'profileForm.studentId',
-  'isStudentAccount',
+  'openStudentIdSettings',
   'student-id-pill',
-  '/^\\d{8}$/.test(profileForm.studentId)',
+  '/^\\d{8}$/.test(profileForm.studentId.trim())',
   'payload.studentId = profileForm.studentId.trim()',
 ]) {
   if (!source.includes(token)) {

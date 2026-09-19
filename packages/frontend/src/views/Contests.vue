@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useStorage } from '@vueuse/core';
-import { useRoute, useRouter } from 'vue-router';
-import { CalendarClock, Flag, ListFilter, PanelLeftClose, PanelLeftOpen, PlayCircle, Trophy } from '@lucide/vue';
+import { useRouter } from 'vue-router';
+import { CalendarClock, Flag, ListFilter, PanelLeftClose, PanelLeftOpen, PlayCircle } from '@lucide/vue';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
 import { pointDifficultyShortLabel } from '../utils/pointDifficulty';
@@ -18,8 +18,6 @@ type Contest = {
 };
 
 const router = useRouter();
-const route = useRoute();
-const campusForm = ref({ studentId: '', realName: '' });
 const campusVisibility = ref('PUBLIC');
 function moveProblem(index: number, delta: number) {
   const next = index + delta;
@@ -30,11 +28,6 @@ function moveProblem(index: number, delta: number) {
 }
 const auth = useAuthStore();
 const contests = ref<Contest[]>([]);
-const selected = ref<Contest | null>(null);
-const standings = ref<any[]>([]);
-const standingsProblems = ref<any[]>([]);
-const contestSubmissions = ref<any[]>([]);
-const selectedSubmissionDetail = ref<any | null>(null);
 const filter = ref('ALL');
 const loading = ref(true);
 const actionLoading = ref(false);
@@ -42,24 +35,10 @@ const error = ref('');
 const showCreator = ref(false);
 const problems = ref<any[]>([]);
 const form = ref({ title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeMode: 'NO_FREEZE', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] as string[] });
-let standingTimer: ReturnType<typeof setTimeout> | null = null;
-const boardRefreshing = ref(false);
-const boardLastUpdatedAt = ref<Date | null>(null);
-const boardBusyHint = ref('');
 const sidebarCollapsed = useStorage('swufe-oj:contest-sidebar-collapsed', false);
 
 const isTeacher = computed(() => auth.isTeacher());
 const filtered = computed(() => filter.value === 'ALL' ? contests.value : contests.value.filter((item) => item.state === filter.value));
-const boardStats = computed(() => {
-  const cells = standings.value.flatMap((row: any) => row.problems || []);
-  return {
-    participants: standings.value.length,
-    accepted: cells.filter((cell: any) => cell.status === 'ACCEPTED').length,
-    tried: cells.filter((cell: any) => cell.status !== 'UNTRIED').length,
-    firstBlood: cells.filter((cell: any) => cell.firstBlood).length,
-    submissions: contestSubmissions.value.length,
-  };
-});
 const labels: Record<string, string> = { ALL: '全部赛事', UPCOMING: '即将开始', RUNNING: '进行中', ENDED: '已结束' };
 const filterIcons: Record<string, any> = { ALL: ListFilter, UPCOMING: CalendarClock, RUNNING: PlayCircle, ENDED: Flag };
 
@@ -88,15 +67,6 @@ async function load() {
       error.value = '比赛服务已更新：登录后的报名、虚拟赛和个人赛事状态需要重启后端后才可使用。';
     }
     contests.value = data;
-    if (route.params.id) {
-      const detail = await api.get('/api/contests/' + encodeURIComponent(String(route.params.id)));
-      selected.value = detail.data;
-      await refreshLiveBoard();
-      scheduleLiveBoardRefresh();
-    } else {
-      selected.value = null;
-      clearLiveBoardRefresh();
-    }
   } catch (e: any) {
     error.value = e.response?.status === 404
       ? '当前后端尚未加载比赛模块，请重启后端服务后重试。'
@@ -106,127 +76,7 @@ async function load() {
 function selectContest(contest: Contest) {
   window.open(router.resolve('/contests/' + encodeURIComponent(contest.id)).href, '_blank', 'noopener');
 }
-function showOverview(nextFilter: string) {
-  filter.value = nextFilter;
-  selected.value = null;
-  standings.value = [];
-  standingsProblems.value = [];
-  contestSubmissions.value = [];
-  clearLiveBoardRefresh();
-  if (route.params.id) void router.push('/contests');
-}
-async function refreshStandings() {
-  if (!selected.value) return;
-  try {
-    const { data } = await api.get('/api/contests/' + selected.value.id + '/standings');
-    standings.value = data.rows || [];
-    standingsProblems.value = data.problems || [];
-  } catch (e: any) {
-    standings.value = [];
-    boardBusyHint.value = e.response?.status === 429 ? '榜单请求过于频繁，系统正在保护比赛服务。' : '';
-  }
-}
-async function refreshContestSubmissions() {
-  if (!selected.value || !auth.token) return;
-  try {
-    const { data } = await api.get('/api/contests/' + selected.value.id + '/submissions');
-    contestSubmissions.value = data.items || [];
-  } catch (e: any) {
-    contestSubmissions.value = [];
-    if (e.response?.status === 429) boardBusyHint.value = '提交记录刷新过于频繁，已自动降低刷新频率。';
-  }
-}
-async function refreshLiveBoard() {
-  if (!selected.value || boardRefreshing.value) return;
-  boardRefreshing.value = true;
-  try {
-    await Promise.all([refreshStandings(), refreshContestSubmissions()]);
-    boardLastUpdatedAt.value = new Date();
-  } finally {
-    boardRefreshing.value = false;
-  }
-}
-function clearLiveBoardRefresh() {
-  if (standingTimer) clearTimeout(standingTimer);
-  standingTimer = null;
-}
-function scheduleLiveBoardRefresh(delay = 5000) {
-  clearLiveBoardRefresh();
-  if (!selected.value) return;
-  standingTimer = setTimeout(async () => {
-    if (document.visibilityState === 'visible') {
-      await refreshLiveBoard();
-      scheduleLiveBoardRefresh(selected.value?.state === 'RUNNING' ? 5000 : 15000);
-    } else {
-      scheduleLiveBoardRefresh(30000);
-    }
-  }, delay);
-}
-function boardUpdateText() {
-  if (!boardLastUpdatedAt.value) return '等待首次刷新';
-  return '更新于 ' + new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(boardLastUpdatedAt.value);
-}
-function cellClass(cell: any) {
-  return {
-    accepted: cell?.status === 'ACCEPTED',
-    wrong: cell?.status === 'WRONG_ANSWER',
-    pending: cell?.status === 'PENDING',
-    untouched: !cell || cell.status === 'UNTRIED',
-    'first-blood': Boolean(cell?.firstBlood),
-  };
-}
-function cellText(cell: any) {
-  if (!cell || cell.status === 'UNTRIED') return '—';
-  if (cell.status === 'ACCEPTED') return cell.wrongAttempts ? `+${cell.wrongAttempts}` : '+';
-  if (cell.status === 'PENDING') return `${cell.attempts || 1}?`;
-  return `-${cell.wrongAttempts || cell.attempts || 1}`;
-}
-function statusText(status: string) {
-  return ({
-    ACCEPTED: 'AC',
-    WRONG_ANSWER: 'WA',
-    TIME_LIMIT_EXCEEDED: 'TLE',
-    MEMORY_LIMIT_EXCEEDED: 'MLE',
-    RUNTIME_ERROR: 'RE',
-    COMPILE_ERROR: 'CE',
-    PENDING: '等待',
-    QUEUING: '排队',
-    JUDGING: '评测',
-    RUNNING: '运行',
-    SYSTEM_ERROR: '错误',
-  } as Record<string, string>)[status] || status;
-}
-function timeText(value?: string | null) {
-  return value ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value)) : '—';
-}
-function memoryText(value?: number | null) {
-  return value === null || value === undefined ? '-' : `${(Number(value) / 1024).toFixed(1)}MB`;
-}
-
-async function register() {
-  if (!selected.value) return;
-  if (!auth.token) { router.push({ path: '/login', query: { redirect: '/contests' } }); return; }
-  const password = selected.value.visibility === 'PASSWORD' ? window.prompt('请输入比赛密码') || '' : '';
-  actionLoading.value = true;
-  try {
-    await api.post('/api/contests/' + selected.value.id + '/register', { password, ...campusForm.value });
-    await load();
-  } catch (e: any) { error.value = e.response?.data?.message || '报名失败'; }
-  finally { actionLoading.value = false; }
-}
-async function virtualContest() {
-  if (!selected.value) return;
-  if (!auth.token) { router.push({ path: '/login', query: { redirect: '/contests' } }); return; }
-  actionLoading.value = true;
-  try {
-    await api.post('/api/contests/' + selected.value.id + '/virtual');
-    await load();
-  } catch (e: any) { error.value = e.response?.data?.message || '无法开始虚拟比赛'; }
-  finally { actionLoading.value = false; }
-}
-function enterProblem(problemId: string) {
-  if (selected.value) window.open(router.resolve({ path: '/problems/' + problemId, query: { contestId: selected.value.id } }).href, '_blank', 'noopener');
-}
+function showOverview(nextFilter: string) { filter.value = nextFilter; }
 async function openCreator() {
   showCreator.value = true;
   if (problems.value.length) return;
@@ -252,23 +102,7 @@ async function createContest() {
   } catch (e: any) { error.value = e.response?.data?.message || '创建比赛失败'; }
   finally { actionLoading.value = false; }
 }
-async function openContestAcceptedSubmission(cell: any) {
-  if (!selected.value || !cell?.viewableSubmissionId) return;
-  try {
-    const { data } = await api.get(`/api/contests/${selected.value.id}/submissions/${cell.viewableSubmissionId}`);
-    selectedSubmissionDetail.value = data;
-  } catch (e: any) {
-    error.value = e.response?.data?.message || '提交详情加载失败';
-  }
-}
-onMounted(async () => {
-  await load();
-  scheduleLiveBoardRefresh(5000);
-});
-watch(() => route.params.id, () => void load());
-onUnmounted(() => {
-  clearLiveBoardRefresh();
-});
+onMounted(load);
 </script>
 
 <template>
@@ -277,7 +111,6 @@ onUnmounted(() => {
     <div v-else class="contest-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
       <aside class="contest-sidebar">
         <div class="sidebar-title">
-          <span class="sidebar-title-icon"><Trophy :size="19" aria-hidden="true" /></span>
           <span class="sidebar-title-copy"><strong>赛事导航</strong><small>比赛与训练</small></span>
           <button
             type="button"
@@ -303,7 +136,7 @@ onUnmounted(() => {
         <div class="sidebar-divider"></div>
         <p class="sidebar-label">赛事列表</p>
         <div class="contest-list">
-          <button v-for="contest in filtered" :key="contest.id" class="contest-card" :class="{ selected: selected?.id === contest.id }" @click="selectContest(contest)">
+          <button v-for="contest in filtered" :key="contest.id" class="contest-card" @click="selectContest(contest)">
             <span class="mode">{{ contest.mode }}</span>
             <span class="state" :class="contest.state.toLowerCase()">{{ stateText(contest.state) }}</span>
             <b>{{ contest.title }}</b>
@@ -324,129 +157,13 @@ onUnmounted(() => {
         <button v-if="isTeacher" class="gold" @click="openCreator">＋ 创建比赛</button>
         <button class="ghost" @click="router.push('/leaderboard')">练习排行榜 →</button>
       </div>
-      <i class="ring one"></i><i class="ring two"></i>
     </section>
 
     <p v-if="error" class="notice">{{ error }}</p>
 
     <section class="workspace">
 
-      <section v-if="selected" class="detail">
-        <header class="detail-head">
-          <div>
-            <div class="badges"><span class="mode">{{ selected.mode }}</span><span class="contest-kind">{{ selected.visibility === 'CAMPUS_PRIVATE' ? '校赛私有赛' : selected.teamMode ? '团队公开赛' : '个人公开赛' }}</span><span v-if="selected.isRated" class="rated">Rated</span><span class="state" :class="selected.state.toLowerCase()">{{ stateText(selected.state) }}</span><span v-if="selected.participant?.isVirtual" class="virtual">虚拟参赛</span></div>
-            <h2>{{ selected.title }}</h2>
-            <p>{{ selected.description || '一场等待你加入的编程挑战。' }}</p>
-          </div>
-          <button v-if="selected.state === 'UPCOMING' && !selected.participant" class="gold" :disabled="actionLoading" @click="register">报名参赛</button>
-          <button v-else-if="selected.state === 'RUNNING' && !selected.participant" class="gold" :disabled="actionLoading" @click="register">现在报名</button>
-          <button v-else-if="selected.state === 'ENDED' && selected.allowUpsolve" class="gold" :disabled="actionLoading" @click="virtualContest">开始虚拟比赛</button>
-          <span v-else class="joined">✓ 已加入赛事</span>
-        </header>
-
-        <form v-if="selected.visibility === 'CAMPUS_PRIVATE' && !selected.participant && selected.state !== 'ENDED'" class="campus-registration" @submit.prevent="register">
-          <p>校赛私有赛需先在<router-link to="/profile">个人中心</router-link>绑定学号，报名后榜单显示“学号_姓名”。</p>
-          <label>学号<input v-model="campusForm.studentId" required inputmode="numeric" maxlength="8" placeholder="与绑定学号一致" /></label>
-          <label>姓名<input v-model="campusForm.realName" required maxlength="40" autocomplete="name" placeholder="真实姓名" /></label>
-          <button class="gold" :disabled="actionLoading">确认报名</button>
-        </form>
-        <div class="rules">
-          <span>🗓 {{ dateText(selected.startTime) }} 至 {{ dateText(selected.endTime) }}</span>
-          <span>⏱ {{ selected.mode === 'ACM' ? '错误罚时 ' + selected.penaltyTime + ' 分钟' : '按最高得分计分' }}</span>
-          <span v-if="selected.freezeTime">🔒 {{ dateText(selected.freezeTime) }} 起封榜</span><span v-else>📊 实时公开排行</span>
-        </div>
-
-        <div class="contest-facts" aria-label="比赛基本信息">
-          <div><small>比赛编号</small><strong>#{{ selected.contestNo }}</strong></div>
-          <div><small>举办者</small><strong>{{ selected.organizer?.name || '平台赛事组' }}</strong></div>
-          <div><small>比赛类型</small><span><b>{{ selected.mode }}</b><b>{{ selected.visibility === 'CAMPUS_PRIVATE' ? '校赛私有赛' : selected.teamMode ? '团队公开赛' : '个人公开赛' }}</b><b v-if="selected.isRated" class="rated">Rated</b></span></div>
-        </div>
-
-        <div class="boards">
-          <div class="panel">
-            <div class="panel-title">比赛题目 <small>{{ selected.problems.length }} PROBLEMS</small></div>
-            <button v-for="(item, index) in selected.problems" :key="item.id" class="problem" :disabled="selected.state !== 'RUNNING' || !selected.participant" @click="enterProblem(item.problem.id)">
-              <strong>{{ String.fromCharCode(65 + index) }}</strong><span>{{ problemDisplayTitle(item.problem) }}</span><small>{{ selected.mode === 'IOI' ? item.score + ' 分' : pointDifficultyShortLabel(item.problem.difficulty) }}</small>
-            </button>
-            <p v-if="selected.state !== 'RUNNING'" class="tip">比赛开始后可进入题目；赛后可通过虚拟比赛补题。</p>
-          </div>
-          <div class="panel">
-            <div class="panel-title">实时战报 <small>{{ selected.mode }} RANKING</small></div>
-            <div v-if="!standings.length" class="tip">还没有可展示的排名数据</div>
-            <div v-for="row in standings.slice(0, 8)" :key="row.userId" class="rank-row">
-              <b :class="{ podium: row.rank <= 3 }">{{ row.rank }}</b><span>{{ row.user.nickname || row.user.username }}</span>
-              <strong>{{ selected.mode === 'ACM' ? row.solvedCount + ' 题' : row.score + ' 分' }}</strong><small v-if="selected.mode === 'ACM'">{{ row.penalty }} min</small>
-            </div>
-            <button class="rank-button" @click="router.push('/leaderboard?contestId=' + selected?.id)">完整排行榜 →</button>
-          </div>
-        </div>
-        <div class="panel live-standings">
-          <div class="board-toolbar">
-            <div>
-              <p class="eyebrow">ICPC STYLE SCOREBOARD</p>
-              <small class="board-refresh-state">{{ boardRefreshing ? '刷新中...' : boardUpdateText() }}</small>
-              <small v-if="boardBusyHint" class="board-busy-hint">{{ boardBusyHint }}</small>
-              <h3>实时排名</h3>
-            </div>
-            <div class="rank-legend" aria-label="排名颜色说明">
-              <span class="legend accepted">AC</span>
-              <span class="legend wrong">WA</span>
-              <span class="legend pending">Pending</span>
-              <span class="legend first-blood">First Blood</span>
-            </div>
-          </div>
-          <div class="board-summary" aria-label="实时排名统计">
-            <span><b>{{ boardStats.participants }}</b><small>参赛选手</small></span>
-            <span><b>{{ boardStats.accepted }}</b><small>通过格</small></span>
-            <span><b>{{ boardStats.tried }}</b><small>已尝试</small></span>
-            <span><b>{{ boardStats.firstBlood }}</b><small>首杀</small></span>
-            <span><b>{{ boardStats.submissions }}</b><small>近期提交</small></span>
-          </div>
-          <div v-if="!standings.length" class="tip">还没有可展示的排名数据</div>
-          <div v-else class="contest-standings-table">
-            <div class="standings-head" :style="{ '--problem-count': Math.max(standingsProblems.length, 1) }">
-              <span>#</span><span>选手</span><span>{{ selected.mode === 'IOI' ? '得分' : '过题' }}</span><span>{{ selected.mode === 'IOI' ? '最后提交' : '罚时' }}</span>
-              <b v-for="problem in standingsProblems" :key="problem.problemId" :title="problem.title">{{ problem.label }}</b>
-            </div>
-            <div v-for="row in standings" :key="row.userId" class="standings-row" :style="{ '--problem-count': Math.max(standingsProblems.length, 1) }">
-              <span class="standing-rank" :class="{ podium: row.rank <= 3 }">{{ row.rank }}</span>
-              <span class="standing-user"><strong>{{ row.user.nickname || row.user.username }}</strong><small>@{{ row.user.username }}</small></span>
-              <strong>{{ selected.mode === 'IOI' ? row.score : row.solvedCount }}</strong>
-              <span>{{ selected.mode === 'IOI' ? timeText(row.lastActive) : row.penalty + ' min' }}</span>
-              <button
-                v-for="cell in row.problems"
-                :key="cell.problemId"
-                class="score-cell"
-                :class="cellClass(cell)"
-                :title="`${cell.label} ${cell.title || ''} · ${cell.status} · ${cell.attempts || 0} 次提交`"
-                type="button"
-                :disabled="!cell.viewableSubmissionId"
-                @click="openContestAcceptedSubmission(cell)"
-              >
-                <span>{{ cellText(cell) }}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="panel submission-feed">
-          <div class="panel-title">实时提交记录 <small>{{ contestSubmissions.length }} SUBMISSIONS</small></div>
-          <div v-if="!contestSubmissions.length" class="tip">暂无提交记录</div>
-          <div v-else class="submission-list">
-            <div class="submission-head" aria-hidden="true">
-              <span>时间</span><span>选手</span><span>题目</span><span>语言</span><span>结果</span><span>耗时 / 内存</span>
-            </div>
-            <button v-for="submission in contestSubmissions" :key="submission.id" type="button" class="submission-row" @click="openContestAcceptedSubmission({ viewableSubmissionId: submission.id })">
-              <span class="submission-time">{{ timeText(submission.createdAt) }}</span>
-              <span class="submission-user">{{ submission.user.nickname || submission.user.username }}</span>
-              <span class="submission-problem"><b>{{ submission.problem.label }}</b>{{ problemDisplayTitle(submission.problem) }}</span>
-              <span class="submission-lang">{{ submission.language }}</span>
-              <strong class="submission-status" :class="submission.status.toLowerCase()">{{ statusText(submission.status) }}</strong>
-              <span class="submission-cost">{{ submission.timeUsed ?? '—' }} ms / {{ submission.memoryUsed ?? '—' }} KB</span>
-            </button>
-          </div>
-        </div>
-      </section>
-      <section v-else class="contest-overview">
+      <section class="contest-overview">
         <header class="overview-head">
           <div>
             <p class="eyebrow">{{ filter === 'ALL' ? 'ALL CONTESTS' : 'CONTEST STATUS' }}</p>
@@ -464,28 +181,10 @@ onUnmounted(() => {
             <span class="overview-enter">查看比赛 <span aria-hidden="true">→</span></span>
           </button>
         </div>
-        <div v-else class="overview-empty"><span>🏁</span><h3>暂无{{ labels[filter] }}的比赛</h3><p>换一个状态查看，或等待教师发布新的比赛。</p></div>
+        <div v-else class="overview-empty"><h3>暂无{{ labels[filter] }}的比赛</h3><p>换一个状态查看，或等待教师发布新的比赛。</p></div>
       </section>
     </section>
       </div>
-    </div>
-
-    <div v-if="selectedSubmissionDetail" class="submission-detail-backdrop" @click.self="selectedSubmissionDetail = null">
-      <article class="submission-detail-modal">
-        <header><div><p class="eyebrow">SUBMISSION DETAIL</p><h2>比赛提交详情</h2></div><button type="button" @click="selectedSubmissionDetail = null">×</button></header>
-        <div class="submission-detail-grid">
-          <span><b>选手</b>{{ selectedSubmissionDetail.user?.nickname || selectedSubmissionDetail.user?.username }}</span>
-          <span><b>题目</b>{{ problemDisplayTitle(selectedSubmissionDetail.problem) }}</span>
-          <span><b>结果</b>{{ statusText(selectedSubmissionDetail.status) }}</span>
-          <span><b>语言</b>{{ selectedSubmissionDetail.language }}</span>
-          <span><b>时限</b>{{ selectedSubmissionDetail.problem?.timeLimit || '-' }}ms</span>
-          <span><b>内存限制</b>{{ selectedSubmissionDetail.problem?.memoryLimit || '-' }}MB</span>
-          <span><b>实际用时</b>{{ selectedSubmissionDetail.timeUsed ?? '-' }}ms</span>
-          <span><b>实际内存</b>{{ memoryText(selectedSubmissionDetail.memoryUsed) }}</span>
-        </div>
-        <h3>源代码</h3>
-        <pre class="submission-source-code">{{ selectedSubmissionDetail.sourceCode }}</pre>
-      </article>
     </div>
 
     <div v-if="showCreator" class="backdrop" @click.self="showCreator = false">
@@ -517,10 +216,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.campus-registration { display:flex; flex-wrap:wrap; gap:12px; padding:16px; background:#f4f6f8; border:1px solid #d9e1e8; border-radius:8px; margin:20px 0; }
-.campus-registration p { flex-basis:100%; margin:0; }
-.campus-registration label { display:grid; gap:6px; }
-.campus-registration input { padding:9px; border:1px solid #bcc9d3; border-radius:5px; }
 .problem-order { padding:0; list-style:none; }
 .problem-order li { display:flex; gap:8px; align-items:center; padding:8px 0; }
 .problem-order span { flex:1; min-width:0; overflow-wrap:anywhere; }
@@ -532,7 +227,6 @@ onUnmounted(() => {
 .workspace { display:grid; grid-template-columns:300px minmax(0,1fr); gap:20px; margin-top:22px; transition:grid-template-columns 180ms cubic-bezier(.2,0,0,1); }.contest-sidebar { position:sticky; top:18px; display:flex; align-self:start; max-height:calc(100vh - 36px); padding:13px; overflow:hidden; flex-direction:column; border:1px solid var(--line); border-radius:18px; background:#f8fbfe; box-shadow:0 8px 22px rgba(23,59,102,.05); transition:padding 180ms cubic-bezier(.2,0,0,1); }.sidebar-title { display:flex; align-items:center; gap:10px; padding:1px 5px 15px; }.sidebar-title-icon { display:inline-grid; width:34px; height:34px; flex:0 0 34px; place-items:center; color:#1c5688; border-radius:8px; background:#ddecfa; }.sidebar-title-copy { display:flex; min-width:0; flex-direction:column; }.sidebar-title strong { color:var(--ink); font-size:13px; line-height:1.3; }.sidebar-title small { margin-top:2px; color:var(--muted); font-size:10px; }.sidebar-collapse-button { display:inline-grid; width:34px; height:34px; flex:0 0 34px; margin-left:auto; place-items:center; color:#6f7e8f; border:0; border-radius:7px; background:transparent; cursor:pointer; transition:background .15s,color .15s; }.sidebar-collapse-button:hover { color:var(--ink); background:#e8eef4; }.sidebar-collapse-button:focus-visible { outline:2px solid #2b6da5; outline-offset:2px; }.sidebar-label { margin:3px 7px 9px; color:#8493a5; font-size:10px; font-weight:900; letter-spacing:.12em; }.filters { display:flex; gap:4px; flex-direction:column; }.filters button { display:flex; align-items:center; gap:10px; padding:10px 11px; border:0; border-radius:10px; color:#607187; background:transparent; font:inherit; font-size:13px; font-weight:750; cursor:pointer; transition:background .18s,color .18s,transform .18s; }.filters button:hover { color:#1e5688; background:#eaf3fb; }.filters button span { min-width:0; flex:1; text-align:left; }.filters button small { display:grid; min-width:22px; height:20px; place-items:center; color:#8c9bad; border-radius:6px; background:#edf1f5; font-size:10px; }.filters .active { color:#fff; background:var(--navy); box-shadow:0 5px 12px rgba(23,59,102,.18); }.filters .active small { color:#dceeff; background:rgba(255,255,255,.16); }.sidebar-divider { height:1px; margin:13px 4px; background:#dce5ee; }.contest-list { display:flex; max-height:465px; overflow:auto; flex-direction:column; gap:8px; padding:0 3px 2px; }.contest-card { position:relative; display:grid; gap:6px; padding:13px; color:var(--ink); text-align:left; border:1px solid transparent; border-radius:13px; background:#fff; cursor:pointer; transition:.2s; }.contest-card:hover,.contest-card.selected { border-color:#8cb7dc; transform:translateX(2px); box-shadow:0 8px 18px rgba(23,59,102,.09); }.contest-card.selected { background:#f1f8ff; }.mode { width:max-content; padding:3px 7px; color:#285d8e; border-radius:5px; background:#ddecfa; font-size:10px; font-weight:900; letter-spacing:.08em; }.state { font-size:11px; font-weight:900; }.contest-card .state { position:absolute; top:14px; right:12px; }.state.running { color:#10836d; }.state.upcoming { color:#a16600; }.state.ended { color:#8c98a6; }.contest-card b { font-size:14px; }.contest-card small,.contest-card em { color:var(--muted); font-size:11px; font-style:normal; }.contest-card em { color:#53687e; font-weight:700; }
 .workspace.sidebar-collapsed { grid-template-columns:72px minmax(0,1fr); }.sidebar-collapsed .contest-sidebar { padding-right:10px; padding-left:10px; }.sidebar-collapsed .sidebar-title { justify-content:center; padding-right:0; padding-left:0; }.sidebar-collapsed .sidebar-title-icon,.sidebar-collapsed .sidebar-title-copy,.sidebar-collapsed .sidebar-label,.sidebar-collapsed .sidebar-divider,.sidebar-collapsed .contest-list { display:none; }.sidebar-collapsed .sidebar-collapse-button { margin-left:0; }.sidebar-collapsed .filters button { justify-content:center; padding-right:0; padding-left:0; }.sidebar-collapsed .filters button span,.sidebar-collapsed .filters button small { display:none; }
 .contest-page { max-width:none; min-height:calc(100vh - 56px); margin:0; padding:0; background:#f3f5f7; }.contest-shell { display:flex; min-height:calc(100vh - 56px); }.contest-main { min-width:0; flex:1 1 auto; padding:26px 28px 64px; }.contest-main .hero,.contest-main .notice,.contest-main .workspace { max-width:1180px; margin-right:auto; margin-left:auto; }.contest-sidebar { top:56px; width:300px; height:calc(100vh - 56px); max-height:calc(100vh - 56px); flex:0 0 300px; padding-top:22px; border-top:0; border-bottom:0; border-left:0; border-radius:0 18px 18px 0; transition:width 240ms cubic-bezier(.2,0,0,1),flex-basis 240ms cubic-bezier(.2,0,0,1),padding 240ms cubic-bezier(.2,0,0,1); will-change:width,flex-basis; }.workspace { display:block; margin-top:22px; }.page-loading { min-height:calc(100vh - 56px); border:0; border-radius:0; background:#f3f5f7; }.contest-shell.sidebar-collapsed .contest-sidebar { width:72px; flex-basis:72px; }.contest-shell.sidebar-collapsed .sidebar-title-icon,.contest-shell.sidebar-collapsed .sidebar-title-copy,.contest-shell.sidebar-collapsed .sidebar-label,.contest-shell.sidebar-collapsed .sidebar-divider,.contest-shell.sidebar-collapsed .contest-list { display:none; }.contest-shell.sidebar-collapsed .sidebar-title { justify-content:center; padding-right:0; padding-left:0; }.contest-shell.sidebar-collapsed .sidebar-collapse-button { margin-left:0; }.contest-shell.sidebar-collapsed .filters button { justify-content:center; padding-right:0; padding-left:0; }.contest-shell.sidebar-collapsed .filters button span,.contest-shell.sidebar-collapsed .filters button small { display:none; }
-.detail { min-width:0; padding:28px; border:1px solid var(--line); border-radius:21px; background:#fffdf8; box-shadow:0 10px 30px rgba(22,42,70,.05); }.detail-head { display:flex; justify-content:space-between; gap:20px; }.badges { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }.contest-kind,.rated { padding:3px 7px; border-radius:5px; font-size:10px; font-weight:900; letter-spacing:.03em; }.contest-kind { color:#247457; background:#e3f4ea; }.rated { color:#fff; background:#43b925; }.virtual { color:#6a4c9d; font-size:11px; font-weight:900; }.detail h2 { margin:11px 0 7px; font-size:27px; letter-spacing:-.03em; }.detail-head p { margin:0; color:var(--muted); line-height:1.65; }.joined { color:#13806b; font-weight:900; white-space:nowrap; }.rules { display:flex; flex-wrap:wrap; gap:14px; margin:22px 0; padding:12px 0; color:#53677d; border-top:1px solid var(--line); border-bottom:1px solid var(--line); font-size:12px; font-weight:700; }.contest-facts { display:grid; grid-template-columns:.7fr 1fr 1.8fr; gap:1px; margin:0 0 20px; overflow:hidden; border:1px solid #e0e8ef; border-radius:12px; background:#e0e8ef; }.contest-facts>div { display:grid; gap:5px; padding:13px 15px; background:#fff; }.contest-facts small { color:#8492a1; font-size:10px; font-weight:900; letter-spacing:.08em; }.contest-facts strong { color:#344f69; font-size:14px; }.contest-facts>div>span { display:flex; flex-wrap:wrap; gap:6px; }.contest-facts b { padding:3px 6px; color:#285d8e; border-radius:4px; background:#e4f0fb; font-size:10px; }.contest-facts b.rated { color:#fff; background:#43b925; }.boards { display:grid; grid-template-columns:1.25fr .85fr; gap:17px; }.panel { padding:17px; border:1px solid #e9edf1; border-radius:15px; background:#fff; }.panel-title { display:flex; justify-content:space-between; margin-bottom:11px; font-weight:900; }.panel-title small { color:#9da8b6; font-size:10px; letter-spacing:.1em; }.problem { display:grid; grid-template-columns:30px 1fr auto; align-items:center; width:100%; gap:9px; padding:11px 0; color:var(--ink); text-align:left; border:0; border-top:1px solid #f0f2f5; background:transparent; cursor:pointer; }.problem:disabled { cursor:not-allowed; }.problem:not(:disabled):hover span { color:#1764a7; }.problem strong { display:grid; place-items:center; width:25px; height:25px; color:#fff; border-radius:6px; background:var(--navy); font-size:12px; }.problem small,.tip { color:#91a0af; font-size:11px; }.rank-row { display:grid; grid-template-columns:29px 1fr auto 52px; align-items:center; gap:7px; padding:10px 0; border-top:1px solid #f0f2f5; font-size:13px; }.rank-row>b { color:#92a0af; }.rank-row>b.podium { color:#ce8814; }.rank-row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.rank-row strong { color:#1b4f83; }.rank-row small { color:#8b98a7; text-align:right; }.rank-button { width:100%; margin-top:12px; padding:9px; color:#245b8e; border:1px solid #c9ddec; border-radius:9px; background:#f3f9ff; font-weight:900; cursor:pointer; }.blank { min-height:390px; display:grid; place-items:center; align-content:center; text-align:center; color:var(--muted); }.blank span { font-size:42px; }
 .contest-overview { min-width:0; padding:28px; border:1px solid var(--line); border-radius:21px; background:#fffdf8; box-shadow:0 10px 30px rgba(22,42,70,.05); }.overview-head { display:flex; align-items:end; justify-content:space-between; gap:24px; padding-bottom:22px; border-bottom:1px solid var(--line); }.overview-head .eyebrow { color:#4e87b6; }.overview-head h2 { margin:0 0 7px; font-size:29px; letter-spacing:-.04em; }.overview-head p:not(.eyebrow) { max-width:620px; margin:0; color:var(--muted); line-height:1.65; }.overview-head>strong { color:#1d5789; font-size:30px; line-height:1; white-space:nowrap; }.overview-head>strong small { color:#8d9bab; font-size:12px; }.overview-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px; margin-top:22px; }.overview-card { display:flex; min-height:205px; flex-direction:column; align-items:stretch; padding:19px; color:var(--ink); text-align:left; border:1px solid #e2eaf1; border-radius:16px; background:#fff; cursor:pointer; transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease; }.overview-card:hover { border-color:#82b1d7; transform:translateY(-3px); box-shadow:0 12px 25px rgba(23,59,102,.1); }.overview-card-top { display:flex; align-items:center; justify-content:space-between; }.overview-card h3 { margin:15px 0 6px; font-size:17px; line-height:1.4; }.overview-card>p { display:-webkit-box; margin:0; overflow:hidden; color:var(--muted); -webkit-box-orient:vertical; -webkit-line-clamp:2; font-size:12px; line-height:1.6; }.overview-meta { display:flex; flex-wrap:wrap; gap:7px 13px; margin-top:auto; padding-top:18px; color:#718095; font-size:11px; font-weight:700; }.overview-meta span { display:flex; align-items:center; gap:4px; }.overview-enter { margin-top:15px; color:#24649b; font-size:12px; font-weight:900; }.overview-enter span { display:inline-block; margin-left:3px; transition:transform .18s ease; }.overview-card:hover .overview-enter span { transform:translateX(4px); }.overview-empty { display:grid; min-height:310px; place-items:center; align-content:center; text-align:center; color:var(--muted); }.overview-empty span { font-size:40px; }.overview-empty h3 { margin:10px 0 4px; color:#506277; font-size:17px; }.overview-empty p { margin:0; font-size:12px; }
 .backdrop { position:fixed; z-index:20; inset:0; display:grid; place-items:start center; padding:76px 20px 28px; overflow:auto; background:rgba(14,29,49,.45); backdrop-filter:blur(4px); }.creator { width:min(750px,100%); max-height:calc(100vh - 104px); overflow:auto; padding:26px; border-radius:20px; background:#fffdf8; box-shadow:0 24px 70px rgba(0,0,0,.28); }.creator header { display:flex; justify-content:space-between; align-items:start; }.creator h2 { margin:0; }.creator header button { border:0; color:#7e8a98; background:transparent; font-size:28px; cursor:pointer; }.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px; margin:22px 0; }.form-grid label { display:grid; gap:6px; color:#5c6b7d; font-size:12px; font-weight:900; }.form-grid .wide { grid-column:1/-1; }.form-grid input,.form-grid select,.form-grid textarea { box-sizing:border-box; width:100%; padding:10px; color:var(--ink); border:1px solid #dce3ea; border-radius:9px; background:#fff; font:inherit; font-size:13px; }.form-grid .check { display:flex; align-items:center; gap:8px; }.form-grid .check input { width:auto; }.picker { padding:14px; border:1px solid #e5ebf0; border-radius:12px; }.picker>small { margin-left:7px; color:#96a2b0; font-size:11px; }.picker label { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #f0f2f4; font-size:13px; }.picker em { margin-left:auto; color:#8492a3; font-style:normal; font-size:11px; }.creator footer { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }.cancel { color:#667687; background:#edf1f5; }
 @media(max-width:860px){.contest-shell{display:block}.contest-main{padding:18px 16px 46px}.hero,.detail-head,.overview-head{flex-direction:column;align-items:start}.hero-actions{flex-direction:row}.workspace,.workspace.sidebar-collapsed,.boards{grid-template-columns:1fr}.contest-facts{grid-template-columns:1fr}.contest-sidebar,.contest-shell.sidebar-collapsed .contest-sidebar{position:static;width:auto;height:auto;max-height:none;padding:13px;border:1px solid var(--line);border-radius:18px}.contest-shell.sidebar-collapsed .sidebar-title-icon,.contest-shell.sidebar-collapsed .sidebar-title-copy,.contest-shell.sidebar-collapsed .sidebar-label,.contest-shell.sidebar-collapsed .sidebar-divider,.contest-shell.sidebar-collapsed .contest-list{display:initial}.contest-shell.sidebar-collapsed .sidebar-title{justify-content:initial;padding:1px 5px 15px}.contest-shell.sidebar-collapsed .sidebar-collapse-button{margin-left:auto}.sidebar-collapse-button{display:none}.filters{display:grid;grid-template-columns:repeat(4,1fr)}.filters button,.contest-shell.sidebar-collapsed .filters button{display:grid;justify-items:center;padding:9px 6px;font-size:12px}.filters button span,.contest-shell.sidebar-collapsed .filters button span{display:block;min-width:auto;text-align:center}.filters button small,.contest-shell.sidebar-collapsed .filters button small{display:none}.contest-list{max-height:none}.contest-card:hover,.contest-card.selected{transform:none}}@media(max-width:560px){.contest-main{padding:15px 12px 42px}.hero{padding:26px 23px;border-radius:20px}.hero h1{font-size:35px}.hero-actions button{flex:1}.detail,.contest-overview{padding:20px}.overview-grid{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.filters{grid-template-columns:repeat(2,1fr)}}
@@ -559,414 +253,4 @@ onUnmounted(() => {
 }
 .filters .active small { background: #dce9ff; color: #1f5eff; }
 .problem strong { background: #e7efff; color: #1f5eff; }
-.live-standings,
-.submission-feed {
-  margin-top: 17px;
-}
-.board-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 12px;
-}
-.board-toolbar .eyebrow {
-  margin-bottom: 5px;
-  color: #3977aa;
-}
-.board-toolbar h3 {
-  margin: 0;
-  color: #1f2a37;
-  font-size: 22px;
-  letter-spacing: -.03em;
-}
-.board-refresh-state,
-.board-busy-hint {
-  display: block;
-  margin-top: 4px;
-  color: #7a8797;
-  font-size: 11px;
-  font-weight: 800;
-}
-.board-busy-hint {
-  color: #b45309;
-}
-.rank-legend {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 7px;
-}
-.legend {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 9px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 950;
-}
-.legend.accepted {
-  color: #15803d;
-  background: #dcfce7;
-}
-.legend.wrong {
-  color: #b91c1c;
-  background: #fee2e2;
-}
-.legend.pending {
-  color: #a16207;
-  background: #fef3c7;
-}
-.legend.first-blood {
-  color: #fff;
-  background: linear-gradient(135deg, #047857, #16a34a);
-  box-shadow: 0 7px 14px rgba(22, 163, 74, .18);
-}
-.board-summary {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.board-summary span {
-  display: grid;
-  gap: 2px;
-  padding: 12px 13px;
-  border: 1px solid #e4ebf2;
-  border-radius: 13px;
-  background: linear-gradient(180deg, #ffffff, #f8fbff);
-}
-.board-summary b {
-  color: #1f5eff;
-  font-size: 21px;
-  line-height: 1;
-}
-.board-summary small {
-  color: #7a8797;
-  font-size: 11px;
-  font-weight: 850;
-}
-.contest-standings-table {
-  overflow-x: auto;
-  border: 1px solid #e3e9ef;
-  border-radius: 12px;
-  background: #f7fafc;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
-}
-.standings-head,
-.standings-row {
-  display: grid;
-  grid-template-columns: 46px minmax(150px, 1.4fr) 62px 86px repeat(var(--problem-count), 54px);
-  align-items: center;
-  min-width: max-content;
-}
-.standings-head {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  color: #5d6d7e;
-  background: #eef4fa;
-  font-size: 11px;
-  font-weight: 900;
-}
-.standings-head span,
-.standings-head b,
-.standings-row > span,
-.standings-row > strong {
-  padding: 9px 8px;
-  border-right: 1px solid #dde6ef;
-}
-.standings-head b {
-  text-align: center;
-  color: #244c77;
-}
-.standings-row {
-  background: #fff;
-  border-top: 1px solid #e7edf3;
-  font-size: 12px;
-  transition: background .15s ease;
-}
-.standings-row:nth-child(odd) {
-  background: #fbfdff;
-}
-.standings-row:hover {
-  background: #f2f8ff;
-}
-.standings-head span:nth-child(1),
-.standings-head span:nth-child(2),
-.standings-row .standing-rank,
-.standings-row .standing-user {
-  position: sticky;
-  z-index: 3;
-}
-.standings-head span:nth-child(1),
-.standings-row .standing-rank {
-  left: 0;
-  background: inherit;
-}
-.standings-head span:nth-child(2),
-.standings-row .standing-user {
-  left: 46px;
-  background: inherit;
-  box-shadow: 8px 0 14px rgba(31, 66, 104, .06);
-}
-.standings-head span:nth-child(1),
-.standings-head span:nth-child(2) {
-  z-index: 5;
-  background: #eef4fa;
-}
-.standing-rank {
-  font-weight: 900;
-  color: #78889a;
-  text-align: center;
-}
-.standing-rank.podium {
-  color: #c78618;
-}
-.standing-user {
-  display: grid;
-  gap: 2px;
-}
-.standing-user strong {
-  color: #1d344e;
-}
-.standing-user small {
-  color: #91a0af;
-}
-.score-cell {
-  position: relative;
-  display: inline-grid;
-  place-items: center;
-  min-width: 42px;
-  height: 32px;
-  margin: 5px 6px;
-  border: 0;
-  border-radius: 8px;
-  background: #edf2f7;
-  color: #8a98a7;
-  font-weight: 950;
-  cursor: default;
-  transition: transform .12s ease, box-shadow .12s ease;
-}
-.score-cell:not(:disabled) {
-  cursor: pointer;
-}
-.score-cell:hover {
-  transform: translateY(-1px);
-}
-.score-cell.accepted {
-  background: #dff6e8;
-  color: #168246;
-}
-.score-cell.first-blood {
-  background: #139447;
-  color: #fff;
-  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .12);
-}
-.score-cell.first-blood::after {
-  content: "FB";
-  position: absolute;
-  top: -6px;
-  right: -7px;
-  padding: 1px 4px;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, .75);
-  border-radius: 999px;
-  background: #064e3b;
-  font-size: 8px;
-  line-height: 1.2;
-  letter-spacing: .02em;
-}
-.score-cell.wrong {
-  background: #ffe2e2;
-  color: #be3333;
-}
-.score-cell.pending {
-  background: #fff3d6;
-  color: #a66b00;
-}
-.submission-list {
-  overflow: hidden;
-  border: 1px solid #e3e9ef;
-  border-radius: 12px;
-}
-.submission-head,
-.submission-row {
-  display: grid;
-  grid-template-columns: 86px 1fr 1.6fr 70px 72px 130px;
-  gap: 10px;
-  align-items: center;
-}
-.submission-head {
-  padding: 9px 12px;
-  color: #6b7b8c;
-  background: #eef4fa;
-  font-size: 11px;
-  font-weight: 950;
-}
-.submission-row {
-  padding: 10px 12px;
-  width: 100%;
-  border-right: 0;
-  border-bottom: 0;
-  border-left: 0;
-  color: inherit;
-  text-align: left;
-  background: #fff;
-  border-top: 1px solid #edf1f5;
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background .15s ease;
-}
-.submission-row:hover {
-  background: #f8fbff;
-}
-.submission-time,
-.submission-lang,
-.submission-cost {
-  color: #7d8b9a;
-}
-.submission-user {
-  font-weight: 850;
-  color: #263b52;
-}
-.submission-problem {
-  display: flex;
-  gap: 7px;
-  min-width: 0;
-  align-items: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.submission-problem b {
-  display: inline-grid;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  place-items: center;
-  border-radius: 6px;
-  background: #e7efff;
-  color: #1f5eff;
-}
-.submission-status {
-  width: max-content;
-  padding: 4px 7px;
-  border-radius: 999px;
-  background: #eef2f7;
-  color: #64748b;
-  font-size: 11px;
-}
-.submission-status.accepted {
-  background: #dcfce7;
-  color: #15803d;
-}
-.submission-status.wrong_answer,
-.submission-status.time_limit_exceeded,
-.submission-status.memory_limit_exceeded,
-.submission-status.runtime_error,
-.submission-status.compile_error {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-.submission-status.pending,
-.submission-status.queuing,
-.submission-status.judging,
-.submission-status.running {
-  background: #fef3c7;
-  color: #a16207;
-}
-.submission-status.system_error {
-  background: #f3e8ff;
-  color: #7e22ce;
-}
-.submission-detail-backdrop {
-  position: fixed;
-  z-index: 60;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, .52);
-}
-.submission-detail-modal {
-  width: min(900px, 100%);
-  max-height: min(780px, 90vh);
-  overflow: auto;
-  padding: 24px;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 26px 70px rgba(15, 23, 42, .26);
-}
-.submission-detail-modal header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-.submission-detail-modal header h2 {
-  margin: 4px 0 0;
-}
-.submission-detail-modal header button {
-  border: 0;
-  background: transparent;
-  color: #64748b;
-  font-size: 28px;
-  cursor: pointer;
-}
-.submission-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-.submission-detail-grid span {
-  display: grid;
-  gap: 4px;
-  padding: 11px;
-  border: 1px solid #e3eaf2;
-  border-radius: 12px;
-  background: #f8fbff;
-  color: #334155;
-  font-size: 12px;
-}
-.submission-detail-grid b {
-  color: #7a8797;
-  font-size: 10px;
-  letter-spacing: .06em;
-}
-.submission-source-code {
-  max-height: 430px;
-  overflow: auto;
-  padding: 15px;
-  border-radius: 12px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.freeze-hint {
-  display: grid;
-  align-content: center;
-  min-height: 40px;
-  padding: 10px;
-  border: 1px dashed #c7d7e8;
-  border-radius: 9px;
-  color: #64748b;
-  background: #f8fbff;
-}
-@media(max-width:860px){
-  .board-toolbar{flex-direction:column}
-  .rank-legend{justify-content:flex-start}
-  .board-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .submission-row{grid-template-columns:72px 1fr 1.4fr 60px 60px;}
-  .submission-head{display:none;}
-  .submission-cost{display:none;}
-}
-@media(max-width:560px){
-  .board-summary{grid-template-columns:1fr}
-}
 </style>
