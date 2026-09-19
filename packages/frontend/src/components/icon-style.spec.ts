@@ -7,9 +7,15 @@ import imports from '../views/ImportProblems.vue?raw';
 import problem from '../views/ProblemDetail.vue?raw';
 
 describe('restrained interface icon style', () => {
-  it.each([['home', home], ['profile', profile], ['leaderboard', leaderboard], ['badges', badges]])('avoids decorative glitter and prize art in %s', (_, source) => {
+  it.each([['profile', profile], ['leaderboard', leaderboard], ['badges', badges]])('avoids decorative glitter and prize art in %s', (_, source) => {
     expect(source).not.toMatch(/Sparkles|Trophy|rankMedal|[🥇🥈🥉✦]/u);
     expect(source).not.toMatch(/class="(?:hero-artwork|hero-orb|contest-art|problem-art)"/);
+  });
+
+  it('preserves the homepage reference artwork when refining other pages', () => {
+    expect(home).toContain('class="hero-artwork"');
+    expect(home).toContain('class="problem-art"');
+    expect(home).toContain('class="contest-art"');
   });
 
   it('uses numeric ranks for every leaderboard row', () => {
