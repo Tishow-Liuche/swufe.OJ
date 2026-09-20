@@ -7,6 +7,7 @@ import { sanitizeProblemContent } from '../common/content-sanitizer';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { normalizePointDifficulty } from './point-difficulty';
+import { readTestDataEntry } from './test-data-zip';
 
 type JudgeMode = 'STANDARD' | 'SPJ';
 
@@ -16,7 +17,6 @@ const TEST_DATA_REQUIRED_STATUSES = new Set(['PUBLISHED', 'CONTEST_RESERVED']);
 const MAX_ZIP_ENTRIES = 200;
 const MAX_ZIP_ENTRY_BYTES = 10 * 1024 * 1024;
 const MAX_ZIP_TOTAL_BYTES = 100 * 1024 * 1024;
-const MAX_ZIP_COMPRESSION_RATIO = 100;
 
 @Injectable()
 export class ProblemService {
@@ -624,8 +624,13 @@ export class ProblemService {
       throw new BadRequestException('无效的 ZIP 文件');
     }
 
-    const zip = new AdmZip(file.buffer);
-    const entries = zip.getEntries();
+    if (file.buffer.length > 50 * 1024 * 1024) throw new BadRequestException('测试数据 ZIP 不能超过 50MB');
+    let entries: AdmZip.IZipEntry[];
+    try {
+      entries = new AdmZip(file.buffer).getEntries();
+    } catch {
+      throw new BadRequestException('ZIP 文件结构损坏，请重新打包后上传');
+    }
     this.validateZipBudget(entries);
     const byName = new Map<string, { name: string; index: number; input?: string; output?: string }>();
     for (const entry of entries) {
@@ -642,7 +647,7 @@ export class ProblemService {
       const item = byName.get(name) || { name, index };
       const field = kind === 'in' ? 'input' : 'output';
       if (item[field] !== undefined) throw new BadRequestException(`测试点 ${name} 的${kind === 'in' ? '输入' : '输出'}文件重复，请保留一份同名文件`);
-      item[field] = entry.getData().toString('utf8');
+      item[field] = readTestDataEntry(entry, MAX_ZIP_ENTRY_BYTES).toString('utf8');
       byName.set(name, item);
     }
 
@@ -674,24 +679,21 @@ export class ProblemService {
       if (entry.isDirectory) continue;
       fileCount++;
       if (fileCount > MAX_ZIP_ENTRIES) {
-        throw new BadRequestException('ZIP 条目数量超过限制');
+        throw new BadRequestException('ZIP 条目数量超过限制，最多 200 个文件');
       }
 
       const size = Number(entry.header?.size);
       const compressedSize = Number(entry.header?.compressedSize);
-      if (!Number.isFinite(size) || !Number.isFinite(compressedSize) || size < 0 || compressedSize < 0) {
+      if (!Number.isSafeInteger(size) || !Number.isSafeInteger(compressedSize) || size < 0 || compressedSize < 0 || (size > 0 && compressedSize === 0)) {
         throw new BadRequestException('ZIP 条目大小无效');
       }
       if (size > MAX_ZIP_ENTRY_BYTES) {
-        throw new BadRequestException('单个文件解压后大小超过限制');
+        throw new BadRequestException('单个文件解压后大小超过限制，最大 10MB');
       }
 
       totalSize += size;
       if (totalSize > MAX_ZIP_TOTAL_BYTES) {
-        throw new BadRequestException('解压后大小超过限制');
-      }
-      if (size > 0 && (compressedSize === 0 || size / compressedSize > MAX_ZIP_COMPRESSION_RATIO)) {
-        throw new BadRequestException('ZIP 压缩比超过限制');
+        throw new BadRequestException('解压后大小超过限制，全部文件合计最大 100MB');
       }
     }
   }

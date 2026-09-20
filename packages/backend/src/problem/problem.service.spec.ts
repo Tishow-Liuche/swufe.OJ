@@ -757,10 +757,58 @@ describe('ProblemService createFull with judge data', () => {
     ])).toThrow('解压后大小超过限制');
   });
 
-  it('rejects a ZIP entry with a suspicious compression ratio before extraction', () => {
+  it('does not reject a declared file solely for its compression ratio', () => {
     expect(() => (service as any).validateZipBudget([
       { isDirectory: false, header: { size: 10 * 1024 * 1024, compressedSize: 10 } },
-    ])).toThrow('压缩比超过限制');
+    ])).not.toThrow();
+  });
+
+  describe('bounded high-compression ZIP import', () => {
+    beforeEach(() => {
+      prisma.problem.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1, testCases: [], testGroups: [], checker: { type: 'STANDARD' } });
+    });
+
+    it.each(['STANDARD', 'SPJ'])('imports real high-ratio %s data without changing its contents', async mode => {
+      prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1, testCases: [], testGroups: [], checker: { type: mode } });
+      const input = '0 '.repeat(50000);
+      const file = zipFile(mode === 'SPJ' ? { 'abs1.in': input } : { 'abs1.in': input, 'abs1.out': '0\n' });
+      const entry = new AdmZip(file.buffer).getEntries().find(e => e.entryName === 'abs1.in')!;
+      expect(entry.header.size / entry.header.compressedSize).toBeGreaterThan(100);
+      expect((await service.uploadTestData('p1', file, actor)).testCount).toBe(1);
+      expect(prisma.problemVersion.create.mock.calls[0][0].data.testCases.create[0]).toMatchObject({ input, expectedOutput: mode === 'SPJ' ? '' : '0\n' });
+    });
+
+    it('accepts genuinely empty inputs and outputs', async () => {
+      await service.uploadTestData('p1', zipFile({ '1.in': '', '1.out': '' }), actor);
+      expect(prisma.problemVersion.create.mock.calls[0][0].data.testCases.create[0]).toMatchObject({ input: '', expectedOutput: '' });
+    });
+
+    it.each([0, 1, 500])('rejects actual data larger than forged declared size %i as HTTP 400', async size => {
+      const file = zipFile({ '1.in': 'abcdef'.repeat(1000), '1.out': 'ok' });
+      const central = file.buffer.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+      file.buffer.writeUInt32LE(size, central + 24);
+      await expect(service.uploadTestData('p1', file, actor)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.problemVersion.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects central-directory CRC mismatch as HTTP 400', async () => {
+      const file = zipFile({ '1.in': '123456789', '1.out': 'ok' });
+      const central = file.buffer.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+      file.buffer.writeUInt32LE(0, central + 16);
+      await expect(service.uploadTestData('p1', file, actor)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.problemVersion.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects malformed ZIP structure as HTTP 400 rather than a server error', async () => {
+      const file = { originalname: 'bad.zip', buffer: Buffer.from('PKbroken'), size: 8 } as Express.Multer.File;
+      await expect(service.uploadTestData('p1', file, actor)).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('keeps aggregate and file-count limits independently of compression ratio', () => {
+      expect(() => service.validateZipBudget(Array(11).fill({ isDirectory: false, header: { size: 10 * 1024 * 1024, compressedSize: 20000 } }))).toThrow('解压后大小超过限制');
+      expect(() => service.validateZipBudget(Array(201).fill({ isDirectory: false, header: { size: 0, compressedSize: 0 } }))).toThrow('条目数量超过限制');
+    });
   });
 
   it('prevents publishing local problems before test data is imported', async () => {
