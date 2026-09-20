@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CfSubmissionService } from '../codeforces/cf-submission.service';
 import { LuoguSubmissionService } from '../luogu/luogu-submission.service';
@@ -66,53 +67,77 @@ export class SubmissionService {
     // Local judge path
     const cv = problem.versions[0];
     if (!cv) throw new NotFoundException('Problem version not found');
-    await this.assertLocalQueueCapacity(userId);
     const tc = await this.prisma.problemTestCase.count({ where: { problemVersionId: cv.id } });
     if (tc === 0) throw new NotFoundException('No test data');
-    const submission = await this.prisma.submission.create({
-      data: { problemId: dto.problemId, problemVersionId: cv.id, userId,
-        language: dto.language, sourceCode: dto.sourceCode, status: 'PENDING' },
+    const submission = await this.prisma.$transaction(async (tx) => {
+      // Serialize admission across API instances without holding a lock during judging.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`local-submission:${userId}`}, 0))`;
+      await this.assertLocalQueueCapacity(userId, tx);
+      const created = await tx.submission.create({
+        data: { problemId: dto.problemId, problemVersionId: cv.id, userId,
+          language: dto.language, sourceCode: dto.sourceCode, status: 'PENDING' },
+      });
+      await tx.judgeTask.create({ data: { submissionId: created.id } });
+      return created;
     });
-    await this.prisma.judgeTask.create({ data: { submissionId: submission.id } });
-    await this.judgeQueue.add('local-judge', {
-      submissionId: submission.id, problemId: dto.problemId,
-      language: dto.language, sourceCode: dto.sourceCode,
-      timeLimit: problem.timeLimit, memoryLimit: problem.memoryLimit,
-    }, { priority: 1 });
+    // Persist before publishing: a fast worker must never be reset to QUEUING.
     await this.prisma.submission.update({ where: { id: submission.id }, data: { status: 'QUEUING' } });
+    try {
+      await this.judgeQueue.add('local-judge', {
+        submissionId: submission.id, problemId: dto.problemId,
+        language: dto.language, sourceCode: dto.sourceCode,
+        timeLimit: problem.timeLimit, memoryLimit: problem.memoryLimit,
+      }, { priority: 1 });
+    } catch (error) {
+      await this.prisma.$transaction(async (tx) => {
+        const finishedAt = new Date();
+        // A lost queue acknowledgement may occur after a worker has picked up the job.
+        const failed = await tx.submission.updateMany({
+          where: { id: submission.id, status: { in: ['PENDING', 'QUEUING'] } },
+          data: { status: 'SYSTEM_ERROR', judgedAt: finishedAt,
+            compileMessage: '判题任务入队失败，请稍后重新提交' },
+        });
+        if (failed.count) {
+          await tx.judgeTask.updateMany({
+            where: { submissionId: submission.id, finishedAt: null },
+            data: { finishedAt },
+          });
+        }
+      });
+      throw error;
+    }
     return { id: submission.id, status: 'QUEUING', mode: 'LOCAL' };
   }
 
-  private async assertLocalQueueCapacity(userId: string) {
+  private async assertLocalQueueCapacity(userId: string, tx: Prisma.TransactionClient) {
     const activeStatuses = ['PENDING', 'QUEUING', 'COMPILING', 'RUNNING', 'JUDGING'];
-    if (typeof (this.prisma.submission as any).findFirst === 'function') {
-      const active = await this.prisma.submission.findFirst({
-        where: { userId, status: { in: activeStatuses } },
-        select: { id: true },
-      });
-      if (active) {
-        throw new HttpException('请等待当前提交评测完成后再提交', HttpStatus.TOO_MANY_REQUESTS);
-      }
-
-      const cooldownSeconds = this.positiveInteger('JUDGE_SUBMISSION_COOLDOWN_SECONDS', 5);
-      const recent = await this.prisma.submission.findFirst({
-        where: {
-          userId,
-          createdAt: { gte: new Date(Date.now() - cooldownSeconds * 1000) },
-        },
-        select: { id: true },
-      });
-      if (recent) {
-        throw new HttpException(`提交过于频繁，请等待 ${cooldownSeconds} 秒`, HttpStatus.TOO_MANY_REQUESTS);
-      }
+    const active = await tx.submission.count({
+      where: { userId, status: { in: activeStatuses } },
+    });
+    const maxPending = this.positiveInteger('JUDGE_MAX_PENDING_PER_USER', 5);
+    if (active >= maxPending) {
+      throw new HttpException(`最多允许 ${maxPending} 个待完成提交，请等待部分评测完成后再提交`, HttpStatus.TOO_MANY_REQUESTS);
     }
 
-    if (typeof (this.judgeQueue as any).getWaitingCount === 'function') {
-      const waiting = await this.judgeQueue.getWaitingCount();
-      const maxWaiting = this.positiveInteger('JUDGE_QUEUE_MAX_WAITING', 500);
-      if (waiting >= maxWaiting) {
-        throw new HttpException('判题队列繁忙，请稍后再试', HttpStatus.TOO_MANY_REQUESTS);
-      }
+    const cooldownSeconds = this.positiveInteger('JUDGE_SUBMISSION_COOLDOWN_SECONDS', 5);
+    const recent = await tx.submission.findFirst({
+      where: {
+        userId,
+        createdAt: { gte: new Date(Date.now() - cooldownSeconds * 1000) },
+      },
+      select: { id: true },
+    });
+    if (recent) {
+      throw new HttpException(`提交过于频繁，请等待 ${cooldownSeconds} 秒`, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    const [waiting, prioritized] = await Promise.all([
+      this.judgeQueue.getWaitingCount(),
+      this.judgeQueue.getPrioritizedCount(),
+    ]);
+    const maxWaiting = this.positiveInteger('JUDGE_QUEUE_MAX_WAITING', 500);
+    if (waiting + prioritized >= maxWaiting) {
+      throw new HttpException('判题队列繁忙，请稍后再试', HttpStatus.TOO_MANY_REQUESTS);
     }
   }
 

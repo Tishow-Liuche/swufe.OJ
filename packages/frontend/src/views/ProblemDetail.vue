@@ -19,6 +19,7 @@ import { Star } from '@lucide/vue';
 import ProblemStateBadges from '../components/ProblemStateBadges.vue';
 import { useAuthStore } from '../stores/auth';
 import { hideContestHints } from './contest/problem-visibility';
+import { createSubmissionPoller, isFinalSubmission } from '../utils/submission-poller';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -38,8 +39,33 @@ const problemSubmissions = ref<any[]>([]);
 const submissionsLoading = ref(false);
 const selectedSubmission = ref<any | null>(null);
 let cmView: EditorView | null = null;
-let pollTimer: any = null;
-let visibilityCleanupId: any = null;
+let historyTimer: ReturnType<typeof setTimeout> | undefined;
+let historyRequest: Promise<void> | null = null;
+let historyRevision = 0;
+let disposed = false;
+const resultPoller = createSubmissionPoller({
+  fetch: async (id, signal) => (await api.get(`/api/submissions/${id}`, { signal })).data,
+  receive: (id, data, final) => {
+    if (result.value?.id !== id) return;
+    result.value = { ...data, mode: data.mode || result.value?.mode };
+    const row = problemSubmissions.value.find(item => item.id === id);
+    if (row) Object.assign(row, data);
+    if (final) {
+      void refreshProblemState().then(() => {
+        if (!disposed && data.status === 'ACCEPTED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
+      }).catch(() => {});
+      void loadProblemSubmissions();
+    }
+  },
+  exhausted: () => { pollExhausted.value = true; },
+  hidden: () => document.visibilityState === 'hidden',
+});
+function onSubmissionVisible() {
+  if (document.visibilityState === 'visible') {
+    resultPoller.refresh();
+    void loadProblemSubmissions();
+  }
+}
 const editorHost = ref<HTMLElement | null>(null);
 const pollExhausted = ref(false);
 const wrongResolvedOpen = ref(false);
@@ -103,6 +129,7 @@ function formatMemoryKb(value: unknown) {
 }
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', onSubmissionVisible);
   try {
     const problemUrl = contestId.value
       ? `/api/contests/${contestId.value}/problems/${route.params.id}`
@@ -125,14 +152,16 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  disposed = true;
+  resultPoller.stop();
+  clearTimeout(historyTimer);
+  document.removeEventListener('visibilitychange', onSubmissionVisible);
   if (draftSaveTimer) {
     clearTimeout(draftSaveTimer);
     draftSaveTimer = null;
     void persistDraft();
   }
   cmView?.destroy();
-  if (pollTimer) clearInterval(pollTimer);
-  if (visibilityCleanupId) clearInterval(visibilityCleanupId);
 });
 
 function createEditor(initialCode?: string) {
@@ -260,18 +289,28 @@ function openExternalUrl(url?: string): boolean {
 }
 
 async function loadProblemSubmissions() {
-  if (!auth.token || !problem.value) return;
-  submissionsLoading.value = true;
+  if (!auth.token || !problem.value || disposed) return;
+  if (historyRequest) return historyRequest;
+  clearTimeout(historyTimer);
+  submissionsLoading.value = !problemSubmissions.value.length;
+  historyRequest = (async () => {
+  const revision = historyRevision;
   try {
     const { data } = await api.get('/api/submissions', {
       params: { problemId: problem.value.id, page: 1, pageSize: 30 },
     });
-    problemSubmissions.value = data.items || [];
+    if (!disposed && revision === historyRevision) problemSubmissions.value = data.items || [];
   } catch {
-    problemSubmissions.value = [];
+    // Keep the last known results on temporary network failure.
   } finally {
     submissionsLoading.value = false;
+    historyRequest = null;
+    if (!disposed && problemSubmissions.value.some(item => !isFinalSubmission(item.status))) {
+      historyTimer = setTimeout(() => { void loadProblemSubmissions(); }, document.hidden ? 5000 : 2000);
+    }
   }
+  })();
+  return historyRequest;
 }
 
 async function openSubmissionDetail(submissionId: string) {
@@ -312,27 +351,30 @@ async function copyCfCode() {
   }
 }
 
-function refreshPage() {
-  globalThis.location?.reload();
-}
-
 async function submitCode() {
   if (submitting.value || !problem.value) return;
   submitting.value = true;
+  resultPoller.stop();
   errorMsg.value = '';
   result.value = null;
   isExternal.value = false;
+  const submittedCode = code.value;
+  const submittedLanguage = language.value;
   try {
-    await persistDraft();
+    void persistDraft();
     const submitUrl = contestId.value
       ? `/api/contests/${contestId.value}/submit`
       : (isAuthorPreview.value ? '/api/submissions/preview' : '/api/submissions');
     const { data } = await api.post(submitUrl, {
       problemId: problem.value.id,
-      language: language.value,
-      sourceCode: code.value,
+      language: submittedLanguage,
+      sourceCode: submittedCode,
     });
+    if (disposed) return;
     result.value = { id: data.submissionId || data.id, status: 'QUEUING', mode: data.mode || 'LOCAL' };
+    historyRevision++;
+    problemSubmissions.value.unshift({ ...result.value, language: submittedLanguage, createdAt: new Date().toISOString() });
+    void loadProblemSubmissions();
 
     // 远程提交：自动复制代码 + 打开第三方 OJ 页面
     if (
@@ -350,9 +392,9 @@ async function submitCode() {
         url: withSwufeOjApiParam(isQoj ? data.qojSubmitUrl : (isLuogu ? data.luoguSubmitUrl : data.cfSubmitUrl)),
         platform: isQoj ? 'QOJ' : (isLuogu ? '洛谷' : 'Codeforces'),
         language: isQoj
-          ? (qojLangNames[language.value] || language.value)
-          : (isLuogu ? (luoguLangNames[language.value] || language.value) : (langNames[language.value] || language.value)),
-        code: code.value,
+          ? (qojLangNames[submittedLanguage] || submittedLanguage)
+          : (isLuogu ? (luoguLangNames[submittedLanguage] || submittedLanguage) : (langNames[submittedLanguage] || submittedLanguage)),
+        code: submittedCode,
         submissionId: data.submissionId,
       };
       cfDialog.value = true;
@@ -375,79 +417,9 @@ async function submitCode() {
 }
 
 function startPolling(id: string) {
-  if (pollTimer) clearInterval(pollTimer);
-  if (visibilityCleanupId) clearInterval(visibilityCleanupId);
+  if (disposed) return;
   pollExhausted.value = false;
-
-  let attempts = 0;
-  let errorCount = 0;
-  // CF: 10 min (400 x 1.5s), local: 45s (30 x 1.5s)
-  const maxAttempts = isExternal.value ? 400 : 30;
-  const maxErrors = isExternal.value ? 60 : 10;
-
-  function doPoll() {
-    attempts++;
-    api.get(`/api/submissions/${id}`).then(async ({ data }) => {
-      errorCount = 0; // reset on success
-      // Preserve mode from the initial submission response if the poll
-      // response does not include it (raw Prisma data has no mode field)
-      if (!data.mode && result.value?.mode) {
-        data.mode = result.value.mode;
-      }
-      result.value = data;
-      const finalStatuses = [
-        'ACCEPTED', 'WRONG_ANSWER', 'TIME_LIMIT_EXCEEDED',
-        'MEMORY_LIMIT_EXCEEDED', 'RUNTIME_ERROR', 'COMPILE_ERROR',
-        'SYSTEM_ERROR', 'REMOTE_ERROR', 'CANCELLED',
-      ];
-      if (finalStatuses.includes(data.status)) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        clearInterval(visibilityCleanupId);
-        visibilityCleanupId = null;
-        await refreshProblemState();
-        await loadProblemSubmissions();
-        if (data.status === 'ACCEPTED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
-        return;
-      }
-      if (attempts >= maxAttempts) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        clearInterval(visibilityCleanupId);
-        visibilityCleanupId = null;
-        pollExhausted.value = true;
-      }
-    }).catch(() => {
-      errorCount++;
-      // Don't kill CF polling on transient API errors — the backend
-      // worker may still be processing. Only stop if errors are
-      // persistently high relative to the polling window.
-      if (errorCount >= maxErrors) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        clearInterval(visibilityCleanupId);
-        visibilityCleanupId = null;
-        pollExhausted.value = true;
-      }
-    });
-  }
-
-  doPoll();
-  pollTimer = setInterval(doPoll, 1500);
-
-  // Refresh immediately when the user switches back to this tab
-  const onVisible = () => {
-    if (document.visibilityState === 'visible' && pollTimer) doPoll();
-  };
-  document.addEventListener('visibilitychange', onVisible);
-  // Clean up visibility listener when polling stops
-  visibilityCleanupId = setInterval(() => {
-    if (!pollTimer) {
-      clearInterval(visibilityCleanupId);
-      visibilityCleanupId = null;
-      document.removeEventListener('visibilitychange', onVisible);
-    }
-  }, 1000);
+  resultPoller.start(id, isExternal.value);
 }
 
 function renderMd(text: string): string {
@@ -535,7 +507,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
                 <option value="java">Java</option>
               </select>
               <button class="btn-submit" @click="submitCode" :disabled="submitting">
-                {{ submitting ? '提交中...' : '提交评测' }}
+                {{ submitting ? '发送中...' : '提交评测' }}
               </button>
             </div>
             <div ref="editorHost" class="cm-editor-host"></div>
@@ -547,8 +519,8 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
                 {{ statusLabels[result.status] || result.status }}
               </span>
               <span v-if="result.score !== undefined" class="result-score">得分: {{ result.score }}</span>
-              <span v-if="hasMetric(result.timeUsed) || hasMetric(result.memoryUsed)" class="result-info">
-                <template v-if="hasMetric(result.timeUsed)">{{ result.timeUsed }}ms</template>
+              <span v-if="hasMetric(result.timeUsed) || hasMetric(result.memoryUsed)" class="result-info" title="程序运行时间，不包含排队、编译及结果传输时间">
+                <template v-if="hasMetric(result.timeUsed)">运行 {{ result.timeUsed }}ms</template>
                 <template v-if="hasMetric(result.timeUsed) && hasMetric(result.memoryUsed)"> · </template>
                 <template v-if="hasMetric(result.memoryUsed)">{{ formatMemoryKb(result.memoryUsed) }}</template>
               </span>
@@ -556,7 +528,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
             <div v-if="result.compileMessage" class="compile-box"><pre>{{ result.compileMessage }}</pre></div>
             <div v-if="result.cases?.length" class="cases">
               <div class="cases-toggle" @click="showAllCases = !showAllCases">
-                测试点详情 ({{ result.cases.filter((c: any) => c.status === 'ACCEPTED').length }}/{{ result.cases.length }} 通过)
+                已测测试点 ({{ result.cases.filter((c: any) => c.status === 'ACCEPTED').length }}/{{ result.cases.length }} 通过)
                 <span class="toggle-arrow">{{ showAllCases ? '▼' : '▶' }}</span>
               </div>
               <div v-if="showAllCases" class="cases-grid">
@@ -571,9 +543,9 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 
           <div v-if="pollExhausted" class="card exhausted-card" style="border-left:4px solid #967440; background:#fff8e1;">
             <p style="margin:0; color:#e65100; font-size:14px;">
-              Polling stopped — the backend has not returned a result within the time limit.
+              暂时未获取到最终结果，提交仍会在后台处理。
               <a href="javascript:void(0)" style="text-decoration:underline; color:#52758f;"
-                 @click="refreshPage">Refresh the page</a> to check the latest status.
+                 @click="result && startPolling(result.id)">重新获取结果</a>，也可查看下方提交记录。
             </p>
           </div>
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>

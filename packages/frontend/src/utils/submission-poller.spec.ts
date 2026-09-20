@@ -1,0 +1,44 @@
+import { expect, it, vi, afterEach } from 'vitest';
+import { createSubmissionPoller } from './submission-poller';
+afterEach(() => vi.useRealTimers());
+it('ignores old results after switching submissions and never overlaps requests', async () => {
+  vi.useFakeTimers();
+  let resolveOld!: (value: any) => void;
+  const fetch = vi.fn((id: string) => id === 'old' ? new Promise(r => { resolveOld = r; }) : Promise.resolve({ status: 'ACCEPTED' }));
+  const receive = vi.fn();
+  const poller = createSubmissionPoller({ fetch, receive, exhausted: vi.fn() });
+  poller.start('old');
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  poller.start('new');
+  await vi.advanceTimersByTimeAsync(0);
+  resolveOld({ status: 'WRONG_ANSWER' });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(receive).toHaveBeenCalledTimes(1);
+  expect(receive).toHaveBeenCalledWith('new', { status: 'ACCEPTED' }, true);
+  poller.stop();
+});
+it('refreshes quick judgements within 500ms and stops at final verdict', async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn().mockResolvedValueOnce({ status: 'RUNNING' }).mockResolvedValue({ status: 'ACCEPTED' });
+  const receive = vi.fn();
+  const poller = createSubmissionPoller({ fetch, receive, exhausted: vi.fn() });
+  poller.start('s1');
+  await vi.advanceTimersByTimeAsync(500);
+  expect(receive).toHaveBeenLastCalledWith('s1', { status: 'ACCEPTED' }, true);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+it('keeps queued submissions updating beyond the old 45 second limit', async () => {
+  vi.useFakeTimers();
+  const receive = vi.fn(), exhausted = vi.fn();
+  const poller = createSubmissionPoller({ fetch: async () => ({ status: 'QUEUING' }), receive, exhausted });
+  poller.start('s1');
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(exhausted).not.toHaveBeenCalled();
+  expect(receive.mock.calls.length).toBeGreaterThan(30);
+  poller.stop();
+  const calls = receive.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(receive).toHaveBeenCalledTimes(calls);
+});
