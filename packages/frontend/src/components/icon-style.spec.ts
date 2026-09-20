@@ -19,7 +19,8 @@ describe('restrained interface icon style', () => {
   });
 
   it('uses numeric ranks for every leaderboard row', () => {
-    expect(leaderboard).toContain('<b>{{ row.rank }}</b>');
+    expect(leaderboard).toContain('<b v-else>{{ row.rank }}</b>');
+    expect(leaderboard).toContain('<b aria-hidden="true">{{ row.rank }}</b>');
   });
 
   it('keeps meaningful labels without decorative emoji', () => {

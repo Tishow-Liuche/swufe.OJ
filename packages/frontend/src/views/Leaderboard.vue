@@ -16,32 +16,11 @@ const contest = ref<any>(null);
 const loading = ref(true);
 const error = ref('');
 
-const scopeMeta = computed(() => ({
-  GLOBAL: {
-    title: '全站过题数排名',
-    kicker: 'SOLVE COUNT',
-    desc: '按照全站真实 AC 题目数排名，提交数与用户名作为并列时的辅助排序。',
-  },
-  CONTEST: {
-    title: contest.value?.title || '比赛排名',
-    kicker: 'CONTEST STANDINGS',
-    desc: '查看单场比赛榜单。ACM 模式展示过题数与罚时，IOI 模式展示得分。',
-  },
-  OVERALL: {
-    title: '综合排名',
-    kicker: 'SINGULARITY SCORE',
-    desc: '按本 OJ 提交 AC 的题目难度计做题分，比赛分当前为 0。',
-  },
+const currentScopeTitle = computed(() => ({
+  GLOBAL: '全站过题数排名',
+  CONTEST: contest.value?.title || '比赛排名',
+  OVERALL: '综合排名',
 })[scope.value]);
-
-const currentScopeTitle = computed(() => (
-  scope.value === 'OVERALL' ? '综合排名' : scopeMeta.value.title
-));
-const currentScopeDesc = computed(() => (
-  scope.value === 'OVERALL'
-    ? '综合分 = 做题分 + 比赛分；当前做题分只统计本 OJ 提交并 AC 的题，比赛分暂为 0。'
-    : scopeMeta.value.desc
-));
 
 const contestOptions = computed(() => [
   { value: '', label: '选择比赛' },
@@ -138,7 +117,6 @@ onMounted(async () => {
       <div>
         <p class="eyebrow">LEADERBOARD</p>
         <h1>{{ currentScopeTitle }}</h1>
-        <p>{{ currentScopeDesc }}</p>
       </div>
     </section>
 
@@ -146,19 +124,16 @@ onMounted(async () => {
       <button :class="{ active: scope === 'GLOBAL' }" @click="switchScope('GLOBAL')">
         <span>
           <strong>全站过题数排名</strong>
-          <small>按 AC 题目数排序</small>
         </span>
       </button>
       <button :class="{ active: scope === 'CONTEST' }" @click="switchScope('CONTEST')">
         <span>
           <strong>比赛排名</strong>
-          <small>选择一场比赛查看榜单</small>
         </span>
       </button>
       <button :class="{ active: scope === 'OVERALL' }" @click="switchScope('OVERALL')">
         <span>
           <strong>综合排名</strong>
-          <small>做题分 + 比赛分</small>
         </span>
       </button>
     </section>
@@ -184,9 +159,12 @@ onMounted(async () => {
       <div class="board-head" :class="{ contest: scope === 'CONTEST', overall: scope === 'OVERALL' }">
         <span v-for="column in displayBoardColumns" :key="column">{{ column }}</span>
       </div>
-      <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="{ top: row.rank <= 3, contest: scope === 'CONTEST', overall: scope === 'OVERALL' }">
+      <div v-for="row in rows" :key="row.userId || row.username" class="board-row" :class="[{ contest: scope === 'CONTEST', overall: scope === 'OVERALL' }, row.rank >= 1 && row.rank <= 3 ? `podium-${row.rank}` : '']">
         <span class="rank">
-          <b>{{ row.rank }}</b>
+          <span v-if="row.rank >= 1 && row.rank <= 3" class="rank-medal" :aria-label="`第 ${row.rank} 名，${['金', '银', '铜'][row.rank - 1]}牌`" role="img">
+            <b aria-hidden="true">{{ row.rank }}</b>
+          </span>
+          <b v-else>{{ row.rank }}</b>
         </span>
         <span class="user">
           <strong>{{ row.nickname || row.username }}</strong>
@@ -228,7 +206,7 @@ onMounted(async () => {
 .leaderboard-hero {
   position: relative;
   display: flex;
-  min-height: 210px;
+  min-height: 168px;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
@@ -261,13 +239,6 @@ onMounted(async () => {
   letter-spacing: -.06em;
 }
 
-.leaderboard-hero p:not(.eyebrow) {
-  max-width: 560px;
-  margin: 12px 0 0;
-  color: #64738e;
-  line-height: 1.8;
-}
-
 .rank-switcher {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -277,7 +248,7 @@ onMounted(async () => {
 
 .rank-switcher button {
   display: grid;
-  min-height: 86px;
+  min-height: 64px;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 12px;
@@ -305,8 +276,7 @@ onMounted(async () => {
   background: linear-gradient(135deg, #2f7cf2, #235fd3);
 }
 
-.rank-switcher strong,
-.rank-switcher small {
+.rank-switcher strong {
   display: block;
 }
 
@@ -314,13 +284,6 @@ onMounted(async () => {
   color: inherit;
   font-size: 15px;
   font-weight: 820;
-}
-
-.rank-switcher small {
-  margin-top: 4px;
-  color: currentColor;
-  opacity: .76;
-  font-size: 12px;
 }
 
 .contest-picker {
@@ -398,12 +361,70 @@ onMounted(async () => {
   border-bottom: 0;
 }
 
-.board-row.top {
-  background: linear-gradient(90deg, #fffaf0, #fff);
+.board-row.podium-1 {
+  --medal-ink: #855911;
+  --medal-edge: #d6b25c;
+  --medal-light: #fff6d5;
+  --medal-base: #ecd087;
+  background: linear-gradient(90deg, #fffbef, #fff 65%);
+}
+
+.board-row.podium-2 {
+  --medal-ink: #53657a;
+  --medal-edge: #afbdcc;
+  --medal-light: #f5f8fc;
+  --medal-base: #d0dbe6;
+  background: linear-gradient(90deg, #f5f8fb, #fff 65%);
+}
+
+.board-row.podium-3 {
+  --medal-ink: #8b542f;
+  --medal-edge: #ce9c79;
+  --medal-light: #fff0e3;
+  --medal-base: #e8bb98;
+  background: linear-gradient(90deg, #fff7f0, #fff 65%);
+}
+
+.rank {
+  display: flex;
+  align-items: center;
+  width: 36px;
+  min-height: 38px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .rank b {
   color: #98a4b1;
+}
+
+.rank-medal {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--medal-edge);
+  border-radius: 50%;
+  background: linear-gradient(145deg, var(--medal-light), var(--medal-base));
+  box-shadow: inset 0 0 0 3px var(--medal-light), 0 2px 4px rgb(23 35 58 / 6%);
+  color: var(--medal-ink);
+}
+
+.rank-medal::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 23px 6px -6px;
+  background: var(--medal-edge);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 75%, 0 100%);
+}
+
+.rank-medal b {
+  color: inherit;
+  font-size: 15px;
+  font-weight: 850;
 }
 
 .user {
