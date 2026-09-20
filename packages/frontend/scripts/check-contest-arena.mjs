@@ -22,7 +22,11 @@ await context.route('**/api/**', route => {
   else if (p === '/api/contests/c1') body = contest;
   else if (p === '/api/contests/c1/register') { contest.participant = { isVirtual: false }; body = { participant: contest.participant }; }
   else if (p === '/api/contests/c1/standings') { counts.standings++; body = board; }
-  else if (p === '/api/contests/c1/submissions') { counts.submissions++; body = { items: [submission] }; }
+  else if (p === '/api/contests/c1/submissions') {
+    counts.submissions++;
+    body = { items: new URL(route.request().url()).searchParams.get('mine') === 'true'
+      ? [submission] : [submission, { ...submission, id: 's2', user: { id: 'u2', username: 'other-player' } }] };
+  }
   else if (p === '/api/contests/c1/submissions/s1') body = submission;
   else if (p === '/api/contests/mine' || p === '/api/contests') body = [contest];
   return route.fulfill({ json: body });
@@ -50,9 +54,19 @@ try {
   await page.getByRole('dialog').getByText('int main() { return 0; }', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭提交详情' }).click();
   await page.getByRole('link', { name: '提交记录', exact: true }).click();
+  await page.locator('.arena-submissions').getByText('other-player', { exact: true }).waitFor();
+  const mineButton = page.getByRole('button', { name: '仅查看自己的提交', exact: true });
+  await Promise.all([
+    page.waitForResponse(r => new URL(r.url()).searchParams.get('mine') === 'true'),
+    mineButton.click(),
+  ]);
+  await page.locator('.arena-submissions').getByText('other-player', { exact: true }).waitFor({ state: 'detached' });
   await page.locator('.arena-submissions').getByText('cpp', { exact: true }).waitFor();
+  assert.equal(await mineButton.getAttribute('aria-pressed'), 'true');
+  await mineButton.click();
+  await page.locator('.arena-submissions').getByText('other-player', { exact: true }).waitFor();
   assert.equal(await page.locator('.arena-standings').count(), 0);
-  await page.reload(); await page.locator('.arena-submissions').getByText('cpp', { exact: true }).waitFor();
+  await page.reload(); await page.locator('.arena-submissions').getByText('cpp', { exact: true }).first().waitFor();
   assert.equal(new URL(page.url()).pathname, '/contests/c1/submissions');
   await page.goBack(); await page.locator('.arena-standings').waitFor();
   if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCREENSHOT_DIR + '/contest-arena-desktop.png' });

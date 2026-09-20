@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ContestService } from './contest.service';
 
@@ -67,8 +67,8 @@ export class ContestController {
 
   @Get(':id/submissions')
   @UseGuards(AuthGuard('jwt'))
-  submissions(@Param('id') id: string, @Req() req: any) {
-    return this.contests.contestSubmissions(id, req.user);
+  submissions(@Param('id') id: string, @Req() req: any, @Query('mine') mine?: string) {
+    return this.contests.contestSubmissions(id, req.user, mine === 'true');
   }
 
   @Get(':id/submissions/:submissionId')

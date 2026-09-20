@@ -6,7 +6,8 @@ import { useContestFeed } from './useContestFeed';
 import ContestSubmissionDialog from './ContestSubmissionDialog.vue';
 const props = defineProps<{ contest: Contest }>(); const auth = useAuthStore();
 const allowed = computed(() => canViewFeed(props.contest, auth.user));
-const { data, error, loading, updatedAt, refresh } = useContestFeed<{ items: any[] }>(() => `/api/contests/${props.contest.id}/submissions`, () => allowed.value);
+const onlyMine = ref(false);
+const { data, error, loading, updatedAt, refresh } = useContestFeed<{ items: any[] }>(() => `/api/contests/${props.contest.id}/submissions${onlyMine.value ? '?mine=true' : ''}`, () => allowed.value);
 const selectedId = ref('');
 </script>
 <template>
@@ -14,6 +15,7 @@ const selectedId = ref('');
     <div class="arena-section-head"><div><h2>提交记录</h2><p class="arena-muted">最近 {{ data?.items?.length || 0 }} 条提交{{ updatedAt ? ` · 更新于 ${timeText(updatedAt)}` : '' }}<span v-if="loading"> · 刷新中</span></p></div><button class="arena-button secondary" :disabled="loading || !allowed" @click="refresh">刷新</button></div>
     <p v-if="!allowed" class="arena-empty">该比赛的提交记录仅限参赛者查看，请先报名。</p>
     <template v-else>
+      <button class="arena-button" :class="onlyMine ? 'primary' : 'secondary'" :aria-pressed="onlyMine" @click="onlyMine = !onlyMine; selectedId = ''">仅查看自己的提交</button>
       <p v-if="error" class="arena-error" role="alert">{{ error }}</p>
       <div v-if="data?.items?.length" class="arena-table-wrap">
         <table class="arena-table submissions-table"><thead><tr><th scope="col">时间</th><th scope="col">选手</th><th scope="col">题目</th><th scope="col">语言</th><th scope="col">结果</th><th scope="col">耗时</th><th scope="col">内存</th><th scope="col">详情</th></tr></thead>
