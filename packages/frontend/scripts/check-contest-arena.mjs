@@ -56,6 +56,18 @@ try {
   await page.getByRole('link', { name: '提交记录', exact: true }).click();
   await page.locator('.arena-submissions').getByText('other-player', { exact: true }).waitFor();
   const mineButton = page.getByRole('button', { name: '仅查看自己的提交', exact: true });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({width,height:1000});
+    const button=await mineButton.boundingBox();
+    const head=await page.locator('.arena-submissions .arena-section-head').boundingBox();
+    const table=await page.locator('.arena-submissions .arena-table-wrap').boundingBox();
+    assert(Math.abs(button.x+button.width-table.x-table.width)<2,'mine filter aligns to table right edge');
+    const top=button.y-head.y-head.height, bottom=table.y-button.y-button.height;
+    assert(Math.abs(top-16)<2 && Math.abs(bottom-16)<2,'mine filter has equal 16px top/bottom gaps');
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'submission page does not overflow');
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+`/submission-filter-${width}.png`});
+  }
+  await page.setViewportSize({width:1440,height:1000});
   await Promise.all([
     page.waitForResponse(r => new URL(r.url()).searchParams.get('mine') === 'true'),
     mineButton.click(),

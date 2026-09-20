@@ -627,38 +627,39 @@ export class ProblemService {
     const zip = new AdmZip(file.buffer);
     const entries = zip.getEntries();
     this.validateZipBudget(entries);
-    const byIndex = new Map<number, { input?: string; output?: string }>();
+    const byName = new Map<string, { name: string; index: number; input?: string; output?: string }>();
     for (const entry of entries) {
       if (entry.isDirectory) continue;
       const normalized = entry.entryName.replace(/\\/g, '/');
       if (normalized.includes('..')) throw new BadRequestException('测试数据包不能包含非法路径');
       const base = path.posix.basename(normalized);
-      const match = base.match(/^(\d+)\.(in|out|ans)$/i);
+      const match = base.match(/^(.*?(\d+))\.(in|out|ans)$/i);
       if (!match) continue;
-      const index = Number(match[1]);
-      if (!Number.isInteger(index) || index <= 0) continue;
-      const kind = match[2].toLowerCase();
-      const item = byIndex.get(index) || {};
-      if (kind === 'in') item.input = entry.getData().toString('utf8');
-      else item.output = entry.getData().toString('utf8');
-      byIndex.set(index, item);
+      const name = match[1];
+      const index = Number(match[2]);
+      if (!Number.isSafeInteger(index) || index <= 0) continue;
+      const kind = match[3].toLowerCase();
+      const item = byName.get(name) || { name, index };
+      const field = kind === 'in' ? 'input' : 'output';
+      if (item[field] !== undefined) throw new BadRequestException(`测试点 ${name} 的${kind === 'in' ? '输入' : '输出'}文件重复，请保留一份同名文件`);
+      item[field] = entry.getData().toString('utf8');
+      byName.set(name, item);
     }
 
-    const indexes = [...byIndex.keys()].sort((a, b) => a - b);
-    if (indexes.length === 0) throw new BadRequestException('ZIP 中没有找到形如 1.in 的输入文件');
-    const score = Math.floor(100 / indexes.length);
-    const rest = 100 - score * indexes.length;
+    const cases = [...byName.values()].sort((a, b) => a.index - b.index || a.name.localeCompare(b.name, 'en'));
+    if (cases.length === 0) throw new BadRequestException('ZIP 中没有找到形如 1.in 或 abs1.in 的输入文件，文件名须以正整数编号结尾');
+    const score = Math.floor(100 / cases.length);
+    const rest = 100 - score * cases.length;
 
-    return indexes.map((index, position) => {
-      const item = byIndex.get(index)!;
-      if (item.input === undefined) throw new BadRequestException(`缺少 ${index}.in 输入文件`);
+    return cases.map((item, position) => {
+      if (item.input === undefined) throw new BadRequestException(`缺少 ${item.name}.in 输入文件`);
       if (judgeMode === 'STANDARD' && item.output === undefined) {
-        throw new BadRequestException(`普通题缺少 ${index}.out 或 ${index}.ans 输出文件`);
+        throw new BadRequestException(`普通题缺少 ${item.name}.out 或 ${item.name}.ans 输出文件`);
       }
       return {
         input: item.input,
         expectedOutput: judgeMode === 'SPJ' ? '' : item.output!,
-        score: score + (position === indexes.length - 1 ? rest : 0),
+        score: score + (position === cases.length - 1 ? rest : 0),
         order: position + 1,
         isSample: false,
       };

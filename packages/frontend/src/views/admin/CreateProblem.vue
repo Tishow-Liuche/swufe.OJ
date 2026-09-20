@@ -252,7 +252,7 @@ function insertImageIntoSample(markdown: string) {
 ...
 100.in
 100.out</pre>
-        <p>也支持 `.ans` 作为输出文件，例如 `1.ans`。每个 `.in` 必须有同编号 `.out` 或 `.ans`。</p>
+        <p>文件名也可带前缀，如 abs1.in + abs1.out、test2.in + test2.ans。名称须以正整数编号结尾；输入与输出的完整文件名（不含扩展名）必须相同。按末尾数字排序，每组只保留一个输出文件。</p>
       </div>
       <div v-else class="format-box spj">
         <strong>SPJ ZIP 格式：</strong>
@@ -261,7 +261,7 @@ function insertImageIntoSample(markdown: string) {
 3.in
 ...
 100.in</pre>
-        <p>SPJ 不需要输出文件。用户程序输出会作为评测代码的标准输入。</p>
+        <p>也支持 abs1.in、test2.in 等以正整数编号结尾的文件名，按末尾数字排序。SPJ 不需要输出文件，用户程序输出会作为评测代码的标准输入。</p>
       </div>
       <input type="file" accept=".zip" @change="onZipSelected" />
       <p v-if="testDataFile" class="file-name">已选择：{{ testDataFile.name }}</p>

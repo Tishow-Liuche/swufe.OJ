@@ -247,10 +247,10 @@ onMounted(loadProblem);
         <h3>替换测试数据 ZIP</h3>
         <p class="hint">当前测试点：{{ existingTestCount }} 组。选择新 ZIP 后保存，会替换旧测试点；不选择则保留旧测试点。</p>
         <div class="format-box" v-if="form.judgeMode === 'STANDARD'">
-          普通题：ZIP 内使用 1.in + 1.out / 1.ans，2.in + 2.out ...
+          普通题：支持 1.in + 1.out / 1.ans，也支持 abs1.in + abs1.out 等带前缀的文件名。名称须以正整数编号结尾，输入输出完整同名，按末尾数字排序；每组只保留一个输出文件。
         </div>
         <div class="format-box spj" v-else>
-          SPJ：ZIP 内只需要 1.in、2.in ...，判题由下方 SPJ 代码完成。
+          SPJ：ZIP 内只需要 1.in、abs1.in、test2.in 等以正整数编号结尾的输入文件，按末尾数字排序；判题由下方 SPJ 代码完成。
         </div>
         <input type="file" accept=".zip" @change="onZipSelected" />
         <p v-if="testDataFile" class="file-name">已选择：{{ testDataFile.name }}</p>

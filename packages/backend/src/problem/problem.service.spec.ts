@@ -511,6 +511,44 @@ describe('ProblemService createFull with judge data', () => {
     expect(result.testCount).toBe(2);
   });
 
+  describe('numeric-suffix ZIP filenames', () => {
+    beforeEach(() => {
+      prisma.problem.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.problemVersion.findFirst.mockResolvedValue({ id:'v1', version:1, testCases:[], testGroups:[], checker:{type:'STANDARD'} });
+    });
+    it('pairs full names and sorts by numeric suffix, including nested files and ans', async () => {
+      await service.uploadTestData('p1', zipFile({
+        'data/abs10.in':'ten', 'data/abs10.out':'10',
+        'abs2.IN':'two', 'abs2.ANS':'2', '1.in':'one', '1.out':'1',
+      }), actor);
+      const cases=prisma.problemVersion.create.mock.calls[0][0].data.testCases.create;
+      expect(cases.map((c:any)=>[c.input,c.expectedOutput,c.order])).toEqual([['one','1',1],['two','2',2],['ten','10',3]]);
+    });
+    it('supports input-only SPJ names ending in digits', async () => {
+      prisma.problemVersion.findFirst.mockResolvedValue({id:'v1',version:1,testCases:[],testGroups:[],checker:{type:'SPJ'}});
+      await service.uploadTestData('p1',zipFile({'abs01.in':'first','测试2.in':'second'}),actor);
+      expect(prisma.problemVersion.create.mock.calls[0][0].data.testCases.create.map((c:any)=>c.input)).toEqual(['first','second']);
+    });
+    it('keeps distinct prefixed pairs with the same suffix separate', async () => {
+      await service.uploadTestData('p1',zipFile({'abs1.in':'a','abs1.out':'A','xyz1.in':'b','xyz1.out':'B'}),actor);
+      expect(prisma.problemVersion.create.mock.calls[0][0].data.testCases.create.map((c:any)=>[c.input,c.expectedOutput])).toEqual([['a','A'],['b','B']]);
+    });
+    it('does not pair different basenames only because their suffix agrees', async () => {
+      await expect(service.uploadTestData('p1',zipFile({'abs1.in':'a','xyz1.out':'wrong'}),actor)).rejects.toThrow('abs1');
+      expect(prisma.problemVersion.create).not.toHaveBeenCalled();
+    });
+    it.each([
+      {'1.in':'a','nested/1.in':'b','1.out':'A'},
+      {'abs1.in':'a','abs1.out':'A','abs1.ans':'B'},
+    ])('rejects duplicate inputs or ambiguous answers instead of overwriting', async entries => {
+      await expect(service.uploadTestData('p1',zipFile(entries),actor)).rejects.toThrow('重复');
+      expect(prisma.problemVersion.create).not.toHaveBeenCalled();
+    });
+    it('ignores filenames not ending in digits and rejects unsafe indices', async () => {
+      await expect(service.uploadTestData('p1',zipFile({'abs.in':'a','1abs.in':'b','case9007199254740993.in':'c'}),actor)).rejects.toThrow('输入文件');
+    });
+  });
+
   it('stores the author when creating a local problem', async () => {
     prisma.problem.create.mockResolvedValue({ id: 'p-owned' });
 
