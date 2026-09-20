@@ -1,5 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
+import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JudgeService } from '../judge/judge.service';
@@ -59,6 +61,42 @@ export class JudgeProcessor extends WorkerHost {
   async process(job: Job<JudgeJob>) {
     const data = job.data;
     this.logger.log(`Judging submission ${data.submissionId}`);
+    const artifacts = new Set<string>();
+    const pendingCases: Prisma.SubmissionCaseCreateManyInput[] = [];
+    let lastCaseFlush = Date.now();
+    let hasFlushedCases = false;
+    const flushCases = async () => {
+      if (!pendingCases.length) return;
+      const batch = [...pendingCases];
+      // One atomic statement avoids transaction round trips over the worker's DB tunnel.
+      // Retried batches replace their own indexes; all user data stays parameterized.
+      const payload = JSON.stringify(batch.map((row) => ({ ...row, id: randomUUID() })));
+      await this.prisma.$executeRaw(Prisma.sql`
+        WITH incoming AS (
+          SELECT * FROM jsonb_to_recordset(${payload}::jsonb) AS row(
+            "id" text, "submissionId" text, "caseIndex" integer, "status" text,
+            "timeUsed" integer, "memoryUsed" integer, "input" text,
+            "expectedOutput" text, "actualOutput" text
+          )
+        ), deleted AS (
+          DELETE FROM "SubmissionCase" AS existing USING incoming
+          WHERE existing."submissionId" = incoming."submissionId"
+            AND existing."caseIndex" = incoming."caseIndex"
+          RETURNING existing."id"
+        )
+        INSERT INTO "SubmissionCase" (
+          "id", "submissionId", "caseIndex", "status", "timeUsed", "memoryUsed",
+          "input", "expectedOutput", "actualOutput"
+        )
+        SELECT incoming."id", incoming."submissionId", incoming."caseIndex", incoming."status",
+          incoming."timeUsed", incoming."memoryUsed", incoming."input",
+          incoming."expectedOutput", incoming."actualOutput"
+        FROM incoming CROSS JOIN (SELECT count(*) FROM deleted) AS deletion_complete
+      `);
+      pendingCases.splice(0, batch.length);
+      lastCaseFlush = Date.now();
+      hasFlushedCases = true;
+    };
 
     try {
       const version = await this.prisma.problemVersion.findFirst({
@@ -75,6 +113,7 @@ export class JudgeProcessor extends WorkerHost {
         data: { status: 'COMPILING' },
       });
       const compileResult = await this.judge.compile(data.language, data.sourceCode);
+      if (compileResult.fileId) artifacts.add(compileResult.fileId);
       if (!compileResult.success) {
         await this.prisma.submission.update({
           where: { id: data.submissionId },
@@ -97,6 +136,7 @@ export class JudgeProcessor extends WorkerHost {
           checker.language || 'python',
           checker.sourceCode || '',
         );
+        if (checkerCompileResult.fileId) artifacts.add(checkerCompileResult.fileId);
         if (!checkerCompileResult.success) {
           await this.prisma.submission.update({
             where: { id: data.submissionId },
@@ -143,8 +183,7 @@ export class JudgeProcessor extends WorkerHost {
               : 'WRONG_ANSWER';
         }
 
-        await this.prisma.submissionCase.create({
-          data: {
+        pendingCases.push({
             submissionId: data.submissionId,
             caseIndex: tc.order,
             status: caseStatus,
@@ -153,18 +192,19 @@ export class JudgeProcessor extends WorkerHost {
             input: tc.isSample ? tc.input : null,
             expectedOutput: useSpj ? '[SPJ]' : tc.isSample ? tc.expectedOutput : null,
             actualOutput: this.truncateOutput(result.output),
-          },
         });
 
         if (caseStatus === 'ACCEPTED') totalScore += tc.score;
         if (caseStatus !== 'ACCEPTED' && finalStatus === 'ACCEPTED') finalStatus = caseStatus;
+        if (!hasFlushedCases || pendingCases.length >= 10 || Date.now() - lastCaseFlush >= 1000
+          || caseStatus === 'TIME_LIMIT_EXCEEDED') await flushCases();
+        // Persist the timeout before stopping; unrun cases earn no score.
+        if (caseStatus === 'TIME_LIMIT_EXCEEDED') break;
       }
+      await flushCases();
 
       const totalPossible = version.testCases.reduce((sum, tc) => sum + tc.score, 0);
       const finalScore = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
-
-      if (compileResult.fileId) this.judge.deleteFile(compileResult.fileId).catch(() => {});
-      if (checkerCompileResult?.fileId) this.judge.deleteFile(checkerCompileResult.fileId).catch(() => {});
 
       const judgedAt = new Date();
       await this.prisma.submission.update({
@@ -195,9 +235,16 @@ export class JudgeProcessor extends WorkerHost {
       this.logger.log(`Submission ${data.submissionId}: ${finalStatus} (${finalScore}分)`);
       return { status: finalStatus, score: finalScore };
     } catch (error: any) {
+      try {
+        await flushCases();
+      } catch (flushError: any) {
+        this.logger.error(`Failed to persist completed cases ${data.submissionId}: ${flushError.message}`);
+      }
       this.logger.error(`Judge error ${data.submissionId}: ${error.message}`);
       await this.failSubmission(data.submissionId, 'SYSTEM_ERROR', error.message?.slice(0, 500));
       throw error;
+    } finally {
+      for (const fileId of artifacts) this.judge.deleteFile(fileId).catch(() => {});
     }
   }
 
