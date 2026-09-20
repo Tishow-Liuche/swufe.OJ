@@ -19,6 +19,6 @@
 - [x] Add/test strict systemd ExecStart transformation: origin IP + hostname/SNI; fail closed on unexpected unit; preserve auth and forwarding options. Tests precede implementation.
 - [x] Check queue empty, pause/drain, back up service unit, apply transformation, restart tunnel only, verify database/Redis and resume queue. On failure restore unit and original pause state.
 - [x] Run same fixture after change with 2/4/8 concurrent submissions. Re-run verdict regression. Inspect resources and logs; compare before/after, not configured parallelism alone.
-- [ ] Commit reproducible tooling and sanitized measurements to 42411036; leave secrets, source/test data and live unit out of git.
+- [x] Commit reproducible tooling and sanitized measurements to 42411036; leave secrets, source/test data and live unit out of git. Implementation commit: `09b6404`; production tunnel switched and verified.
 
 Acceptance: all audit verdicts/cases correct, observed parallel task intervals, queue delay normally <2 s for <=8 jobs when idle, direct DB round trips <50 ms in this environment; report measured exceptions. No claim of arbitrary contest capacity or zero failures.
