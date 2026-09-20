@@ -6,6 +6,8 @@ The contest submissions page has a toggle for the current user's submissions. Th
 
 Verification: the new backend regression initially failed because its query lacked the user restriction, then passed with the implementation (11 targeted tests). Frontend 51 tests, browser contest arena including toggling both directions, backend build and frontend typecheck/build passed.
 
+Deployment: runtime commit `d0df902b15f75eb3967a302f4c24c67c46ff872a` deployed to test.singularitylab.online (backend and frontend only). All 21 contest backend tests passed. Two temporary live accounts verified both API ownership restriction and browser toggle in both directions. Fixtures were removed afterward; no existing accounts or submissions were changed.
+
 ## SPJ diagnostic result
 
 The current judge first runs the contestant program in go-judge, then runs the authored checker separately with contestant stdout on stdin and files named `input`, `output`, `user_output`. Boolean stdout and legacy zero-exit/no-stdout checkers are supported. Successful execution of the contestant alone is not the final SPJ verdict.
