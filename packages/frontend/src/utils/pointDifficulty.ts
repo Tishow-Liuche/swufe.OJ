@@ -57,12 +57,11 @@ const legacyMap: Record<string, PointDifficulty> = {
   '2500': 'POINT_5',
   '2600': 'POINT_5',
   '3000': 'POINT_5',
-  UNRATED: 'POINT_1',
 };
 
 export function normalizePointDifficulty(value?: string | null): PointDifficulty | null {
   const raw = String(value || '').trim().toUpperCase();
-  if (!raw) return null;
+  if (!raw || ['NULL', 'NONE', 'UNRATED'].includes(raw)) return null;
   if (byValue.has(raw as PointDifficulty)) return raw as PointDifficulty;
   return legacyMap[raw] || null;
 }
@@ -72,17 +71,17 @@ export function pointDifficultyMeta(value?: string | null) {
 }
 
 export function pointDifficultyLabel(value?: string | null) {
-  if (!value) return '未评定难度';
+  if (!normalizePointDifficulty(value)) return '未评定难度';
   return pointDifficultyMeta(value).label;
 }
 
 export function pointDifficultyShortLabel(value?: string | null) {
-  if (!value) return '未评定难度';
+  if (!normalizePointDifficulty(value)) return '未评定难度';
   return pointDifficultyMeta(value).shortLabel;
 }
 
 export function pointDifficultyClass(value?: string | null) {
-  if (!value) return 'unrated';
+  if (!normalizePointDifficulty(value)) return 'unrated';
   return pointDifficultyMeta(value).className;
 }
 

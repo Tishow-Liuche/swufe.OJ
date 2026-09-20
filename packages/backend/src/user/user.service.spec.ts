@@ -76,6 +76,22 @@ describe('UserService profile settings', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
+  it('keeps unrated statistics separate from P1 instead of serializing a null key', async () => {
+    prisma.submission.count = jest.fn().mockResolvedValue(0);
+    prisma.submission.groupBy = jest.fn().mockResolvedValue([]);
+    prisma.submission.findMany.mockResolvedValue([]);
+    prisma.externalSolvedProblem.findMany.mockResolvedValue([]);
+    prisma.problem = { findMany: jest.fn().mockResolvedValue([
+      { difficulty: null }, { difficulty: 'POINT_1' }, { difficulty: 'UNRATED' }, { difficulty: 'POINT_0' },
+    ]) };
+    const result = await service.getStats('u1');
+    expect(result.difficultyDist).toEqual([
+      { difficulty: 'POINT_0', count: 1 },
+      { difficulty: 'POINT_1', count: 1 },
+      { difficulty: 'UNRATED', count: 2 },
+    ]);
+  });
+
   it('updates nickname, email and phone for the current user', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
     prisma.user.update.mockResolvedValue({

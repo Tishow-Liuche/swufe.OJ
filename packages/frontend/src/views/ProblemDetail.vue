@@ -3,8 +3,8 @@ import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../api/client';
 import { basicSetup } from 'codemirror';
-import { EditorView, keymap } from '@codemirror/view';
-import { indentWithTab } from '@codemirror/commands';
+import { EditorView } from '@codemirror/view';
+import { editorIndentation } from '../utils/editor-indentation';
 import { EditorState } from '@codemirror/state';
 import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
@@ -192,7 +192,7 @@ function createEditor(initialCode?: string) {
   const state = EditorState.create({
     doc: templateCode,
     extensions: [
-      keymap.of([indentWithTab]),
+      editorIndentation,
       basicSetup,
       langExtensions[language.value]?.() || cpp(),
       oneDark,
@@ -220,7 +220,7 @@ watch(language, () => {
   const state = EditorState.create({
     doc: newCode,
     extensions: [
-      keymap.of([indentWithTab]),
+      editorIndentation,
       basicSetup,
       langExtensions[language.value]?.() || cpp(),
       oneDark,

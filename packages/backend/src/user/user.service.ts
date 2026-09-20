@@ -448,7 +448,7 @@ export class UserService {
     });
     const diffCount: Record<string, number> = {};
     for (const p of difficultyDist) {
-      const d = normalizePointDifficulty(p.difficulty);
+      const d = normalizePointDifficulty(p.difficulty) || 'UNRATED';
       diffCount[d] = (diffCount[d] || 0) + 1;
     }
 
@@ -474,7 +474,7 @@ export class UserService {
       },
       heatmap,
       languageDist: langDist.map((l) => ({ language: l.language, count: l._count })),
-      difficultyDist: Object.entries(diffCount).map(([d, c]) => ({ difficulty: d, count: c })),
+      difficultyDist: Object.entries(diffCount).sort(([a], [b]) => a.localeCompare(b)).map(([d, c]) => ({ difficulty: d, count: c })),
       recentSubmissions: recent,
     };
   }
