@@ -6,6 +6,12 @@
 
 **Execution:** Inline in existing isolated worktree, following standing user instruction to proceed without repeated confirmation.
 
-- [ ] Add mounted Vue tests for GLOBAL/OVERALL/CONTEST: no rule text, ranks 1–3 medals, rank 4+ plain, scores preserved; run red.
-- [ ] Update only Leaderboard.vue scoped markup/styles. Run frontend tests, leaderboard script and production build.
-- [ ] Inspect desktop/mobile browser layouts and medal alignment. Push 42411036, deploy frontend assets atomically without restarting the proxy/worker, verify deployed assets and health.
+- [x] Add mounted Vue tests for GLOBAL/OVERALL/CONTEST: no rule text, ranks 1–3 medals, rank 4+ plain, scores preserved; run red.
+- [x] Update only Leaderboard.vue scoped markup/styles. Run frontend tests, leaderboard script and production build.
+- [x] Inspect desktop/mobile browser layouts and medal alignment; deploy frontend assets atomically without restarting proxy/worker, verify deployed assets and health.
+
+## Verification
+
+55 frontend tests and leaderboard frame check pass. Typecheck and production build pass using a fresh output directory (previous dist contained a locked file). Six browser scenarios (three scopes × 1440/390px) pass locally and on deployed assets; API fixture responses are mocked, numeric medal labels/colors and ribbon bounds are asserted. Desktop/mobile screenshots inspected. Independent review found no blockers. Homepage and backend logic unchanged.
+
+Frontend release `eb6bf31` deployed to existing Caddy container by hashed-assets copy then atomic index replacement. Caddy start timestamp remains `2026-09-20T10:03:14.97459625Z`; backend health OK, queue unpaused, worker connected. Rollback image `swufe-oj-caddy:before-medals-20260920`, prior index `/home/ubuntu/leaderboard-medals-20260920/index.before.html`. Persistent latest image updated without restarting services. GitHub synchronization is tracked by the git push result, separately from successful deployment.
