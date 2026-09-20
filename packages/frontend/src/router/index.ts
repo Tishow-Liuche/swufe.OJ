@@ -43,7 +43,8 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
-  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth
+    || (record.path === '/problems/:id' && Boolean(to.query.contestId)));
 
   if (requiresAuth && !auth.isLoggedIn()) {
     await auth.restoreSession();

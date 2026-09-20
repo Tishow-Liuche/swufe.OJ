@@ -67,4 +67,13 @@ describe('protected route session restore', () => {
     expect(route.meta.requiresAuth).toBe(true);
     expect(route.meta.requiresStudent).toBe(true);
   });
+  it('restores login before opening a contest problem in a fresh tab', async () => {
+    auth.restoreSession.mockImplementation(async () => {
+      auth.isLoggedIn.mockReturnValue(true);
+      return true;
+    });
+    await router.push('/problems/p1?contestId=c1');
+    expect(auth.restoreSession).toHaveBeenCalledOnce();
+    expect(router.currentRoute.value.fullPath).toBe('/problems/p1?contestId=c1');
+  });
 });
