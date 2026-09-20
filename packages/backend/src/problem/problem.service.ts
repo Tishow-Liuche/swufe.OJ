@@ -5,6 +5,7 @@ import { FileUploadService } from '../common/file-upload.service';
 import { PROBLEM_ACTIONS, ProblemAccessService, type ProblemAction, type ProblemActor } from '../common/problem-access.service';
 import { sanitizeProblemContent } from '../common/content-sanitizer';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { normalizePointDifficulty } from './point-difficulty';
 
 type JudgeMode = 'STANDARD' | 'SPJ';
@@ -44,6 +45,7 @@ export class ProblemService {
     judgeMode?: string;
     spjLanguage?: string;
     spjSourceCode?: string;
+    spjProtocol?: string;
     testCases?: Array<{ input?: string; expectedOutput?: string; score?: number; isSample?: boolean }>;
   }, actor: ProblemActor) {
     const existing = await this.prisma.problem.findFirst({ where: { title: dto.title } });
@@ -52,10 +54,12 @@ export class ProblemService {
     const status = this.normalizeProblemStatus(dto.status);
     const judgeMode = this.normalizeJudgeMode(dto.judgeMode);
     const testCases = this.normalizeInlineTestCases(dto.testCases || [], judgeMode, status);
-    const checker = this.normalizeChecker(judgeMode, dto.spjLanguage, dto.spjSourceCode);
+    const checker = this.normalizeChecker(judgeMode, dto.spjLanguage, dto.spjSourceCode, dto.spjProtocol);
 
     const versionCreate: any = {
       version: 1,
+      timeLimit: dto.timeLimit || 1000,
+      memoryLimit: dto.memoryLimit || 256,
       description: sanitizeProblemContent(dto.description),
       inputFormat: this.sanitizeOptionalContent(dto.inputFormat),
       outputFormat: this.sanitizeOptionalContent(dto.outputFormat),
@@ -93,37 +97,20 @@ export class ProblemService {
     const problem = await this.prisma.problem.findUnique({ where: { id: problemId } });
     if (!problem) throw new NotFoundException('题目不存在');
 
-    const version = await this.prisma.problemVersion.findFirst({
-      where: { problemId, isCurrent: true },
-      include: { checker: true },
-    });
-    if (!version) throw new NotFoundException('题目版本不存在');
-
-    const judgeMode: JudgeMode = version.checker?.type === 'SPJ' ? 'SPJ' : 'STANDARD';
-    const cases = this.parseTestDataZip(file, judgeMode);
-    const data = cases.map((tc) => ({ problemVersionId: version.id, ...tc }));
-
-    await this.prisma.problemTestCase.deleteMany({ where: { problemVersionId: version.id } });
-    await this.prisma.problemTestCase.createMany({ data });
-    await this.fillMissingSamplesFromFirstCase(version, cases, judgeMode);
-    await this.prisma.testGroup.deleteMany({ where: { problemVersionId: version.id } });
-    await this.prisma.testGroup.create({
-      data: {
-        problemVersionId: version.id,
-        name: file.originalname,
-        score: 100,
-        testCount: data.length,
-        order: 1,
-      },
-    });
-
-    return {
-      status: 'imported',
-      fileName: file.originalname,
-      size: file.size,
-      testCount: data.length,
-      judgeMode,
-    };
+    return this.prisma.$transaction(async (tx) => {
+      const version = await this.lockCurrentVersion(tx, problemId);
+      const latestProblem = await tx.problem.findUniqueOrThrow({ where: { id: problemId } });
+      const judgeMode: JudgeMode = version.checker?.type === 'SPJ' ? 'SPJ' : 'STANDARD';
+      const cases = this.parseTestDataZip(file, judgeMode);
+      const samples: Record<string, string> = {};
+      if (!String(version.sampleInput || '').trim()) samples.sampleInput = cases[0].input;
+      if (judgeMode === 'STANDARD' && !String(version.sampleOutput || '').trim()) samples.sampleOutput = cases[0].expectedOutput;
+      const created = await this.publishVersion(tx, version, latestProblem, {
+        ...samples, testCases: cases,
+        testGroups: [{ name: file.originalname, score: 100, testCount: cases.length, order: 1 }],
+      });
+      return { status: 'imported', fileName: file.originalname, size: file.size, testCount: cases.length, judgeMode, versionId: created.id };
+    }, { timeout: 30000 });
   }
 
   async uploadImage(file: Express.Multer.File) {
@@ -132,33 +119,26 @@ export class ProblemService {
     return { url: this.publicObjectUrl(s3Path), previewUrl: url, s3Path };
   }
 
-  async uploadChecker(problemId: string, file: Express.Multer.File, type: string, language: string, actor: ProblemActor) {
+  async uploadChecker(problemId: string, file: Express.Multer.File, type: string, language: string, actor: ProblemActor, protocol?: string) {
     await this.problemAccess.assertCanManage(problemId, actor, 'MANAGE_CHECKER');
     const problem = await this.prisma.problem.findUnique({ where: { id: problemId } });
     if (!problem) throw new NotFoundException('题目不存在');
 
-    const version = await this.prisma.problemVersion.findFirst({
-      where: { problemId, isCurrent: true },
-    });
-    if (!version) throw new NotFoundException('题目版本不存在');
-
-    const s3Path = await this.fileUpload.uploadFile(file, `checkers/${problemId}`);
-    await this.prisma.checker.upsert({
-      where: { problemVersionId: version.id },
-      create: {
-        problemVersionId: version.id,
-        type,
-        language,
-        sourceCode: s3Path,
-      },
-      update: {
-        type,
-        language,
-        sourceCode: s3Path,
-      },
-    });
-
-    return { path: s3Path, type, language };
+    if (!file?.buffer?.length || file.buffer.length > 1024 * 1024) throw new BadRequestException('请上传不超过 1MB 的 UTF-8 判题源码');
+    let source: string;
+    try { source = new TextDecoder('utf-8', { fatal: true }).decode(file.buffer); }
+    catch { throw new BadRequestException('判题源码必须为 UTF-8 文本'); }
+    if (source.includes('\0')) throw new BadRequestException('不能上传二进制判题程序，请上传源码');
+    return this.prisma.$transaction(async (tx) => {
+      const version = await this.lockCurrentVersion(tx, problemId);
+      const checker = this.normalizeChecker(this.normalizeJudgeMode(type), language, source,
+        protocol ?? (version.checker?.type === 'SPJ' ? version.checker.protocol || 'LEGACY' : undefined));
+      const latestProblem = await tx.problem.findUniqueOrThrow({ where: { id: problemId } });
+      const created = await this.publishVersion(tx, version, latestProblem, {
+        checker, ...this.modeChangeData(version, checker, latestProblem.status),
+      });
+      return { versionId: created.id, type: checker.type, language: checker.language, protocol: checker.protocol };
+    }, { timeout: 30000 });
   }
 
   async findAll(query: any) {
@@ -378,13 +358,6 @@ export class ProblemService {
       await this.problemAccess.assertCanManage(id, actor, 'PUBLISH');
     }
 
-    const currentVersion = await this.prisma.problemVersion.findFirst({
-      where: { problemId: id, isCurrent: true },
-      include: { checker: true },
-      orderBy: { version: 'desc' },
-    });
-    if (!currentVersion) throw new NotFoundException('题目版本不存在');
-
     if (dto.status !== undefined) dto.status = this.normalizeProblemStatus(dto.status);
     const problemData = this.pickDefined({
       title: dto.title,
@@ -405,36 +378,26 @@ export class ProblemService {
     });
     const wantsCheckerUpdate = dto.judgeMode !== undefined
       || dto.spjLanguage !== undefined
-      || dto.spjSourceCode !== undefined;
-    const checker = wantsCheckerUpdate
-      ? this.normalizeChecker(
-          dto.judgeMode !== undefined
-            ? this.normalizeJudgeMode(dto.judgeMode)
-            : (currentVersion.checker?.type === 'SPJ' ? 'SPJ' : 'STANDARD'),
-          dto.spjLanguage ?? currentVersion.checker?.language ?? undefined,
-          dto.spjSourceCode ?? currentVersion.checker?.sourceCode ?? undefined,
-        )
-      : null;
-
-    if (TEST_DATA_REQUIRED_STATUSES.has(dto.status)) {
-      const testCount = await this.prisma.problemTestCase.count({
-        where: { problemVersionId: currentVersion.id },
-      });
-      if (testCount === 0) throw new BadRequestException('发布题目前必须先上传测试数据');
-    }
+      || dto.spjSourceCode !== undefined || dto.spjProtocol !== undefined;
 
     return this.prisma.$transaction(async (tx) => {
-      if (Object.keys(versionData).length) {
-        await tx.problemVersion.update({
-          where: { id: currentVersion.id },
-          data: versionData,
-        });
+      const currentVersion = await this.lockCurrentVersion(tx, id);
+      const latestProblem = await tx.problem.findUniqueOrThrow({ where: { id } });
+      if (TEST_DATA_REQUIRED_STATUSES.has(dto.status) && currentVersion.testCases.length === 0) {
+        throw new BadRequestException('发布题目前必须先上传测试数据');
       }
-      if (checker) {
-        await tx.checker.upsert({
-          where: { problemVersionId: currentVersion.id },
-          create: { problemVersionId: currentVersion.id, ...checker },
-          update: checker,
+      const checker = wantsCheckerUpdate ? this.normalizeChecker(
+        dto.judgeMode !== undefined ? this.normalizeJudgeMode(dto.judgeMode) : (currentVersion.checker?.type === 'SPJ' ? 'SPJ' : 'STANDARD'),
+        dto.spjLanguage ?? currentVersion.checker?.language ?? undefined,
+        dto.spjSourceCode ?? currentVersion.checker?.sourceCode ?? undefined,
+        dto.spjProtocol ?? (currentVersion.checker?.type === 'SPJ' ? currentVersion.checker.protocol || 'LEGACY' : undefined),
+      ) : null;
+      if (Object.keys(versionData).length || checker || dto.timeLimit !== undefined || dto.memoryLimit !== undefined) {
+        await this.publishVersion(tx, currentVersion, latestProblem, {
+          ...versionData, ...(checker ? { checker } : {}),
+          ...this.modeChangeData(currentVersion, checker, dto.status ?? latestProblem.status),
+          timeLimit: dto.timeLimit ?? latestProblem.timeLimit,
+          memoryLimit: dto.memoryLimit ?? latestProblem.memoryLimit,
         });
       }
       if (Array.isArray(dto.tags)) {
@@ -450,7 +413,7 @@ export class ProblemService {
         where: { id },
         data: problemData,
       });
-    });
+    }, { timeout: 30000 });
   }
   async delete(id: string, actor: ProblemActor) {
     await this.problemAccess.assertCanManage(id, actor, 'DELETE');
@@ -518,23 +481,19 @@ export class ProblemService {
   async updateStatus(id: string, status: string, actor: ProblemActor) {
     const nextStatus = this.normalizeProblemStatus(status);
     await this.problemAccess.assertCanManage(id, actor, 'PUBLISH');
-    const problem = await this.prisma.problem.findUnique({
-      where: { id },
-      select: { id: true, source: true },
-    });
-    if (!problem) throw new NotFoundException('题目不存在');
-    if (TEST_DATA_REQUIRED_STATUSES.has(nextStatus) && problem.source === 'LOCAL') {
-      const version = await this.prisma.problemVersion.findFirst({
-        where: { problemId: id, isCurrent: true },
-        select: { id: true },
+    return this.prisma.$transaction(async (tx) => {
+      // Publication and data changes must serialize on the same key.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`problem-version:${id}`}, 0))`;
+      const problem = await tx.problem.findUnique({
+        where: { id }, select: { id: true, source: true },
       });
-      if (!version) throw new NotFoundException('题目版本不存在');
-      const testCount = await this.prisma.problemTestCase.count({
-        where: { problemVersionId: version.id },
-      });
-      if (testCount === 0) throw new BadRequestException('发布题目前必须先上传测试数据包');
-    }
-    return this.prisma.problem.update({ where: { id }, data: { status: nextStatus } });
+      if (!problem) throw new NotFoundException('题目不存在');
+      if (TEST_DATA_REQUIRED_STATUSES.has(nextStatus) && problem.source === 'LOCAL') {
+        const version = await this.lockCurrentVersion(tx, id);
+        if (version.testCases.length === 0) throw new BadRequestException('发布题目前必须先上传测试数据包');
+      }
+      return tx.problem.update({ where: { id }, data: { status: nextStatus } });
+    }, { timeout: 30000 });
   }
 
   private async findProblemDetail(id: string) {
@@ -579,25 +538,41 @@ export class ProblemService {
     return value === undefined ? undefined : sanitizeProblemContent(value);
   }
 
-  private async fillMissingSamplesFromFirstCase(
-    version: { id: string; sampleInput?: string | null; sampleOutput?: string | null },
-    cases: Array<{ input: string; expectedOutput: string }>,
-    judgeMode: JudgeMode,
-  ) {
-    const firstCase = cases[0];
-    if (!firstCase) return;
-
-    const data: { sampleInput?: string; sampleOutput?: string } = {};
-    if (!String(version.sampleInput || '').trim()) data.sampleInput = firstCase.input;
-    if (judgeMode === 'STANDARD' && !String(version.sampleOutput || '').trim()) {
-      data.sampleOutput = firstCase.expectedOutput;
-    }
-    if (Object.keys(data).length === 0) return;
-
-    await this.prisma.problemVersion.update({
-      where: { id: version.id },
-      data,
+  private async lockCurrentVersion(tx: Prisma.TransactionClient, problemId: string) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`problem-version:${problemId}`}, 0))`;
+    const version = await tx.problemVersion.findFirst({
+      where: { problemId, isCurrent: true }, orderBy: { version: 'desc' },
+      include: { checker: true, testCases: { orderBy: { order: 'asc' } }, testGroups: true },
     });
+    if (!version) throw new NotFoundException('题目版本不存在');
+    return version;
+  }
+
+  private modeChangeData(previous: any, checker: any, status: string) {
+    if (previous.checker?.type === 'SPJ' && checker?.type === 'STANDARD' && previous.testCases.length) {
+      if (status !== 'DRAFT') throw new BadRequestException('改为普通题前请先设为草稿，再重新上传包含输出文件的测试数据');
+      return { testCases: [], testGroups: [] };
+    }
+    return {};
+  }
+
+  private async publishVersion(tx: Prisma.TransactionClient, previous: any, problem: any, patch: any) {
+    const value = { ...previous, ...patch };
+    const checker = value.checker;
+    // Old rows and their test cases remain immutable for queued submissions/rejudges.
+    await tx.problemVersion.updateMany({ where: { problemId: problem.id, isCurrent: true }, data: { isCurrent: false } });
+    return tx.problemVersion.create({ data: {
+      problemId: problem.id, version: previous.version + 1, isCurrent: true,
+      description: value.description, inputFormat: value.inputFormat, outputFormat: value.outputFormat,
+      sampleInput: value.sampleInput, sampleOutput: value.sampleOutput, hint: value.hint, dataRange: value.dataRange,
+      timeLimit: patch.timeLimit ?? previous.timeLimit ?? problem.timeLimit,
+      memoryLimit: patch.memoryLimit ?? previous.memoryLimit ?? problem.memoryLimit,
+      ...(checker ? { checker: { create: {
+        type: checker.type, language: checker.language, sourceCode: checker.sourceCode, protocol: checker.protocol || 'LEGACY',
+      } } } : {}),
+      testCases: { create: value.testCases.map(({ input, expectedOutput, score, order, isSample }: any) => ({ input, expectedOutput, score, order, isSample })) },
+      testGroups: { create: value.testGroups.map(({ name, score, testCount, order }: any) => ({ name, score, testCount, order })) },
+    } });
   }
 
   private normalizeInlineTestCases(
@@ -625,16 +600,19 @@ export class ProblemService {
     });
   }
 
-  private normalizeChecker(judgeMode: JudgeMode, language?: string, sourceCode?: string) {
+  private normalizeChecker(judgeMode: JudgeMode, language?: string, sourceCode?: string, protocol?: string) {
     if (judgeMode === 'STANDARD') {
-      return { type: 'STANDARD', language: null, sourceCode: null };
+      return { type: 'STANDARD', language: null, sourceCode: null, protocol: 'BOOLEAN_STDOUT' };
     }
     const checkerLanguage = String(language || '').trim();
     const checkerSource = String(sourceCode || '').trim();
     if (!checkerLanguage || !checkerSource) {
       throw new BadRequestException('SPJ 题目必须录入评测代码和评测代码语言');
     }
-    return { type: 'SPJ', language: checkerLanguage, sourceCode: checkerSource };
+    if (!['cpp', 'c', 'python', 'java'].includes(checkerLanguage)) throw new BadRequestException('不支持的 SPJ 语言');
+    const checkerProtocol = protocol || 'BOOLEAN_STDOUT';
+    if (!['BOOLEAN_STDOUT', 'EXIT_CODE', 'LEGACY'].includes(checkerProtocol)) throw new BadRequestException('不支持的 SPJ 判定协议');
+    return { type: 'SPJ', language: checkerLanguage, sourceCode: checkerSource, protocol: checkerProtocol };
   }
 
   private parseTestDataZip(file: Express.Multer.File, judgeMode: JudgeMode) {

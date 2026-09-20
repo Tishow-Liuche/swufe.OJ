@@ -28,6 +28,7 @@ describe('ProblemService createFull with judge data', () => {
         groupBy: jest.fn(),
         count: jest.fn(),
         findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn((args: any) => prisma.problem.findUnique(args)),
         update: jest.fn(),
         delete: jest.fn(),
       },
@@ -35,7 +36,7 @@ describe('ProblemService createFull with judge data', () => {
         findFirst: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
-        create: jest.fn(),
+        create: jest.fn().mockResolvedValue({ id: 'new-version' }),
       },
       problemTestCase: {
         deleteMany: jest.fn(),
@@ -64,6 +65,7 @@ describe('ProblemService createFull with judge data', () => {
         upsert: jest.fn(),
         deleteMany: jest.fn(),
       },
+      $executeRaw: jest.fn(),
       $transaction: jest.fn(async (fn: any) => fn(prisma)),
     };
     access = {
@@ -207,11 +209,11 @@ describe('ProblemService createFull with judge data', () => {
 
   it('checks specific delegated actions before changing an existing problem', async () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'EXTERNAL', status: 'DRAFT' });
-    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', checker: { type: 'STANDARD' } });
+    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1, testCases: [], testGroups: [], checker: { type: 'STANDARD' } });
     prisma.problemTestCase.createMany.mockResolvedValue({ count: 1 });
 
     await service.uploadTestData('p1', zipFile({ '1.in': '1\n', '1.out': '1\n' }), actor);
-    await service.uploadChecker('p1', { originalname: 'main.cpp' } as Express.Multer.File, 'STANDARD', 'cpp', actor);
+    await service.uploadChecker('p1', { originalname: 'main.cpp', buffer: Buffer.from('int main(){}') } as Express.Multer.File, 'STANDARD', 'cpp', actor);
     await service.update('p1', {}, actor);
     await service.updateStatus('p1', 'PUBLISHED', actor);
     await service.delete('p1', actor);
@@ -225,7 +227,7 @@ describe('ProblemService createFull with judge data', () => {
 
   it('requires publication permission when a generic edit changes status', async () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'EXTERNAL', status: 'DRAFT' });
-    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', checker: { type: 'STANDARD' } });
+    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1, testCases: [{ input: '1', expectedOutput: '1' }], testGroups: [], checker: { type: 'STANDARD' } });
 
     await service.update('p1', { status: 'PUBLISHED' }, actor);
 
@@ -393,6 +395,7 @@ describe('ProblemService createFull with judge data', () => {
                 type: 'STANDARD',
                 language: null,
                 sourceCode: null,
+                protocol: 'BOOLEAN_STDOUT',
               },
             },
           }),
@@ -475,6 +478,7 @@ describe('ProblemService createFull with judge data', () => {
                 type: 'SPJ',
                 language: 'python',
                 sourceCode: 'print(input().strip() == "3")',
+                protocol: 'BOOLEAN_STDOUT',
               },
             },
           }),
@@ -487,6 +491,7 @@ describe('ProblemService createFull with judge data', () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p1' });
     prisma.problemVersion.findFirst.mockResolvedValue({
       id: 'v1',
+      version: 1, testCases: [], testGroups: [],
       checker: { type: 'STANDARD' },
     });
     prisma.problemTestCase.createMany.mockResolvedValue({ count: 2 });
@@ -498,13 +503,11 @@ describe('ProblemService createFull with judge data', () => {
       '2.ans': '7\n',
     }), actor);
 
-    expect(prisma.problemTestCase.deleteMany).toHaveBeenCalledWith({ where: { problemVersionId: 'v1' } });
-    expect(prisma.problemTestCase.createMany).toHaveBeenCalledWith({
-      data: [
-        { problemVersionId: 'v1', input: '1 2\n', expectedOutput: '3\n', score: 50, order: 1, isSample: false },
-        { problemVersionId: 'v1', input: '2 5\n', expectedOutput: '7\n', score: 50, order: 2, isSample: false },
-      ],
-    });
+    expect(prisma.problemTestCase.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.problemVersion.create.mock.calls[0][0].data.testCases.create).toEqual([
+      { input: '1 2\n', expectedOutput: '3\n', score: 50, order: 1, isSample: false },
+      { input: '2 5\n', expectedOutput: '7\n', score: 50, order: 2, isSample: false },
+    ]);
     expect(result.testCount).toBe(2);
   });
 
@@ -581,6 +584,7 @@ describe('ProblemService createFull with judge data', () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'LOCAL', createdById: 'teacher-1' });
     prisma.problemVersion.findFirst.mockResolvedValue({
       id: 'v1',
+      version: 1, testCases: [], testGroups: [],
       checker: { type: 'STANDARD', language: null, sourceCode: null },
     });
     prisma.problem.update.mockResolvedValue({ id: 'p1', title: 'New Title' });
@@ -614,9 +618,7 @@ describe('ProblemService createFull with judge data', () => {
         outputLimit: 128,
       },
     });
-    expect(prisma.problemVersion.update).toHaveBeenCalledWith({
-      where: { id: 'v1' },
-      data: {
+    expect(prisma.problemVersion.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
         description: 'new statement',
         inputFormat: 'input',
         outputFormat: 'output',
@@ -624,8 +626,7 @@ describe('ProblemService createFull with judge data', () => {
         sampleOutput: '3\n',
         hint: 'hint',
         dataRange: 'n &lt;= 10',
-      },
-    });
+    }));
     expect(prisma.problemTag.deleteMany).toHaveBeenCalledWith({ where: { problemId: 'p1' } });
     expect(prisma.problemTag.createMany).toHaveBeenCalledWith({
       data: [
@@ -633,19 +634,12 @@ describe('ProblemService createFull with judge data', () => {
         { problemId: 'p1', name: 'prefix', type: 'TAG' },
       ],
     });
-    expect(prisma.checker.upsert).toHaveBeenCalledWith({
-      where: { problemVersionId: 'v1' },
-      create: {
-        problemVersionId: 'v1',
+    expect(prisma.checker.upsert).not.toHaveBeenCalled();
+    expect(prisma.problemVersion.create.mock.calls[0][0].data.checker.create).toEqual({
         type: 'SPJ',
         language: 'python',
         sourceCode: 'print(True)',
-      },
-      update: {
-        type: 'SPJ',
-        language: 'python',
-        sourceCode: 'print(True)',
-      },
+        protocol: 'BOOLEAN_STDOUT',
     });
   });
 
@@ -653,6 +647,7 @@ describe('ProblemService createFull with judge data', () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p7', source: 'LOCAL', createdById: 'teacher-1' });
     prisma.problemVersion.findFirst.mockResolvedValue({
       id: 'v7',
+      version: 1, testCases: [], testGroups: [],
       checker: { type: 'STANDARD' },
     });
     prisma.problemTestCase.count.mockResolvedValue(0);
@@ -667,6 +662,7 @@ describe('ProblemService createFull with judge data', () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p1' });
     prisma.problemVersion.findFirst.mockResolvedValue({
       id: 'v1',
+      version: 1, testCases: [], testGroups: [],
       sampleInput: null,
       sampleOutput: '',
       checker: { type: 'STANDARD' },
@@ -680,19 +676,17 @@ describe('ProblemService createFull with judge data', () => {
       '2.out': '7\n',
     }), actor);
 
-    expect(prisma.problemVersion.update).toHaveBeenCalledWith({
-      where: { id: 'v1' },
-      data: {
+    expect(prisma.problemVersion.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
         sampleInput: '1 2\n',
         sampleOutput: '3\n',
-      },
-    });
+    }));
   });
 
   it('imports SPJ zip files from numbered .in files without output files', async () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p2' });
     prisma.problemVersion.findFirst.mockResolvedValue({
       id: 'v2',
+      version: 1, testCases: [], testGroups: [],
       checker: { type: 'SPJ' },
     });
     prisma.problemTestCase.createMany.mockResolvedValue({ count: 2 });
@@ -702,12 +696,10 @@ describe('ProblemService createFull with judge data', () => {
       '2.in': 'world\n',
     }), actor);
 
-    expect(prisma.problemTestCase.createMany).toHaveBeenCalledWith({
-      data: [
-        { problemVersionId: 'v2', input: 'hello\n', expectedOutput: '', score: 50, order: 1, isSample: false },
-        { problemVersionId: 'v2', input: 'world\n', expectedOutput: '', score: 50, order: 2, isSample: false },
-      ],
-    });
+    expect(prisma.problemVersion.create.mock.calls[0][0].data.testCases.create).toEqual([
+      { input: 'hello\n', expectedOutput: '', score: 50, order: 1, isSample: false },
+      { input: 'world\n', expectedOutput: '', score: 50, order: 2, isSample: false },
+    ]);
   });
 
   it('rejects standard zip files when an input file has no matching output file', async () => {
@@ -735,7 +727,7 @@ describe('ProblemService createFull with judge data', () => {
 
   it('prevents publishing local problems before test data is imported', async () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p4', source: 'LOCAL' });
-    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v4' });
+    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v4', testCases: [] });
     prisma.problemTestCase.count.mockResolvedValue(0);
 
     await expect(service.updateStatus('p4', 'PUBLISHED', actor)).rejects.toBeInstanceOf(BadRequestException);
@@ -743,7 +735,7 @@ describe('ProblemService createFull with judge data', () => {
 
   it('prevents moving local problems into contest reserved before test data is imported', async () => {
     prisma.problem.findUnique.mockResolvedValue({ id: 'p4', source: 'LOCAL', status: 'DRAFT' });
-    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v4' });
+    prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v4', testCases: [] });
     prisma.problemTestCase.count.mockResolvedValue(0);
 
     await expect(service.updateStatus('p4', 'CONTEST_RESERVED', actor)).rejects.toBeInstanceOf(BadRequestException);

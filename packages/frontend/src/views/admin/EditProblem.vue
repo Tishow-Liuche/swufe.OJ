@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import api from '../../api/client';
 import { renderMarkdownWithMath } from '../../utils/markdown';
 import { pointDifficultyOptions } from '../../utils/pointDifficulty';
+import SpjProtocolSelect from '../../components/SpjProtocolSelect.vue';
 
 type JudgeMode = 'STANDARD' | 'SPJ';
 
@@ -38,6 +39,7 @@ const form = reactive({
   judgeMode: 'STANDARD' as JudgeMode,
   spjLanguage: 'python',
   spjSourceCode: '',
+  spjProtocol: 'BOOLEAN_STDOUT',
 });
 
 const difficulties = [
@@ -129,6 +131,7 @@ async function loadProblem() {
     form.judgeMode = checker.type === 'SPJ' ? 'SPJ' : 'STANDARD';
     form.spjLanguage = checker.language || 'python';
     form.spjSourceCode = checker.sourceCode || '';
+    form.spjProtocol = checker.type === 'SPJ' ? checker.protocol || 'LEGACY' : 'BOOLEAN_STDOUT';
     existingTestCount.value = version.testCases?.length || 0;
   } catch (e: any) {
     error.value = e.response?.data?.message || '加载题目失败';
@@ -163,6 +166,7 @@ async function saveProblem() {
       judgeMode: form.judgeMode,
       spjLanguage: form.judgeMode === 'SPJ' ? form.spjLanguage : undefined,
       spjSourceCode: form.judgeMode === 'SPJ' ? form.spjSourceCode : undefined,
+      spjProtocol: form.judgeMode === 'SPJ' ? form.spjProtocol : undefined,
       status: targetStatus === 'DRAFT' ? 'DRAFT' : undefined,
     });
 
@@ -254,6 +258,7 @@ onMounted(loadProblem);
 
       <div v-if="form.judgeMode === 'SPJ'" class="card">
         <h3>SPJ 评测代码</h3>
+        <SpjProtocolSelect v-model="form.spjProtocol" legacy-available />
         <label>语言
           <select v-model="form.spjLanguage">
             <option v-for="lang in languages" :key="lang.value" :value="lang.value">{{ lang.label }}</option>

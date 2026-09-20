@@ -12,7 +12,7 @@ describe('JudgeProcessor local test data judging', () => {
     storedCases = [];
     prisma = {
       problemVersion: { findFirst: jest.fn() },
-      submission: { update: jest.fn() },
+      submission: { update: jest.fn(), findUnique: jest.fn().mockResolvedValue({ problemId: 'p1', problemVersionId: 'v-original' }) },
       submissionCase: {
         createMany: jest.fn(async ({ data }) => { storedCases.push(...data); }),
         deleteMany: jest.fn(async ({ where }) => {
@@ -73,6 +73,87 @@ describe('JudgeProcessor local test data judging', () => {
         status: 'ACCEPTED', timeUsed: 1, memoryUsed: 64, output: 'true',
       });
     }
+
+    it('loads the stored snapshot, including its original limits', async () => {
+      prepare('STANDARD', ['ACCEPTED']);
+      const version = await prisma.problemVersion.findFirst();
+      version.timeLimit = 4200;
+      version.memoryLimit = 512;
+      prisma.problemVersion.findFirst.mockClear();
+      await processor.process(job);
+      expect(prisma.problemVersion.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'v-original', problemId: 'p1' } }));
+      expect(judge.run).toHaveBeenCalledWith('cpp', 'input-0', 4200, 512, 'program', 'code');
+    });
+
+    it('fails closed when a stored snapshot is missing', async () => {
+      prisma.problemVersion.findFirst.mockResolvedValue(null);
+      expect(await processor.process(job)).toEqual({ status: 'SYSTEM_ERROR' });
+      expect(prisma.problemVersion.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'v-original', problemId: 'p1' } }));
+      expect(judge.compile).not.toHaveBeenCalled();
+    });
+
+    it('allows explicit historical null snapshot fallback only', async () => {
+      prepare('STANDARD', ['ACCEPTED']);
+      prisma.submission.findUnique.mockResolvedValue({ problemId: 'p1', problemVersionId: null });
+      await processor.process(job);
+      expect(prisma.problemVersion.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { problemId: 'p1', isCurrent: true } }));
+    });
+
+    it('records compiler infrastructure failure as SYSTEM_ERROR and zero score', async () => {
+      prepare('STANDARD', ['ACCEPTED']);
+      judge.compile.mockReset().mockResolvedValue({ success: false, systemError: true, message: 'sandbox HTTP 503' });
+      expect(await processor.process(job)).toEqual({ status: 'SYSTEM_ERROR' });
+      expect(prisma.submission.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SYSTEM_ERROR', score: 0 }) }));
+    });
+
+    it.each(['TIME_LIMIT_EXCEEDED', 'RUNTIME_ERROR', 'SYSTEM_ERROR', 'MEMORY_LIMIT_EXCEEDED'])('stops and zeroes the whole judgement for checker %s', async (status) => {
+      prepare('SPJ', ['ACCEPTED', 'ACCEPTED', 'ACCEPTED']);
+      judge.runWithFiles.mockReset()
+        .mockResolvedValueOnce({ status: 'ACCEPTED', exitStatus: 0, output: 'true' })
+        .mockResolvedValueOnce({ status, exitStatus: 7, stderr: 'checker fault detail', output: '' });
+      expect(await processor.process(job)).toEqual({ status: 'SYSTEM_ERROR', score: 0 });
+      expect(judge.run).toHaveBeenCalledTimes(2);
+      expect(storedCases.map((row) => row.status)).toEqual(['ACCEPTED', 'SYSTEM_ERROR']);
+      expect(prisma.submission.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ compileMessage: expect.stringContaining('checker fault detail') }) }));
+    });
+
+    it.each([
+      ['BOOLEAN_STDOUT', '', 0, 'ACCEPTED', 'SYSTEM_ERROR'],
+      ['BOOLEAN_STDOUT', 'nonsense', 0, 'ACCEPTED', 'SYSTEM_ERROR'],
+      ['BOOLEAN_STDOUT', 'true', 0, 'ACCEPTED', 'ACCEPTED'],
+      ['BOOLEAN_STDOUT', 'false', 0, 'ACCEPTED', 'WRONG_ANSWER'],
+      ['BOOLEAN_STDOUT', 'false', 1, 'RUNTIME_ERROR', 'SYSTEM_ERROR'],
+      ['EXIT_CODE', '', 0, 'ACCEPTED', 'ACCEPTED'],
+      ['EXIT_CODE', 'true', 1, 'RUNTIME_ERROR', 'WRONG_ANSWER'],
+      ['EXIT_CODE', '', 2, 'RUNTIME_ERROR', 'WRONG_ANSWER'],
+      ['EXIT_CODE', '', 3, 'RUNTIME_ERROR', 'SYSTEM_ERROR'],
+      ['LEGACY', '', 0, 'ACCEPTED', 'ACCEPTED'],
+      ['LEGACY', 'false', 0, 'ACCEPTED', 'WRONG_ANSWER'],
+    ])('honors checker protocol %s output %s exit %s', async (protocol, output, exitStatus, status, expected) => {
+      prepare('SPJ', ['ACCEPTED']);
+      const version = await prisma.problemVersion.findFirst();
+      version.checker.protocol = protocol;
+      judge.runWithFiles.mockResolvedValue({ status, output, exitStatus, sandboxStatus: status === 'RUNTIME_ERROR' ? 'Nonzero Exit Status' : 'Accepted' });
+      expect((await processor.process(job)).status).toBe(expected);
+    });
+
+    it('does not treat a signal with exit one as an explicit wrong verdict', async () => {
+      prepare('SPJ', ['ACCEPTED']);
+      judge.runWithFiles.mockResolvedValue({ status: 'RUNTIME_ERROR', output: '', exitStatus: 1, signal: 11, sandboxStatus: 'Signalled' });
+      expect((await processor.process(job)).status).toBe('SYSTEM_ERROR');
+    });
+
+    it('gives the checker independent minimum resource limits', async () => {
+      prepare('SPJ', ['ACCEPTED']);
+      await processor.process({ ...job, data: { ...job.data, timeLimit: 10, memoryLimit: 8 } });
+      expect(judge.runWithFiles).toHaveBeenCalledWith('cpp', 'ok', 2000, 256, 'checker', 'checker code', expect.any(Object));
+    });
+
+    it('lets a system fault override an earlier wrong answer', async () => {
+      prepare('STANDARD', ['WRONG_ANSWER', 'SYSTEM_ERROR', 'ACCEPTED']);
+      expect(await processor.process(job)).toEqual({ status: 'SYSTEM_ERROR', score: 0 });
+      expect(judge.run).toHaveBeenCalledTimes(2);
+    });
 
     it.each(['STANDARD', 'SPJ'])('stops %s after a timed-out case while retaining the full score denominator', async (type) => {
       prepare(type, ['ACCEPTED', 'TIME_LIMIT_EXCEEDED', 'ACCEPTED']);
@@ -358,7 +439,7 @@ describe('JudgeProcessor local test data judging', () => {
     expect(judge.runWithFiles).toHaveBeenCalledWith(
       'python',
       '3\n',
-      1000,
+      2000,
       256,
       'checker',
       'import sys; print(sys.stdin.read().strip() == "3")',
@@ -406,7 +487,7 @@ describe('JudgeProcessor local test data judging', () => {
     expect(judge.runWithFiles).toHaveBeenCalledWith(
       'cpp',
       '3\n',
-      1000,
+      2000,
       256,
       'checker',
       'classic checker',

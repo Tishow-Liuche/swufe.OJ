@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import api from '../../api/client';
 import { renderMarkdownWithMath } from '../../utils/markdown';
 import { pointDifficultyOptions } from '../../utils/pointDifficulty';
+import SpjProtocolSelect from '../../components/SpjProtocolSelect.vue';
 
 type JudgeMode = 'STANDARD' | 'SPJ';
 
@@ -25,7 +26,18 @@ const form = reactive({
   status: 'DRAFT',
   judgeMode: 'STANDARD' as JudgeMode,
   spjLanguage: 'python',
-  spjSourceCode: 'import sys\nfrom pathlib import Path\n\n# 平台兼容两种 SPJ 协议：\n# 1. stdin 是用户程序输出；输出 true / 1 / ac 表示通过\n# 2. 当前目录存在 input、output、user_output 文件；退出码 0 表示通过，非 0 表示 WA\nuser_output = Path("user_output").read_text(encoding="utf-8") if Path("user_output").exists() else sys.stdin.read()\ninput_data = Path("input").read_text(encoding="utf-8") if Path("input").exists() else ""\n\nprint(user_output.strip() == "答案")\n',
+  spjProtocol: 'BOOLEAN_STDOUT',
+  spjSourceCode: 'import sys\nfrom pathlib import Path\n\n# 布尔输出协议：必须完整检查所有数据后输出一次 True 或 False。\n# 请将下方比较替换为本题的完整检查逻辑。\nuser_output = sys.stdin.read()\ninput_data = Path("input").read_text(encoding="utf-8")\n\nprint(user_output.strip() == "答案")\n',
+});
+
+const booleanStarter = form.spjSourceCode;
+const exitCodeStarter = booleanStarter
+  .replace('布尔输出协议：必须完整检查所有数据后输出一次 True 或 False。', '退出码协议：必须完整检查所有数据后以 0（正确）或 1（错误）退出。')
+  .replace('print(user_output.strip() == "答案")', 'sys.exit(0 if user_output.strip() == "答案" else 1)');
+watch(() => form.spjProtocol, (protocol) => {
+  if (form.spjLanguage === 'python' && [booleanStarter, exitCodeStarter].includes(form.spjSourceCode)) {
+    form.spjSourceCode = protocol === 'EXIT_CODE' ? exitCodeStarter : booleanStarter;
+  }
 });
 
 const testDataFile = ref<File | null>(null);
@@ -257,9 +269,7 @@ function insertImageIntoSample(markdown: string) {
 
     <div v-if="form.judgeMode === 'SPJ'" class="card">
       <h3>SPJ 评测代码</h3>
-      <p class="hint">
-        评测代码从标准输入读取用户程序输出；输出 true / 1 / yes / AC / accepted / correct 表示通过，其它输出表示 WA。
-      </p>
+      <SpjProtocolSelect v-model="form.spjProtocol" />
       <div class="form-group">
         <label>评测代码语言</label>
         <select v-model="form.spjLanguage">

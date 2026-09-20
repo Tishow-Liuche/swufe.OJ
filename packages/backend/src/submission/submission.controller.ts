@@ -3,6 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { SubmissionService } from './submission.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { contestantSubmission } from './submission-privacy';
 
 @Controller('api/submissions')
 export class SubmissionController {
@@ -44,12 +45,7 @@ export class SubmissionController {
     if (!isOwner && !isTeacherOrAdmin) {
       throw new ForbiddenException('无权查看此提交');
     }
-    if (!isTeacherOrAdmin && (sub as any).cases) {
-      (sub as any).cases = (sub as any).cases.map((c: any) => ({
-        caseIndex: c.caseIndex, status: c.status, timeUsed: c.timeUsed, memoryUsed: c.memoryUsed,
-      }));
-    }
-    return sub;
+    return isTeacherOrAdmin ? sub : contestantSubmission(sub);
   }
 
   /** 重判（教师/管理员） */

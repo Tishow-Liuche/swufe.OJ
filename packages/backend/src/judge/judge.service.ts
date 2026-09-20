@@ -11,6 +11,7 @@ interface GoJudgeRequest {
       max?: number;
     }>;
     cpuLimit?: number;
+    clockLimit?: number;
     memoryLimit?: number;
     procLimit?: number;
     copyIn?: Record<string, { content: string } | { fileId: string }>;
@@ -22,6 +23,8 @@ interface GoJudgeRequest {
 interface GoJudgeResult {
   status: string;
   exitStatus: number;
+  signal?: number | string;
+  error?: string;
   time: number;       // ns
   memory: number;     // bytes
   runTime: number;    // ns
@@ -30,17 +33,23 @@ interface GoJudgeResult {
   fileError?: Array<{ name: string; message: string }>;
 }
 
-interface CompileResult {
+export interface CompileResult {
   success: boolean;
   fileId?: string;
   message: string;
+  systemError?: boolean;
 }
 
-interface RunResult {
+export interface RunResult {
   status: string;
   timeUsed: number;    // ms
   memoryUsed: number;  // KB
   output: string;
+  exitStatus?: number;
+  signal?: number | string;
+  error?: string;
+  stderr?: string;
+  sandboxStatus?: string;
 }
 
 interface LanguageConfig {
@@ -121,6 +130,7 @@ export class JudgeService {
           { name: 'stderr', max: 10240 },
         ],
         cpuLimit: 10_000_000_000,    // 10s
+        clockLimit: 30_000_000_000,
         memoryLimit: 536_870_912,    // 512MB
         procLimit: 50,
         copyIn: { [sourceFile]: { content: code } },
@@ -130,26 +140,24 @@ export class JudgeService {
     };
 
     try {
-      const res = await fetch(`${this.baseUrl}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      const results: GoJudgeResult[] = await res.json();
-      const result = results[0];
+      const result = await this.requestRun(request, 35_000);
 
       if (result.status === 'Accepted') {
         const fileId = result.fileIds?.[artifactFile];
+        if (result.exitStatus !== 0 || result.signal || result.error || !fileId?.trim() || result.fileError?.length) {
+          return { success: false, systemError: true, fileId, message: 'Compile system error: invalid successful compilation or missing artifact' };
+        }
         return { success: true, fileId, message: '' };
       }
 
       // Compilation failed
       const stderr = result.files?.['stderr'] || '';
       const stdout = result.files?.['stdout'] || '';
-      return { success: false, message: `${stdout}\n${stderr}`.trim() };
+      const systemError = Boolean(result.error || result.signal) || !['Nonzero Exit Status', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Output Limit Exceeded'].includes(result.status);
+      return { success: false, ...(systemError ? { systemError: true } : {}), message: `${stdout}\n${stderr}\n${result.error || ''}`.trim() || `Compilation: ${result.status}` };
     } catch (error: any) {
       this.logger.error(`Compile error: ${error.message}`);
-      return { success: false, message: `Compile system error: ${error.message}` };
+      return { success: false, systemError: true, message: `Compile system error: ${error.message}` };
     }
   }
 
@@ -184,10 +192,15 @@ export class JudgeService {
   ): Promise<RunResult> {
     const langConfig = LANGUAGE_CONFIG[language];
     if (!langConfig) {
-      return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: 'Unsupported language' };
+      return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: '', error: 'Unsupported language' };
     }
 
+    if (!Number.isFinite(timeLimitMs) || timeLimitMs <= 0 || timeLimitMs > 300_000
+      || !Number.isFinite(memoryLimitMb) || memoryLimitMb <= 0) {
+      return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: '', error: 'Invalid sandbox resource limits' };
+    }
     const cpuLimit = timeLimitMs * 1_000_000;
+    const clockLimit = Math.min(300_000, Math.max(2000, timeLimitMs * 3)) * 1_000_000;
     const memoryLimit = memoryLimitMb * 1024 * 1024;
 
     const copyIn: Record<string, { content: string } | { fileId: string }> = {};
@@ -201,7 +214,7 @@ export class JudgeService {
 
     for (const [name, content] of Object.entries(files)) {
       if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
-        return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: `Invalid SPJ file name: ${name}` };
+        return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: '', error: `Invalid SPJ file name: ${name}` };
       }
       copyIn[name] = { content: content ?? '' };
     }
@@ -216,6 +229,7 @@ export class JudgeService {
           { name: 'stderr', max: 10_240 },
         ],
         cpuLimit,
+        clockLimit,
         memoryLimit,
         procLimit: 50,
         copyIn,
@@ -224,15 +238,10 @@ export class JudgeService {
     };
 
     try {
-      const res = await fetch(`${this.baseUrl}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      const results: GoJudgeResult[] = await res.json();
-      const result = results[0];
+      const result = await this.requestRun(request, clockLimit / 1_000_000 + 5000);
 
-      const status = STATUS_MAP[result.status] || 'RUNTIME_ERROR';
+      const status = result.fileError?.length || (result.status === 'Accepted' && (result.error || result.signal))
+        ? 'SYSTEM_ERROR' : STATUS_MAP[result.status] || 'SYSTEM_ERROR';
       const timeUsed = Math.round(result.time / 1_000_000);   // ns → ms
       const memoryUsed = Math.round(result.memory / 1024);     // bytes → KB
 
@@ -241,6 +250,11 @@ export class JudgeService {
         timeUsed,
         memoryUsed,
         output: result.files?.['stdout'] || '',
+        exitStatus: result.exitStatus,
+        signal: result.signal,
+        error: result.error || result.fileError?.map((entry) => `${entry.name}: ${entry.message}`).join('; '),
+        stderr: result.files?.['stderr'] || '',
+        sandboxStatus: result.status,
       };
     } catch (error: any) {
       this.logger.error(`Run error: ${error.message}`);
@@ -248,15 +262,43 @@ export class JudgeService {
         status: 'SYSTEM_ERROR',
         timeUsed: 0,
         memoryUsed: 0,
-        output: error.message,
+        output: '',
+        error: error.message,
       };
     }
+  }
+
+  private async requestRun(request: GoJudgeRequest, deadlineMs: number): Promise<GoJudgeResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), deadlineMs);
+    try {
+      const response = await fetch(`${this.baseUrl}/run`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request), signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Sandbox HTTP ${response.status}`);
+      const body: unknown = await response.json();
+      const result = Array.isArray(body) && body.length === 1 ? body[0] : null;
+      const stringMap = (value: unknown) => value === undefined || (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every((v) => typeof v === 'string'));
+      if (!result || typeof result.status !== 'string' || !Object.prototype.hasOwnProperty.call(STATUS_MAP, result.status)
+        || !Number.isInteger(result.exitStatus)
+        || !Number.isFinite(result.time) || result.time < 0
+        || !Number.isFinite(result.memory) || result.memory < 0
+        || !stringMap(result.files) || !stringMap(result.fileIds)
+        || (result.status === 'Accepted' && (typeof result.files?.stdout !== 'string' || typeof result.files?.stderr !== 'string'))
+        || (result.fileError !== undefined && (!Array.isArray(result.fileError) || result.fileError.some((entry) => !entry || typeof entry.name !== 'string' || typeof entry.message !== 'string')))
+        || (result.error !== undefined && typeof result.error !== 'string')
+        || (result.signal !== undefined && typeof result.signal !== 'string' && typeof result.signal !== 'number')) {
+        throw new Error('Malformed sandbox response');
+      }
+      return result;
+    } finally { clearTimeout(timer); }
   }
 
   /** Clean up cached file */
   async deleteFile(fileId: string): Promise<void> {
     try {
-      const res = await fetch(`${this.baseUrl}/file/${fileId}`, { method: 'DELETE' });
+      const res = await fetch(`${this.baseUrl}/file/${encodeURIComponent(fileId)}`, { method: 'DELETE', signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
         this.logger.warn(`Failed to delete go-judge file: ${fileId}`);
       }

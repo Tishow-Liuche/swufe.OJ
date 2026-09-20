@@ -37,7 +37,7 @@ describe('ProblemController mutation actor propagation', () => {
 
     expect(problem.createFull).toHaveBeenCalledWith(expect.anything(), actor);
     expect(problem.uploadTestData).toHaveBeenCalledWith('p1', file, actor);
-    expect(problem.uploadChecker).toHaveBeenCalledWith('p1', file, 'STANDARD', 'cpp', actor);
+    expect(problem.uploadChecker).toHaveBeenCalledWith('p1', file, 'STANDARD', 'cpp', actor, undefined);
     expect(problem.update).toHaveBeenCalledWith('p1', expect.anything(), actor);
     expect(problem.updateStatus).toHaveBeenCalledWith('p1', 'PUBLISHED', actor);
     expect(problem.delete).toHaveBeenCalledWith('p1', actor);

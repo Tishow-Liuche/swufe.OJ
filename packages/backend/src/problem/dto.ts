@@ -107,6 +107,10 @@ export class CreateProblemDto {
   spjSourceCode?: string;
 
   @IsOptional()
+  @IsIn(['BOOLEAN_STDOUT', 'EXIT_CODE', 'LEGACY'])
+  spjProtocol?: string;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ProblemTestCaseDto)
@@ -128,10 +132,14 @@ export class UpdateProblemDto {
 
   @IsOptional()
   @IsInt()
+  @Min(100)
+  @Max(60000)
   timeLimit?: number;
 
   @IsOptional()
   @IsInt()
+  @Min(16)
+  @Max(4096)
   memoryLimit?: number;
 
   @IsOptional()
@@ -177,6 +185,10 @@ export class UpdateProblemDto {
   @IsOptional()
   @IsString()
   spjSourceCode?: string;
+
+  @IsOptional()
+  @IsIn(['BOOLEAN_STDOUT', 'EXIT_CODE', 'LEGACY'])
+  spjProtocol?: string;
 
   @IsOptional()
   @IsString()

@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { JudgeService } from '../judge/judge.service';
+import { JudgeService, CompileResult, RunResult } from '../judge/judge.service';
 import { LearningService } from '../learning/learning.service';
 import { AssignmentProgressService } from '../teacher/assignment-progress.service';
 import { ContestCacheService } from '../contest/contest-cache.service';
@@ -16,19 +16,6 @@ interface JudgeJob {
   sourceCode: string;
   timeLimit: number;
   memoryLimit: number;
-}
-
-interface CompileResult {
-  success: boolean;
-  fileId?: string;
-  message: string;
-}
-
-interface RunResult {
-  status: string;
-  timeUsed: number;
-  memoryUsed: number;
-  output: string;
 }
 
 interface ProblemTestCaseForJudge {
@@ -104,8 +91,19 @@ export class JudgeProcessor extends WorkerHost {
       if (job.attemptsMade > 0 || job.attemptsStarted > 1) {
         await this.prisma.submissionCase.deleteMany({ where: { submissionId: data.submissionId } });
       }
+      const submission = await this.prisma.submission.findUnique({
+        where: { id: data.submissionId },
+        select: { problemId: true, problemVersionId: true },
+      });
+      if (!submission || submission.problemId !== data.problemId || submission.problemVersionId === undefined) {
+        await this.failSubmission(data.submissionId, 'SYSTEM_ERROR', 'Submission snapshot identity is missing or mismatched');
+        return { status: 'SYSTEM_ERROR' };
+      }
+      if (submission.problemVersionId === null) this.logger.warn(`Legacy submission ${data.submissionId} has no snapshot; using current version`);
       const version = await this.prisma.problemVersion.findFirst({
-        where: { problemId: data.problemId, isCurrent: true },
+        where: submission.problemVersionId === null
+          ? { problemId: data.problemId, isCurrent: true }
+          : { id: submission.problemVersionId, problemId: data.problemId },
         include: { testCases: { orderBy: { order: 'asc' } }, checker: true },
       });
       if (!version || version.testCases.length === 0) {
@@ -117,41 +115,37 @@ export class JudgeProcessor extends WorkerHost {
         where: { id: data.submissionId },
         data: { status: 'COMPILING' },
       });
+      const limits = { ...data, timeLimit: version.timeLimit ?? data.timeLimit, memoryLimit: version.memoryLimit ?? data.memoryLimit };
       const compileResult = await this.judge.compile(data.language, data.sourceCode);
       if (compileResult.fileId) artifacts.add(compileResult.fileId);
       if (!compileResult.success) {
+        const status = compileResult.systemError ? 'SYSTEM_ERROR' : 'COMPILE_ERROR';
         await this.prisma.submission.update({
           where: { id: data.submissionId },
           data: {
-            status: 'COMPILE_ERROR',
+            status,
+            score: 0,
               compileMessage: this.truncateOutput(compileResult.message),
             judgedAt: new Date(),
           },
         });
         await this.finishTask(data.submissionId);
-        await this.learning.recordSubmissionResult(data.submissionId, 'COMPILE_ERROR');
-        return { status: 'COMPILE_ERROR' };
+        await this.learning.recordSubmissionResult(data.submissionId, status);
+        return { status };
       }
 
       const checker = version.checker;
       const useSpj = checker?.type === 'SPJ';
       let checkerCompileResult: CompileResult | null = null;
       if (useSpj) {
+        if (!checker.protocol || checker.protocol === 'LEGACY') this.logger.warn(`Submission ${data.submissionId} uses LEGACY SPJ protocol`);
         checkerCompileResult = await this.judge.compile(
           checker.language || 'python',
           checker.sourceCode || '',
         );
         if (checkerCompileResult.fileId) artifacts.add(checkerCompileResult.fileId);
         if (!checkerCompileResult.success) {
-          await this.prisma.submission.update({
-            where: { id: data.submissionId },
-            data: {
-              status: 'SYSTEM_ERROR',
-              compileMessage: `SPJ 编译失败：${checkerCompileResult.message}`,
-              judgedAt: new Date(),
-            },
-          });
-          await this.finishTask(data.submissionId);
+          await this.failSubmission(data.submissionId, 'SYSTEM_ERROR', `SPJ compilation failed: ${checkerCompileResult.message}`);
           return { status: 'SYSTEM_ERROR' };
         }
       }
@@ -165,13 +159,14 @@ export class JudgeProcessor extends WorkerHost {
       let maxTime = 0;
       let maxMemory = 0;
       let totalScore = 0;
+      let systemMessage: string | undefined;
 
       for (const tc of version.testCases) {
         const result = await this.judge.run(
           data.language,
           tc.input,
-          data.timeLimit,
-          data.memoryLimit,
+          limits.timeLimit,
+          limits.memoryLimit,
           compileResult.fileId,
           data.sourceCode,
         );
@@ -181,11 +176,17 @@ export class JudgeProcessor extends WorkerHost {
 
         let caseStatus = result.status;
         if (caseStatus === 'ACCEPTED') {
-          caseStatus = useSpj && checkerCompileResult
-            ? await this.judgeWithSpj(checker, checkerCompileResult, result.output, tc, data)
-            : this.compareOutput(result.output, tc.expectedOutput)
+          if (useSpj && checkerCompileResult) {
+            const verdict = await this.judgeWithSpj(checker, checkerCompileResult, result.output, tc, limits);
+            caseStatus = verdict.status;
+            systemMessage = verdict.message;
+          } else caseStatus = this.compareOutput(result.output, tc.expectedOutput)
               ? 'ACCEPTED'
               : 'WRONG_ANSWER';
+        }
+        if (caseStatus === 'SYSTEM_ERROR') {
+          finalStatus = 'SYSTEM_ERROR';
+          systemMessage ||= `Sandbox system error: ${result.error || result.stderr || result.sandboxStatus || result.output || 'unknown failure'}`;
         }
 
         pendingCases.push({
@@ -204,12 +205,12 @@ export class JudgeProcessor extends WorkerHost {
         if (!hasFlushedCases || pendingCases.length >= 10 || Date.now() - lastCaseFlush >= 1000
           || caseStatus === 'TIME_LIMIT_EXCEEDED') await flushCases();
         // Persist the timeout before stopping; unrun cases earn no score.
-        if (caseStatus === 'TIME_LIMIT_EXCEEDED') break;
+        if (caseStatus === 'TIME_LIMIT_EXCEEDED' || caseStatus === 'SYSTEM_ERROR') break;
       }
       await flushCases();
 
       const totalPossible = version.testCases.reduce((sum, tc) => sum + tc.score, 0);
-      const finalScore = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+      const finalScore = finalStatus !== 'SYSTEM_ERROR' && totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
 
       const judgedAt = new Date();
       await this.prisma.submission.update({
@@ -219,6 +220,7 @@ export class JudgeProcessor extends WorkerHost {
           score: finalScore,
           timeUsed: maxTime,
           memoryUsed: maxMemory,
+          compileMessage: systemMessage ? this.truncateOutput(systemMessage) : null,
           judgedAt,
         },
       });
@@ -254,7 +256,7 @@ export class JudgeProcessor extends WorkerHost {
   }
 
   private async judgeWithSpj(
-    checker: { language?: string | null; sourceCode?: string | null },
+    checker: { language?: string | null; sourceCode?: string | null; protocol?: string | null },
     checkerCompileResult: CompileResult,
     userOutput: string,
     testCase: ProblemTestCaseForJudge,
@@ -263,8 +265,8 @@ export class JudgeProcessor extends WorkerHost {
     const checkerResult: RunResult = await this.judge.runWithFiles(
       checker.language || 'python',
       userOutput,
-      data.timeLimit,
-      data.memoryLimit,
+      Math.min(30_000, Math.max(2000, data.timeLimit)),
+      Math.min(1024, Math.max(256, data.memoryLimit)),
       checkerCompileResult.fileId,
       checker.sourceCode || '',
       {
@@ -273,7 +275,13 @@ export class JudgeProcessor extends WorkerHost {
         user_output: userOutput,
       },
     );
-    return this.checkerAccepted(checkerResult) ? 'ACCEPTED' : 'WRONG_ANSWER';
+    const status = this.checkerVerdict(checkerResult, checker.protocol || 'LEGACY');
+    return {
+      status,
+      message: status === 'SYSTEM_ERROR'
+        ? `SPJ system error (${checker.protocol || 'LEGACY'}): status=${checkerResult.sandboxStatus || checkerResult.status}, exit=${checkerResult.exitStatus ?? 'unknown'}, signal=${checkerResult.signal ?? 'none'}; ${checkerResult.error || ''}; stderr=${checkerResult.stderr || ''}; stdout=${checkerResult.output || '[empty]'}`
+        : undefined,
+    };
   }
 
   private compareOutput(actual: string, expected: string): boolean {
@@ -294,18 +302,23 @@ export class JudgeProcessor extends WorkerHost {
       : `${value.slice(0, MAX_STORED_OUTPUT_CHARS)}\n[output truncated]`;
   }
 
-  private checkerAccepted(result: RunResult): boolean {
-    if (result.status !== 'ACCEPTED') return false;
+  private checkerVerdict(result: RunResult, protocol: string): string {
+    if (!['LEGACY', 'BOOLEAN_STDOUT', 'EXIT_CODE'].includes(protocol)) return 'SYSTEM_ERROR';
+    if (result.signal || result.error || (result.sandboxStatus && !['Accepted', 'Nonzero Exit Status'].includes(result.sandboxStatus))) return 'SYSTEM_ERROR';
+    if (protocol !== 'BOOLEAN_STDOUT' && [1, 2].includes(result.exitStatus!)
+      && result.status === 'RUNTIME_ERROR' && result.sandboxStatus === 'Nonzero Exit Status') return 'WRONG_ANSWER';
+    if (result.status !== 'ACCEPTED' || (result.exitStatus !== undefined && result.exitStatus !== 0)) return 'SYSTEM_ERROR';
+    if (protocol === 'EXIT_CODE') return result.exitStatus === 0 ? 'ACCEPTED' : 'SYSTEM_ERROR';
     const answer = String(result.output || '').trim().toLowerCase();
-    if (!answer) return true;
-    if (['false', '0', 'no', 'wa', 'wrong', 'wrong_answer', 'incorrect'].includes(answer)) return false;
-    return ['true', '1', 'yes', 'ac', 'accepted', 'correct'].includes(answer);
+    if (!answer && protocol === 'LEGACY') return 'ACCEPTED';
+    if (['false', '0', 'no', 'wa', 'wrong', 'wrong_answer', 'incorrect'].includes(answer)) return 'WRONG_ANSWER';
+    return ['true', '1', 'yes', 'ac', 'accepted', 'correct'].includes(answer) ? 'ACCEPTED' : 'SYSTEM_ERROR';
   }
 
   private async failSubmission(id: string, status: string, msg: string) {
     await this.prisma.submission.update({
       where: { id },
-      data: { status, compileMessage: msg, judgedAt: new Date() },
+      data: { status, score: 0, compileMessage: this.truncateOutput(msg), judgedAt: new Date() },
     });
     await this.finishTask(id);
   }

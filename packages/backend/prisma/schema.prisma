@@ -315,6 +315,8 @@ model ProblemVersion {
   hint         String?
   dataRange    String?
   isCurrent    Boolean           @default(true)
+  timeLimit    Int?
+  memoryLimit  Int?
   createdAt    DateTime          @default(now())
   problem      Problem           @relation(fields: [problemId], references: [id], onDelete: Cascade)
   submissions  Submission[]
@@ -365,6 +367,7 @@ model Checker {
   id               String         @id @default(cuid())
   problemVersionId String         @unique
   type             String         @default("STANDARD")
+  protocol         String         @default("LEGACY")
   sourceCode       String?
   language         String?
   problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)

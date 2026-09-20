@@ -54,8 +54,8 @@ export class ProblemController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   uploadChecker(
     @Param('id') id: string, @UploadedFile() file: Express.Multer.File,
-    @Body('type') type: string, @Body('language') language: string, @Req() req: any,
-  ) { return this.problem.uploadChecker(id, file, type || 'STANDARD', language || 'cpp', req.user); }
+      @Body('type') type: string, @Body('language') language: string, @Req() req: any, @Body('protocol') protocol?: string,
+    ) { return this.problem.uploadChecker(id, file, type || 'STANDARD', language || 'cpp', req.user, protocol); }
 
   /** 题库列表（公开） */
   @Get()

@@ -10,6 +10,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubmissionService } from '../submission/submission.service';
+import { contestantSubmission } from '../submission/submission-privacy';
 import { ContestCacheService } from './contest-cache.service';
 import { ContestStandingsCalculatorService } from './contest-standings-calculator.service';
 
@@ -470,7 +471,7 @@ export class ContestService {
     }
     const item = contest.submissions[0];
     if (!item) throw new NotFoundException('提交记录不属于该比赛');
-    return item.submission;
+    return canManage ? item.submission : contestantSubmission(item.submission);
   }
 
   async saveSnapshot(id: string, viewer: Viewer) {
