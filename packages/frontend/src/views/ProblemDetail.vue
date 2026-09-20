@@ -3,7 +3,8 @@ import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../api/client';
 import { basicSetup } from 'codemirror';
-import { EditorView } from '@codemirror/view';
+import { EditorView, keymap } from '@codemirror/view';
+import { indentWithTab } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
 import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
@@ -20,6 +21,7 @@ import ProblemStateBadges from '../components/ProblemStateBadges.vue';
 import { useAuthStore } from '../stores/auth';
 import { hideContestHints } from './contest/problem-visibility';
 import { createSubmissionPoller, isFinalSubmission } from '../utils/submission-poller';
+import { editorDraftKey, readEditorDraft, saveEditorDraft } from '../utils/editor-draft';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -57,7 +59,7 @@ const resultPoller = createSubmissionPoller({
       void loadProblemSubmissions();
     }
   },
-  exhausted: () => { pollExhausted.value = true; },
+  exhausted: () => { void loadProblemSubmissions(); },
   hidden: () => document.visibilityState === 'hidden',
 });
 function onSubmissionVisible() {
@@ -67,7 +69,8 @@ function onSubmissionVisible() {
   }
 }
 const editorHost = ref<HTMLElement | null>(null);
-const pollExhausted = ref(false);
+let localDraftKey = '';
+let cloudDraftEnabled = false;
 const wrongResolvedOpen = ref(false);
 const resolvingWrong = ref(false);
 let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -130,25 +133,42 @@ function formatMemoryKb(value: unknown) {
 
 onMounted(async () => {
   document.addEventListener('visibilitychange', onSubmissionVisible);
+  let initialCode: string | undefined;
   try {
+    if (!auth.isLoggedIn()) await auth.restoreSession();
+    if (disposed) return;
     const problemUrl = contestId.value
       ? `/api/contests/${contestId.value}/problems/${route.params.id}`
       : isAuthorPreview.value
         ? `/api/problems/mine/created/${route.params.id}`
       : `/api/problems/${route.params.id}`;
     const { data } = await api.get(problemUrl);
+    if (disposed) return;
     problem.value = data;
+    localDraftKey = editorDraftKey(auth.user?.id || 'guest', String(route.params.id),
+      contestId.value ? 'contest:' + contestId.value : isAuthorPreview.value ? 'preview' : 'practice');
+    cloudDraftEnabled = !contestId.value && !isAuthorPreview.value;
     if (auth.token && !contestId.value && !isAuthorPreview.value) {
-      problemState.value = (await api.get(`/api/learning/problem-states/${route.params.id}`)).data;
+      try {
+        problemState.value = (await api.get(`/api/learning/problem-states/${route.params.id}`)).data;
+      } catch { /* Local drafts still work when cloud learning data is unavailable. */ }
       if (problemState.value?.draft?.language) language.value = problemState.value.draft.language;
       if (problemState.value?.status === 'PASSED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
     }
-    await loadProblemSubmissions();
+    const localDraft = readEditorDraft(localDraftKey);
+    const cloudDraft = problemState.value?.draft;
+    // A late cloud save may contain older text despite a newer server timestamp.
+    const draft = localDraft || cloudDraft;
+    if (draft && langExtensions[draft.language]) {
+      language.value = draft.language;
+      initialCode = draft.sourceCode;
+    }
+    void loadProblemSubmissions();
   } catch (e: any) {
     errorMsg.value = '题目加载失败';
   }
   await nextTick();
-  createEditor(problemState.value?.draft?.sourceCode);
+  if (!disposed) createEditor(initialCode);
 });
 
 onUnmounted(() => {
@@ -166,12 +186,13 @@ onUnmounted(() => {
 
 function createEditor(initialCode?: string) {
   if (!editorHost.value) return;
-  const templateCode = initialCode || languageTemplates[language.value];
+  const templateCode = initialCode ?? languageTemplates[language.value];
   code.value = templateCode;
 
   const state = EditorState.create({
     doc: templateCode,
     extensions: [
+      keymap.of([indentWithTab]),
       basicSetup,
       langExtensions[language.value]?.() || cpp(),
       oneDark,
@@ -199,6 +220,7 @@ watch(language, () => {
   const state = EditorState.create({
     doc: newCode,
     extensions: [
+      keymap.of([indentWithTab]),
       basicSetup,
       langExtensions[language.value]?.() || cpp(),
       oneDark,
@@ -213,7 +235,7 @@ watch(language, () => {
   });
   cmView = new EditorView({ state, parent: editorHost.value });
   code.value = newCode;
-  if (!isTemplateCode(newCode)) scheduleDraftSave();
+  scheduleDraftSave();
 });
 
 function isTemplateCode(value: string) {
@@ -221,7 +243,8 @@ function isTemplateCode(value: string) {
 }
 
 function scheduleDraftSave() {
-  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
+  saveEditorDraft(localDraftKey, language.value, code.value);
+  if (!auth.token || !problem.value || !cloudDraftEnabled) return;
   if (draftSaveTimer) clearTimeout(draftSaveTimer);
   draftSaveTimer = setTimeout(() => {
     draftSaveTimer = null;
@@ -230,7 +253,7 @@ function scheduleDraftSave() {
 }
 
 async function persistDraft() {
-  if (!auth.token || !problem.value || contestId.value || isAuthorPreview.value) return;
+  if (!auth.token || !problem.value || !cloudDraftEnabled) return;
   try {
     if (!code.value.trim() || isTemplateCode(code.value)) {
       if (problemState.value?.hasDraft) {
@@ -418,7 +441,6 @@ async function submitCode() {
 
 function startPolling(id: string) {
   if (disposed) return;
-  pollExhausted.value = false;
   resultPoller.start(id, isExternal.value);
 }
 
@@ -451,6 +473,8 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
         <span>当前题目不会出现在公开题库中；这里的提交用于命题人测试数据和判题正确性。</span>
       </div>
       <div class="problem-header">
+        <RouterLink v-if="contestId" class="back-to-contest" aria-label="返回比赛"
+          :to="{ name: 'contest-problems', params: { id: contestId } }">← 返回比赛</RouterLink>
         <div class="problem-title-row">
           <h2>
             <span v-if="platformProblemNo" class="problem-no-badge">{{ platformProblemNo }}</span>
@@ -541,13 +565,6 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
             </div>
           </div>
 
-          <div v-if="pollExhausted" class="card exhausted-card" style="border-left:4px solid #967440; background:#fff8e1;">
-            <p style="margin:0; color:#e65100; font-size:14px;">
-              暂时未获取到最终结果，提交仍会在后台处理。
-              <a href="javascript:void(0)" style="text-decoration:underline; color:#52758f;"
-                 @click="result && startPolling(result.id)">重新获取结果</a>，也可查看下方提交记录。
-            </p>
-          </div>
           <div v-if="errorMsg" class="card error-card">{{ errorMsg }}</div>
 
           <div v-if="auth.token" class="card problem-submissions-card">
@@ -696,6 +713,8 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
   color: #4f5a93;
 }
 .problem-header { margin-bottom: 20px; }
+.back-to-contest { display: inline-flex; align-items: center; margin-bottom: 14px; padding: 7px 12px; border: 1px solid #cdddf5; border-radius: 8px; background: #f3f7ff; color: #2864c5; font-size: 13px; text-decoration: none; }
+.back-to-contest:hover { background: #e7efff; }
 .problem-header h2 { font-size: 24px; margin: 0 0 8px; color: #1a1a2e; }
 .problem-community-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .problem-community-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid #cbdde0; border-radius: 4px; background: #f7fbfa; color: #087a70; font-size: 13px; font-weight: 700; text-decoration: none; }

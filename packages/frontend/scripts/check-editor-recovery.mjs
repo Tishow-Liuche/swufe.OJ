@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
+const browser = await chromium.launch({ channel: 'chromium', headless: true });
+try {
+  const context = await browser.newContext();
+  await context.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    let body = {};
+    if (path === '/api/auth/refresh') body = { accessToken: 'test' };
+    else if (path === '/api/user/profile') body = { id: 'u1', username: 'student', role: 'STUDENT' };
+    else if (path.includes('/problems/p1')) body = { id: 'p1', title: 'Editor test', contestState: 'RUNNING', versions: [{ description: 'Statement' }] };
+    else if (path === '/api/submissions') body = { items: [], total: 0 };
+    return route.fulfill({ json: body });
+  });
+  const page = await context.newPage();
+  const base = process.env.UI_BASE_URL || 'http://127.0.0.1:5188';
+  await page.goto(base + '/problems/p1?contestId=c1');
+  const editor = page.locator('.cm-content');
+  await editor.fill('int saved = 42;');
+  await page.reload();
+  await editor.waitFor();
+  assert.equal(await editor.innerText(), 'int saved = 42;', 'immediate refresh preserves code');
+  await editor.click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('Tab');
+  assert(await editor.evaluate(el => el.contains(document.activeElement)), 'Tab stays in editor');
+  assert.match(await editor.innerText(), /^\s+int saved/);
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await editor.innerText(), 'int saved = 42;');
+  const back = page.getByRole('link', { name: '返回比赛', exact: true });
+  assert.equal(await back.getAttribute('href'), '/contests/c1/problems');
+  assert.equal(await page.locator('.exhausted-card').count(), 0);
+  await page.locator('.lang-select').selectOption('python');
+  await editor.fill('print(42)');
+  await page.reload();
+  await editor.waitFor();
+  assert.equal(await page.locator('.lang-select').inputValue(), 'python');
+  assert.equal(await editor.innerText(), 'print(42)');
+  await page.evaluate(() => document.querySelector('#app').__vue_app__.config.globalProperties.$router.push('/problems/p1?contestId=c2'));
+  await editor.waitFor();
+  assert.notEqual(await editor.innerText(), 'print(42)', 'different contests have separate drafts');
+  await page.evaluate(() => document.querySelector('#app').__vue_app__.config.globalProperties.$router.push('/problems/p1?contestId=c1'));
+  await editor.waitFor();
+  assert.equal(await editor.innerText(), 'print(42)');
+  console.log('PASS: immediate-refresh draft/language recovery, contest isolation, Tab/Shift+Tab, return link, no timeout banner.');
+} finally { await browser.close(); }

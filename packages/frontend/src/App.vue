@@ -191,7 +191,7 @@ async function logout() {
     </Transition>
 
     <main class="app-main">
-      <router-view />
+      <router-view :key="route.path.startsWith('/problems/') ? route.fullPath : undefined" />
     </main>
   </div>
 </template>
