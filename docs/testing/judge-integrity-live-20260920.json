@@ -1,0 +1,431 @@
+[
+  {
+    "name": "standard-python-ac",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 20,
+    "memoryKb": 2960,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-wrong",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 0,
+    "timeMs": 20,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-empty",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 0,
+    "timeMs": 21,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-extra-token",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 0,
+    "timeMs": 17,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-crash",
+    "expected": "RUNTIME_ERROR",
+    "actual": "RUNTIME_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 36,
+    "memoryKb": 5136,
+    "cases": [
+      "RUNTIME_ERROR"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-timeout",
+    "expected": "TIME_LIMIT_EXCEEDED",
+    "actual": "TIME_LIMIT_EXCEEDED",
+    "pass": true,
+    "score": 0,
+    "timeMs": 201,
+    "memoryKb": 2960,
+    "cases": [
+      "TIME_LIMIT_EXCEEDED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-memory",
+    "expected": "MEMORY_LIMIT_EXCEEDED",
+    "actual": "MEMORY_LIMIT_EXCEEDED",
+    "pass": true,
+    "score": 0,
+    "timeMs": 72,
+    "memoryKb": 32784,
+    "cases": [
+      "MEMORY_LIMIT_EXCEEDED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-output-limit",
+    "expected": "OUTPUT_LIMIT_EXCEEDED",
+    "actual": "OUTPUT_LIMIT_EXCEEDED",
+    "pass": true,
+    "score": 0,
+    "timeMs": 47,
+    "memoryKb": 36752,
+    "cases": [
+      "OUTPUT_LIMIT_EXCEEDED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "cpp-ac",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 4,
+    "memoryKb": 400,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "cpp-compile-error",
+    "expected": "COMPILE_ERROR",
+    "actual": "COMPILE_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": null,
+    "memoryKb": null,
+    "cases": [],
+    "taskFinished": true
+  },
+  {
+    "name": "c-ac",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 2,
+    "memoryKb": 272,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "java-ac",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 155,
+    "memoryKb": 31116,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-boolean-ac",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 21,
+    "memoryKb": 2960,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-boolean-wa",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 0,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-empty-candidate",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 0,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-file-integrity",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-exit-wa",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 0,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-exit-ac",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-exit-two-wa",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 0,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-exit-three-error",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 19,
+    "memoryKb": 2960,
+    "cases": [
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-invalid-verdict",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-signal",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 19,
+    "memoryKb": 2960,
+    "cases": [
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-legacy-compatibility",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true,
+    "note": "Compatibility only: does not prove candidate correctness"
+  },
+  {
+    "name": "spj-crash",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 21,
+    "memoryKb": 2960,
+    "cases": [
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-timeout",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 19,
+    "memoryKb": 2960,
+    "cases": [
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-no-verdict",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true,
+    "note": "Ambiguous with supported legacy zero-exit checker; explicit protocol needed"
+  },
+  {
+    "name": "version-pinning",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 18,
+    "memoryKb": 2916,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "standard-multi-case",
+    "expected": "WRONG_ANSWER",
+    "actual": "WRONG_ANSWER",
+    "pass": true,
+    "score": 50,
+    "timeMs": 20,
+    "memoryKb": 2960,
+    "cases": [
+      "ACCEPTED",
+      "WRONG_ANSWER"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "missing-test-data",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": null,
+    "memoryKb": null,
+    "cases": [],
+    "taskFinished": true
+  },
+  {
+    "name": "version-time-limit",
+    "expected": "ACCEPTED",
+    "actual": "ACCEPTED",
+    "pass": true,
+    "score": 100,
+    "timeMs": 422,
+    "memoryKb": 2960,
+    "cases": [
+      "ACCEPTED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "timeout-stops-following-cases",
+    "expected": "TIME_LIMIT_EXCEEDED",
+    "actual": "TIME_LIMIT_EXCEEDED",
+    "pass": true,
+    "score": 0,
+    "timeMs": 202,
+    "memoryKb": 2960,
+    "cases": [
+      "TIME_LIMIT_EXCEEDED"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "checker-error-overrides-earlier-wa",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 18,
+    "memoryKb": 2960,
+    "cases": [
+      "WRONG_ANSWER",
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true
+  },
+  {
+    "name": "spj-output-limit",
+    "expected": "SYSTEM_ERROR",
+    "actual": "SYSTEM_ERROR",
+    "pass": true,
+    "score": 0,
+    "timeMs": 19,
+    "memoryKb": 2988,
+    "cases": [
+      "SYSTEM_ERROR"
+    ],
+    "taskFinished": true
+  }
+]

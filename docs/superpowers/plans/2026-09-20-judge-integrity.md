@@ -16,9 +16,9 @@
 
 ## Tasks
 
-- [ ] Sandbox/processor: write regression tests for checker crash/timeout/system failures, boolean empty, exit-code outcomes, missing artifacts, invalid responses, deadlines; observe failures. Implement JudgeService metadata and protocol interpreter, persisted-version loading, bounded requests. Run Jest judge suites.
-- [ ] Data model/authoring: migrate Checker.protocol with LEGACY database default. New SPJ API defaults BOOLEAN_STDOUT; updates preserve existing protocol absent explicit change. Clone current version plus checker/cases/groups inside transaction with per-problem advisory lock for checker/test-data changes. File upload stores decoded source rather than object path. Add tests for clone/atomic replacement/protocol validation and upload. Regenerate Prisma and run tests.
-- [ ] Frontend: selectors on create/edit, correct source templates and explanations; preserve legacy when editing existing records. Add UI tests and build.
-- [ ] Independent review: spec then quality review. Address critical/important findings before release.
-- [ ] Deploy: back up images/source, additive migration, update worker and API coherently (pause admission/queue only if needed, resume reliably). Preserve all existing resource limits. Push 42411036, no main push.
-- [ ] Verify live: serial isolated diagnostics, normal languages/statuses, SPJ protocols/faults, pinned version and authoring updates; clean fixtures, confirm healthy worker/queue. Record exact results and limitations.
+- [x] Sandbox/processor: write regression tests for checker crash/timeout/system failures, boolean empty, exit-code outcomes, missing artifacts, invalid responses, deadlines; observe failures. Implement JudgeService metadata and protocol interpreter, persisted-version loading, bounded requests. Run Jest judge suites.
+- [x] Data model/authoring: migrate Checker.protocol with LEGACY database default. New SPJ API defaults BOOLEAN_STDOUT; updates preserve existing protocol absent explicit change. Clone current version plus checker/cases/groups inside transaction with per-problem advisory lock for checker/test-data changes. File upload stores decoded source rather than object path. Add tests for clone/atomic replacement/protocol validation and upload. Regenerate Prisma and run tests.
+- [x] Frontend: selectors on create/edit, correct source templates and explanations; preserve legacy when editing existing records. Add UI tests and build.
+- [x] Independent review: spec then quality review. Address critical/important findings before release.
+- [x] Deploy: back up images/source, additive migration, update worker and API coherently (pause admission/queue only if needed, resume reliably). Preserve all existing resource limits. Push 42411036, no main push.
+- [x] Verify live: serial isolated diagnostics, normal languages/statuses, SPJ protocols/faults, pinned version and authoring updates; clean fixtures, confirm healthy worker/queue. Record exact results and limitations. See `docs/testing/judge-integrity-20260920.md` (33/33 final live cases).
