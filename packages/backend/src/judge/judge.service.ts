@@ -154,7 +154,7 @@ export class JudgeService {
       const stderr = result.files?.['stderr'] || '';
       const stdout = result.files?.['stdout'] || '';
       const outputLimit = this.isOutputLimitEvidence(result);
-      const systemError = Boolean((result.error && !outputLimit) || result.signal || (result.fileError?.length && !outputLimit)) || !['Nonzero Exit Status', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Output Limit Exceeded'].includes(result.status);
+      const systemError = Boolean((result.error && !outputLimit) || result.signal) || !['Nonzero Exit Status', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Output Limit Exceeded'].includes(result.status);
       return { success: false, ...(systemError ? { systemError: true } : {}), message: `${stdout}\n${stderr}\n${result.error || ''}`.trim() || `Compilation: ${result.status}` };
     } catch (error: any) {
       this.logger.error(`Compile error: ${error.message}`);

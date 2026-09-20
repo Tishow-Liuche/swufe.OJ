@@ -100,7 +100,7 @@ describe('JudgeService go-judge requests', () => {
   });
 
   it('retains ordinary compiler errors as user compilation errors', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => [{ status: 'Nonzero Exit Status', exitStatus: 1, time: 0, memory: 0, files: { stderr: 'syntax error' } }] });
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [{ status: 'Nonzero Exit Status', exitStatus: 1, time: 0, memory: 0, files: { stderr: 'syntax error' }, fileError: [{ name:'main', type:'CopyOutOpenError', message:'No such file or directory' }] }] });
     expect(await service.compile('cpp', 'code')).toEqual(expect.objectContaining({ success: false, message: 'syntax error' }));
   });
 
