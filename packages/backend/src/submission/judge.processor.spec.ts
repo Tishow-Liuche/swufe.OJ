@@ -17,7 +17,7 @@ describe('JudgeProcessor local test data judging', () => {
         createMany: jest.fn(async ({ data }) => { storedCases.push(...data); }),
         deleteMany: jest.fn(async ({ where }) => {
           storedCases = storedCases.filter((row) => row.submissionId !== where.submissionId
-            || !where.caseIndex.in.includes(row.caseIndex));
+            || (where.caseIndex && !where.caseIndex.in.includes(row.caseIndex)));
         }),
       },
       judgeTask: { update: jest.fn().mockResolvedValue({}) },
@@ -113,6 +113,30 @@ describe('JudgeProcessor local test data judging', () => {
       prepare('STANDARD', ['ACCEPTED', 'ACCEPTED', 'ACCEPTED']);
       expect(await processor.process(job)).toEqual({ status: 'ACCEPTED', score: 100 });
       expect(judge.run).toHaveBeenCalledTimes(3);
+      expect(prisma.submissionCase.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it.each([{ attemptsMade: 1 }, { attemptsStarted: 2 }])('clears stale case tails before an earlier timeout on retry %j', async (retry) => {
+      prepare('STANDARD', ['TIME_LIMIT_EXCEEDED', 'ACCEPTED', 'ACCEPTED']);
+      storedCases.push(...[1, 2, 3].map((caseIndex) => ({
+        submissionId: 's1', caseIndex, status: 'ACCEPTED',
+      })));
+      await processor.process({ ...job, ...retry });
+      expect(storedCases.map((row) => [row.caseIndex, row.status]))
+        .toEqual([[1, 'TIME_LIMIT_EXCEEDED']]);
+      expect(prisma.submissionCase.deleteMany).toHaveBeenCalledTimes(1);
+      expect(prisma.submissionCase.deleteMany).toHaveBeenCalledWith({ where: { submissionId: 's1' } });
+      expect(prisma.submissionCase.deleteMany.mock.invocationCallOrder[0])
+        .toBeLessThan(judge.compile.mock.invocationCallOrder[0]);
+    });
+
+    it('clears stale cases even when a retried submission fails compilation', async () => {
+      prepare('STANDARD', ['ACCEPTED']);
+      storedCases.push({ submissionId: 's1', caseIndex: 1, status: 'ACCEPTED' });
+      judge.compile.mockReset().mockResolvedValue({ success: false, message: 'compile failed' });
+      expect(await processor.process({ ...job, attemptsMade: 1 }))
+        .toEqual({ status: 'COMPILE_ERROR' });
+      expect(storedCases).toEqual([]);
     });
 
     it('flushes the first case then batches ten cases and the final remainder', async () => {

@@ -99,6 +99,11 @@ export class JudgeProcessor extends WorkerHost {
     };
 
     try {
+      // Retried/stalled jobs must not expose a previous attempt's unrun tail.
+      // Keep normal first attempts free of this additional database round trip.
+      if (job.attemptsMade > 0 || job.attemptsStarted > 1) {
+        await this.prisma.submissionCase.deleteMany({ where: { submissionId: data.submissionId } });
+      }
       const version = await this.prisma.problemVersion.findFirst({
         where: { problemId: data.problemId, isCurrent: true },
         include: { testCases: { orderBy: { order: 'asc' } }, checker: true },
