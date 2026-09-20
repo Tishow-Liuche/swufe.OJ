@@ -18,12 +18,14 @@ import { pointDifficultyLabel } from '../utils/pointDifficulty';
 import { Star } from '@lucide/vue';
 import ProblemStateBadges from '../components/ProblemStateBadges.vue';
 import { useAuthStore } from '../stores/auth';
+import { hideContestHints } from './contest/problem-visibility';
 
 const route = useRoute();
 const auth = useAuthStore();
 const contestId = computed(() => String(route.query.contestId || ''));
 const isAuthorPreview = computed(() => String(route.query.preview || '') === '1');
 const problem = ref<any>(null);
+const hideHints = computed(() => hideContestHints(contestId.value, problem.value?.contestState));
 const problemState = ref<any>(null);
 const code = ref('');
 const language = ref('cpp');
@@ -490,10 +492,10 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
         <div class="problem-meta">
           <span class="meta-item">时限 {{ problem.timeLimit }}ms</span>
           <span class="meta-item">内存 {{ problem.memoryLimit }}MB</span>
-          <span class="meta-item">难度 {{ pointDifficultyLabel(problem.difficulty) }}</span>
-          <span class="meta-item">标签 {{ (problem.tags || []).map((t: any) => tagLabel(t.name)).join('、') || '-' }}</span>
+          <span v-if="!hideHints" class="meta-item">难度 {{ pointDifficultyLabel(problem.difficulty) }}</span>
+          <span v-if="!hideHints" class="meta-item">标签 {{ (problem.tags || []).map((t: any) => tagLabel(t.name)).join('、') || '-' }}</span>
         </div>
-        <div class="problem-community-links">
+        <div v-if="!hideHints" class="problem-community-links">
           <RouterLink :to="{ path: '/community', query: { panel: 'feed', problemId: problem.id, problemTitle: problem.title, compose: '1' } }">
             题目讨论
           </RouterLink>
@@ -603,7 +605,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
         </div>
       </div>
 
-      <ProblemDiscussionPanel :problem-id="problem.id" :problem-title="problem.title" />
+      <ProblemDiscussionPanel v-if="!hideHints" :problem-id="problem.id" :problem-title="problem.title" />
     </template>
 
     <!-- 第三方 OJ 远程提交引导弹窗 -->

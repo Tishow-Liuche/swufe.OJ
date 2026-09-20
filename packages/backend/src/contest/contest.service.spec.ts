@@ -103,6 +103,25 @@ describe('ContestService practice leaderboard', () => {
 });
 
 describe('ContestService contest reserved problems', () => {
+  it('keeps hints hidden during virtual participation after the official contest ends', async () => {
+    const prisma: any = { contest: { findUnique: jest.fn().mockResolvedValue({
+      createdBy: 'teacher', startTime: new Date(Date.now() - 120000), endTime: new Date(Date.now() - 60000),
+      participants: [{ userId: 'u1', isVirtual: true, virtualStart: new Date(Date.now() - 1000), virtualEnd: new Date(Date.now() + 60000) }],
+      problems: [{ problem: { tags: [{ name: 'dp' }], difficulty: 'POINT_3' } }],
+    }) } };
+    const result = await createContestService(prisma).getContestProblem('c1', 'p1', { id: 'u1', role: 'STUDENT' });
+    expect(result).toEqual({ tags: [], difficulty: null, contestState: 'RUNNING' });
+  });
+  it.each(['STUDENT', 'ADMIN'])('redacts hints in active contest responses for %s', async role => {
+    const problem = { id: 'p1', tags: [{ name: 'dp' }], difficulty: 'POINT_3', versions: [{ description: 'statement' }] };
+    const prisma: any = { contest: { findUnique: jest.fn().mockResolvedValue({
+      createdBy: 'teacher', startTime: new Date(Date.now() - 60000), endTime: new Date(Date.now() + 60000),
+      participants: [{ userId: 'u1' }], problems: [{ problem }],
+    }) } };
+    const result = await createContestService(prisma).getContestProblem('c1', 'p1', { id: 'u1', role });
+    expect(result).toEqual({ ...problem, tags: [], difficulty: null, contestState: 'RUNNING' });
+    expect(problem.tags).toEqual([{ name: 'dp' }]);
+  });
   it('returns contest reserved problem details for a participant in that contest', async () => {
     const problem = {
       id: 'problem-1',
@@ -128,7 +147,7 @@ describe('ContestService contest reserved problems', () => {
     const service = createContestService(prisma);
 
     await expect(service.getContestProblem('contest-1', 'problem-1', { id: 'student-1', role: 'STUDENT' }))
-      .resolves.toBe(problem);
+      .resolves.toEqual({ ...problem, contestState: 'ENDED' });
 
     expect(prisma.contest.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'contest-1' },

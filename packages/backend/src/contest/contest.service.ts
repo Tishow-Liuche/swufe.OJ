@@ -316,7 +316,12 @@ export class ContestService {
     if (!canManage && this.stateOf(contest, participant) === 'UPCOMING') {
       throw new ForbiddenException('比赛尚未开始');
     }
-    return contestProblem.problem;
+    const contestState = this.stateOf(contest, participant);
+    return {
+      ...contestProblem.problem,
+      ...(contestState !== 'ENDED' ? { tags: [], difficulty: null } : {}),
+      contestState,
+    };
   }
 
   async standings(id: string, viewer: Viewer) {
