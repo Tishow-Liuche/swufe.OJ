@@ -573,7 +573,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
               <button type="button" @click="loadProblemSubmissions">{{ submissionsLoading ? '刷新中...' : '刷新' }}</button>
             </div>
             <div v-if="submissionsLoading" class="submission-empty">正在加载提交记录...</div>
-            <div v-else-if="problemSubmissions.length" class="problem-submission-list">
+            <div v-else-if="problemSubmissions.length" class="problem-submission-list" role="region" aria-label="本题提交记录列表" tabindex="0">
               <button
                 v-for="submission in problemSubmissions"
                 :key="submission.id"
@@ -807,7 +807,8 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 .submission-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .submission-card-title strong { color: #24364b; }
 .submission-card-title button { padding: 5px 10px; border: 1px solid #c6daf2; border-radius: 6px; background: #f4f8ff; color: #1f5eff; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
-.problem-submission-list { display: grid; gap: 7px; }
+.problem-submission-list { display: grid; gap: 7px; max-height: min(420px, 50vh); max-height: min(420px, 50dvh); min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.problem-submission-list:focus-visible { outline: 2px solid #2874eb; outline-offset: 2px; border-radius: 8px; }
 .problem-submission-row { display: grid; grid-template-columns: 78px 56px minmax(110px, 1fr) 132px; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 1px solid #e4ebf2; border-radius: 8px; background: #fff; color: #475569; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .problem-submission-row:hover { border-color: #b5cff2; background: #f8fbff; }
 .submission-status-dot { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; padding: 0 7px; border-radius: 999px; color: #fff; font-size: 11px; font-weight: 900; }

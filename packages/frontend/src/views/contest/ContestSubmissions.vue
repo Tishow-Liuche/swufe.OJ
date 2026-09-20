@@ -19,7 +19,7 @@ const selectedId = ref('');
         <button class="arena-button" :class="onlyMine ? 'primary' : 'secondary'" :aria-pressed="onlyMine" @click="onlyMine = !onlyMine; selectedId = ''">仅查看自己的提交</button>
       </div>
       <p v-if="error" class="arena-error" role="alert">{{ error }}</p>
-      <div v-if="data?.items?.length" class="arena-table-wrap">
+      <div v-if="data?.items?.length" class="arena-table-wrap" role="region" aria-label="比赛提交记录列表" tabindex="0">
         <table class="arena-table submissions-table"><thead><tr><th scope="col">时间</th><th scope="col">选手</th><th scope="col">题目</th><th scope="col">语言</th><th scope="col">结果</th><th scope="col">耗时</th><th scope="col">内存</th><th scope="col">详情</th></tr></thead>
           <tbody><tr v-for="submission in data.items" :key="submission.id"><td>{{ timeText(submission.createdAt) }}</td><td>{{ submission.user?.nickname || submission.user?.username }}</td><td>{{ submission.problem?.label }} · {{ problemDisplayTitle(submission.problem) }}</td><td>{{ submission.language }}</td><td><span class="arena-verdict" :class="verdictClass(submission.status)">{{ statusText(submission.status) }}</span></td><td>{{ submission.timeUsed ?? '—' }} ms</td><td>{{ submission.memoryUsed ?? '—' }} KB</td><td><button class="arena-text-button" @click="selectedId = submission.id">查看</button></td></tr></tbody>
         </table>
@@ -32,4 +32,7 @@ const selectedId = ref('');
 <style scoped>
 .arena-submissions .arena-section-head { margin-bottom: 0; }
 .submission-filter-toolbar { display: flex; justify-content: flex-end; padding-block: 16px; }
+.arena-submissions .arena-table-wrap { max-height: min(520px, 55vh); max-height: min(520px, 55dvh); min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.arena-submissions .arena-table-wrap:focus-visible { outline: 2px solid #2874eb; outline-offset: 2px; }
+.submissions-table th { position: sticky; top: 0; z-index: 1; }
 </style>
