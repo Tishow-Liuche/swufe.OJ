@@ -379,6 +379,30 @@ describe('UserService profile settings', () => {
     }));
   });
 
+  it('includes distinct unmapped external problems with safe display metadata', async () => {
+    prisma.submission.findMany.mockResolvedValue([]);
+    prisma.externalSolvedProblem.findMany.mockResolvedValue(['4A','5B'].map((remoteProblemId,i)=>({
+      id:'e'+i,platform:'CODEFORCES',remoteProblemId,problem:null,acceptedAt:new Date(),
+      rawPayload:{problem:{contestId:4,index:'A',name:'Watermelon',rating:800}},
+    })));
+    const result=await service.listAcceptedProblems('u1');
+    expect(result.total).toBe(2);
+    expect(new Set(result.items.map(i=>i.key)).size).toBe(2);
+    expect(result.items[0]).toMatchObject({problemId:null,statementAvailable:false,problem:{id:null,title:'Watermelon',difficulty:'POINT_0'}});
+  });
+
+  it('counts each unlinked CF problem and avoids null local IDs in statistics', async () => {
+    prisma.submission.count=jest.fn().mockResolvedValue(0);
+    prisma.submission.groupBy=jest.fn().mockResolvedValue([]);
+    prisma.submission.findMany.mockResolvedValue([]);
+    prisma.externalSolvedProblem.findMany.mockResolvedValue(['4A','5B'].map(remoteProblemId=>({problemId:null,platform:'CODEFORCES',remoteProblemId,rawPayload:{problem:{rating:800}}})));
+    prisma.problem={findMany:jest.fn().mockResolvedValue([])};
+    const result=await service.getStats('u1');
+    expect(prisma.problem.findMany).toHaveBeenCalledWith({where:{id:{in:[]}},select:{difficulty:true}});
+    expect(result.overview.solvedCount).toBe(2);
+    expect(result.difficultyDist).toEqual([{difficulty:'POINT_0',count:2}]);
+  });
+
   it('creates award recognition as pending for the current user', async () => {
     prisma.competitionAward.create.mockResolvedValue({
       id: 'a1',

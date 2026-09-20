@@ -5,6 +5,7 @@ import { FileUploadService } from '../common/file-upload.service';
 import { CfAcceptedSyncService } from '../codeforces/cf-accepted-sync.service';
 import * as bcrypt from 'bcryptjs';
 import { normalizePointDifficulty } from '../problem/point-difficulty';
+import { externalProblemDisplay, externalSolvedIdentity } from '../common/external-solved';
 import {
   assignmentLifecycleLabel,
   requiredSolveCount,
@@ -211,6 +212,7 @@ export class UserService {
           platform: true,
           remoteProblemId: true,
           remoteSubmissionId: true,
+          rawPayload: true,
           acceptedAt: true,
           timeUsed: true,
           memoryUsed: true,
@@ -221,6 +223,7 @@ export class UserService {
               title: true,
               difficulty: true,
               source: true,
+              status: true,
               sourceInfo: { select: { platform: true, remoteProblemId: true, remoteUrl: true } },
             },
           },
@@ -230,11 +233,12 @@ export class UserService {
 
     const byProblem = new Map<string, any>();
     const put = (item: any) => {
-      if (!item.problem) return;
       item.problemId = item.problem.id;
-      const existing = byProblem.get(item.problem.id);
+      item.statementAvailable = item.statementAvailable ?? Boolean(item.problemId);
+      item.key = item.problemId ? `local:${item.problemId}` : `external:${item.source}:${item.remoteProblemId}`;
+      const existing = byProblem.get(item.key);
       if (!existing || new Date(item.acceptedAt).getTime() > new Date(existing.acceptedAt).getTime()) {
-        byProblem.set(item.problem.id, item);
+        byProblem.set(item.key, item);
       }
     };
 
@@ -252,6 +256,7 @@ export class UserService {
     }
 
     for (const solved of externalAccepted) {
+      const statementAvailable = Boolean(solved.problem) && (!solved.problem.status || solved.problem.status === 'PUBLISHED');
       put({
         source: solved.platform,
         externalSolvedId: solved.id,
@@ -260,7 +265,8 @@ export class UserService {
         acceptedAt: solved.acceptedAt,
         timeUsed: solved.timeUsed,
         memoryUsed: solved.memoryUsed,
-        problem: solved.problem,
+        statementAvailable,
+        problem: statementAvailable ? solved.problem : { ...externalProblemDisplay(solved), id: solved.problem?.id ?? null },
       });
     }
 
@@ -435,12 +441,12 @@ export class UserService {
 
     const externalSolved = await this.prisma.externalSolvedProblem.findMany({
       where: { userId },
-      select: { problemId: true, platform: true },
+      select: { problemId: true, platform: true, remoteProblemId: true, rawPayload: true },
     });
     const solvedProblemIds = [
       ...new Set([
         ...solved.map((s) => s.problemId),
-        ...externalSolved.map((s: any) => s.problemId),
+        ...externalSolved.filter(s => s.problemId).map((s: any) => s.problemId),
       ]),
     ];
     const difficultyDist = await this.prisma.problem.findMany({
@@ -449,6 +455,11 @@ export class UserService {
     const diffCount: Record<string, number> = {};
     for (const p of difficultyDist) {
       const d = normalizePointDifficulty(p.difficulty) || 'UNRATED';
+      diffCount[d] = (diffCount[d] || 0) + 1;
+    }
+    const remoteOnly = new Map(externalSolved.filter(s => !s.problemId).map(s => [externalSolvedIdentity(s), s]));
+    for (const row of remoteOnly.values()) {
+      const d = externalProblemDisplay(row).difficulty || 'UNRATED';
       diffCount[d] = (diffCount[d] || 0) + 1;
     }
 
@@ -468,7 +479,7 @@ export class UserService {
       overview: {
         totalSubmissions, totalAccepted,
         acceptRate: totalSubmissions > 0 ? Math.round((totalAccepted / totalSubmissions) * 100) : 0,
-        solvedCount: solvedProblemIds.length, triedCount: tried.length,
+        solvedCount: solvedProblemIds.length + remoteOnly.size, triedCount: tried.length,
         localSolvedCount: solved.length, externalSolvedCount: externalSolved.length,
         activeDays: uniqueDays.size, currentStreak: streak,
       },

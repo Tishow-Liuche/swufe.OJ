@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(resolve(__dirname, '../src/views/Profile.vue'), 'utf8');
+const syncSource = readFileSync(resolve(__dirname, '../src/views/useCodeforcesSync.ts'), 'utf8');
 const loginSource = readFileSync(resolve(__dirname, '../src/views/Login.vue'), 'utf8');
 const appSource = readFileSync(resolve(__dirname, '../src/App.vue'), 'utf8');
 
@@ -23,7 +24,14 @@ for (const token of [
   "REMOTE_ERROR: 'RMR'",
   "REMOTE_REEOR: 'RMR'",
   'syncCodeforcesAccepted',
-  '/api/user/external-accounts/codeforces/sync',
+  'useCodeforcesSync',
+  'acceptedProblemLocation(item)',
+  ':key="item.key || item.problemId"',
+  'aria-haspopup="dialog"',
+  'role="dialog"',
+  '@keydown.esc.stop="closeMissingStatement"',
+  'missingStatementTrigger?.focus()',
+  '本地暂未收录题面，该题的 Codeforces 通过记录已同步，不影响通过题数统计。',
   '同步 CF 通过记录',
   'loadAcceptedProblems',
   '/api/user/accepted-problems',
@@ -42,6 +50,18 @@ for (const token of [
   if (!source.includes(token)) {
     throw new Error(`Profile UI is missing required token: ${token}`);
   }
+}
+
+for (const token of [
+  '/api/user/external-accounts/codeforces/sync/start',
+  '/api/user/external-accounts/codeforces/sync/status',
+  'item.statementAvailable === false || !item.problemId',
+  "['waiting', 'active', 'delayed']",
+  '2500',
+  'onUnmounted',
+  'controller?.abort()',
+]) {
+  if (!syncSource.includes(token)) throw new Error(`Profile sync helper is missing required token: ${token}`);
 }
 
 for (const token of [

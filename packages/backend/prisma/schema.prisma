@@ -264,7 +264,7 @@ model Problem {
 model ExternalSolvedProblem {
   id                 String   @id @default(cuid())
   userId             String
-  problemId          String
+  problemId          String?
   platform           String
   remoteProblemId    String
   remoteSubmissionId String?
@@ -275,10 +275,10 @@ model ExternalSolvedProblem {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  problem            Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problem            Problem? @relation(fields: [problemId], references: [id], onDelete: SetNull)
 
   @@unique([userId, platform, remoteProblemId])
-  @@unique([platform, remoteSubmissionId])
+  @@unique([userId, platform, remoteSubmissionId], map: "ExternalSolvedProblem_user_platform_submission_key")
   @@index([userId])
   @@index([problemId])
   @@index([platform, remoteProblemId])

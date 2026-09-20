@@ -26,6 +26,7 @@ import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
 import UserAvatar from '../components/UserAvatar.vue';
 import { pointDifficultyShortLabel } from '../utils/pointDifficulty';
+import { acceptedProblemLocation, useCodeforcesSync } from './useCodeforcesSync';
 
 interface HeatDay { date: string; count: number; accepted: number; level: number }
 interface Stats {
@@ -75,7 +76,25 @@ const avatarUploading = ref(false);
 const avatarError = ref('');
 const profileForm = reactive({ nickname: '', email: '', phone: '', studentId: '', gender: '' });
 const accountForm = reactive({ codeforcesHandle: '', luoguHandle: '' });
-const cfSyncing = ref(false);
+const { status: cfStatus, error: cfError, pending: cfSyncing, start: syncCodeforcesAccepted, retry: retryCodeforcesStatus } = useCodeforcesSync(async () => {
+  const [statsRes, acceptedRes] = await Promise.all([api.get('/api/user/stats'), api.get('/api/user/accepted-problems')]);
+  stats.value = statsRes.data;
+  acceptedProblems.value = acceptedRes.data.items || [];
+});
+const missingStatement = ref<any>(null);
+const missingStatementClose = ref<HTMLButtonElement | null>(null);
+let missingStatementTrigger: HTMLElement | null = null;
+async function showMissingStatement(item: any, event: Event) {
+  missingStatementTrigger = event.currentTarget as HTMLElement;
+  missingStatement.value = item;
+  await nextTick();
+  missingStatementClose.value?.focus();
+}
+async function closeMissingStatement() {
+  missingStatement.value = null;
+  await nextTick();
+  missingStatementTrigger?.focus();
+}
 const passwordForm = reactive({ currentPassword: '', password: '', confirmPassword: '' });
 const passwordSaving = ref(false);
 const awards = ref<AwardRecord[]>([]);
@@ -223,22 +242,6 @@ async function saveAccounts() {
     accountForm.luoguHandle = data.luoguHandle || '';
   } catch (e: any) {
     settingsError.value = e.response?.data?.message || '保存远程 OJ 账号失败';
-  }
-}
-
-async function syncCodeforcesAccepted() {
-  settingsError.value = '';
-  cfSyncing.value = true;
-  try {
-    await api.post('/api/user/external-accounts/codeforces/sync');
-    const statsRes = await api.get('/api/user/stats');
-    stats.value = statsRes.data;
-    if (activeTab.value === 'accepted') await loadAcceptedProblems();
-  } catch (e: any) {
-    const message = e.response?.data?.message;
-    settingsError.value = Array.isArray(message) ? message.join('，') : message || '同步 Codeforces 通过记录失败';
-  } finally {
-    cfSyncing.value = false;
   }
 }
 
@@ -602,12 +605,20 @@ void [
         <div class="panel-title"><h2>已通过题目</h2><span>{{ acceptedProblems.length }} 题</span></div>
         <div v-if="acceptedLoading" class="empty-state">正在加载已通过题目…</div>
         <div v-else-if="acceptedProblems.length" class="accepted-list">
-          <router-link v-for="item in acceptedProblems" :key="item.problem.id" class="accepted-row" :to="{ path: `/problems/${item.problem.id}`, query: item.contestId ? { contestId: item.contestId } : {} }" target="_blank" rel="noopener">
+          <template v-for="item in acceptedProblems" :key="item.key || item.problemId">
+          <router-link v-if="acceptedProblemLocation(item)" class="accepted-row" :to="acceptedProblemLocation(item)!" target="_blank" rel="noopener">
             <span class="accepted-source">{{ item.source || item.problem?.source || 'LOCAL' }}</span>
             <span class="accepted-title">{{ problemDisplayTitle(item.problem, item.problemId) }}</span>
             <span class="accepted-difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
             <span class="accepted-remote">{{ item.remoteProblemId || item.problem?.sourceInfo?.remoteProblemId || '本地题' }}</span>
           </router-link>
+          <button v-else type="button" class="accepted-row" aria-haspopup="dialog" @click="showMissingStatement(item, $event)">
+            <span class="accepted-source">{{ item.source || 'CODEFORCES' }}</span>
+            <span class="accepted-title">{{ problemDisplayTitle(item.problem, item.remoteProblemId) }}</span>
+            <span class="accepted-difficulty">{{ pointDifficultyShortLabel(item.problem?.difficulty) }}</span>
+            <span class="accepted-remote">{{ item.remoteProblemId || item.problem?.sourceInfo?.remoteProblemId }}</span>
+          </button>
+          </template>
         </div>
         <div v-else class="empty-state">暂无已通过题目。</div>
       </section>
@@ -661,6 +672,11 @@ void [
           <label>Codeforces<input v-model="accountForm.codeforcesHandle" placeholder="CF handle" /></label>
           <label>洛谷<input v-model="accountForm.luoguHandle" placeholder="洛谷用户名" /></label>
           <div class="inline-actions"><button class="primary-btn" @click="saveAccounts"><Save :size="16" />保存绑定</button><button class="secondary-btn" :disabled="cfSyncing" @click="syncCodeforcesAccepted"><RefreshCw :size="16" :class="{ spinning: cfSyncing }" />{{ cfSyncing ? '同步中…' : '同步 CF 通过记录' }}</button></div>
+          <div class="cf-sync-box" aria-live="polite" v-if="cfSyncing || cfStatus.result || cfError">
+            <p v-if="cfSyncing" class="hint">{{ cfStatus.state === 'waiting' || cfStatus.state === 'delayed' ? '同步任务已排队，可离开页面，稍后查看。' : '正在同步 Codeforces 通过记录…' }}<span v-if="cfStatus.progress"> 已读取 {{ cfStatus.progress.fetchedCount }} 条提交，发现 {{ cfStatus.progress.acceptedCount }} 道通过题目<span v-if="cfStatus.progress.phase === 'saving'">，已保存 {{ cfStatus.progress.savedCount || 0 }} 道</span>。</span></p>
+            <p v-if="cfStatus.state === 'completed' && cfStatus.result && !cfError" class="hint">已同步 {{ cfStatus.result.acceptedCount }} 题，本地已收录 {{ cfStatus.result.matchedCount }} 题，暂未收录 {{ cfStatus.result.unmatchedCount }} 题。</p>
+            <p v-if="cfError" class="error-msg">{{ cfError }} <button type="button" class="secondary-btn" @click="retryCodeforcesStatus">重试查询</button></p>
+          </div>
         </article>
 
         <article class="profile-panel">
@@ -699,6 +715,16 @@ void [
         <div v-if="settingsLoading" class="empty-state">正在加载账号设置…</div>
         <div v-if="settingsError" class="page-state error">{{ settingsError }}</div>
       </section>
+
+      <div v-if="missingStatement" class="modal-overlay" @click.self="closeMissingStatement">
+        <div class="modal-card missing-statement-card" role="dialog" aria-modal="true" aria-labelledby="missing-statement-title" aria-describedby="missing-statement-description" @keydown.esc.stop="closeMissingStatement" @keydown.tab.prevent="missingStatementClose?.focus()">
+          <div class="modal-header"><h2 id="missing-statement-title">本地暂未收录题面</h2><button ref="missingStatementClose" type="button" aria-label="关闭" @click="closeMissingStatement">×</button></div>
+          <div class="modal-body">
+            <p>{{ missingStatement.remoteProblemId || missingStatement.problem?.sourceInfo?.remoteProblemId }} · {{ problemDisplayTitle(missingStatement.problem) }}</p>
+            <p id="missing-statement-description">本地暂未收录题面，该题的 Codeforces 通过记录已同步，不影响通过题数统计。</p>
+          </div>
+        </div>
+      </div>
 
       <div v-if="selectedSubmission" class="modal-overlay" @click.self="selectedSubmission = null">
         <div class="modal-card">
@@ -1645,6 +1671,9 @@ void [
   border-bottom: 1px solid #eef2f6;
   background: #fff;
 }
+
+.missing-statement-card { width: min(520px, 100%); }
+.accepted-row:focus-visible { outline: 2px solid #527b9d; outline-offset: -2px; }
 
 .modal-header button {
   width: 34px;

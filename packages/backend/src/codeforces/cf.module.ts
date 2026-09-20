@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { createRedisConnectionOptions } from '../submission/judge-queue';
+import { CF_ACCEPTED_QUEUE, CfAcceptedSyncJobs, CfAcceptedSyncProcessor } from './cf-accepted-sync-jobs';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CfVerdictMapper } from './cf-verdict.mapper';
 import { CfSubmissionService } from './cf-submission.service';
@@ -19,14 +22,22 @@ import { CfAcceptedSyncService } from './cf-accepted-sync.service';
  * SubmissionModule so the dependency graph is explicit.
  */
 @Module({
-  imports: [ConfigModule, PrismaModule],
+  imports: [ConfigModule, PrismaModule, BullModule.registerQueueAsync({
+    name: CF_ACCEPTED_QUEUE, imports: [ConfigModule], inject: [ConfigService],
+    useFactory: (config: ConfigService) => ({
+      connection: createRedisConnectionOptions(config),
+      defaultJobOptions: { attempts: 2, backoff: { type: 'exponential', delay: 15000 }, removeOnComplete: { age: 86400, count: 1000 }, removeOnFail: { age: 86400, count: 1000 } },
+    }),
+  })],
   providers: [
     CfVerdictMapper,
     CfSubmissionService,
     CfWorkerService,
     CfTaskLeaseService,
     CfAcceptedSyncService,
+    CfAcceptedSyncJobs,
+    CfAcceptedSyncProcessor,
   ],
-  exports: [CfSubmissionService, CfTaskLeaseService, CfAcceptedSyncService],
+  exports: [CfSubmissionService, CfTaskLeaseService, CfAcceptedSyncService, CfAcceptedSyncJobs],
 })
 export class CodeforcesModule {}

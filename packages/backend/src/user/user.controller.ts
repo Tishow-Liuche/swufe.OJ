@@ -6,12 +6,13 @@ import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserService } from './user.service';
+import { CfAcceptedSyncJobs } from '../codeforces/cf-accepted-sync-jobs';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 
 @Controller('api/user')
 export class UserController {
-  constructor(private userService: UserService) {}
+  constructor(private userService: UserService, private readonly cfSyncJobs: CfAcceptedSyncJobs) {}
 
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
@@ -53,7 +54,7 @@ export class UserController {
   @Post('external-accounts/codeforces/sync')
   @UseGuards(AuthGuard('jwt'))
   syncCodeforcesAccepted(@Req() req: any) {
-    return this.userService.syncCodeforcesAccepted(req.user.id);
+    return this.cfSyncJobs.start(req.user.id);
   }
 
   @Get('awards')
@@ -61,6 +62,15 @@ export class UserController {
   listAwards(@Req() req: any) {
     return this.userService.listAwards(req.user.id);
   }
+
+  @Post('external-accounts/codeforces/sync/start')
+  @UseGuards(AuthGuard('jwt'))
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  startCodeforcesSync(@Req() req: any) { return this.cfSyncJobs.start(req.user.id); }
+
+  @Get('external-accounts/codeforces/sync/status')
+  @UseGuards(AuthGuard('jwt'))
+  codeforcesSyncStatus(@Req() req: any) { return this.cfSyncJobs.status(req.user.id); }
 
   @Post('awards')
   @UseGuards(AuthGuard('jwt'))

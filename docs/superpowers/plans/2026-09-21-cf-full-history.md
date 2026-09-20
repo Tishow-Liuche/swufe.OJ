@@ -1,0 +1,11 @@
+# CF full-history accepted records
+
+Goal: sync every public CF accepted problem, including those without a local statement, with a missing-statement dialog on click. No fabricated problems, no imported test data, no changes to local-only overall points.
+
+Data: make ExternalSolvedProblem.problemId nullable and use SetNull on problem deletion. Retain remote identity and raw submission metadata. Scope submission uniqueness to user/platform/submission so records remain user-owned; existing account-binding uniqueness rules are unchanged. Migration preserves rows; back up table and test before deployment.
+
+Sync: durable dedicated BullMQ queue, authenticated start/status routes keyed to current user, deduplicated active job, bounded concurrency, page size1000 with >2s between requests. Fetch pages until a short page, retain newest AC per CF ID, guard repeated pages and network/body errors. Do not declare success on partial history. Upsert by user/platform/problem, nullable link; re-sync links newly imported problems. UI polls progress and recovers status after refresh. Old sync endpoint aliases the same queue so older clients cannot bypass concurrency protection; new UI uses queue start/status.
+
+Consumers: accepted list includes synthetic display metadata (not database Problem rows), stable external keys and explicit statementAvailable flag. Missing items open a styled dialog, linked items keep normal local navigation. Stats use distinct local IDs plus platform/remote IDs for unlinked records; difficulty uses CF rating when known else unrated. Global solved ranking counts each remote item separately; assignment/contest matching still requires local IDs and overall score remains local submissions only.
+
+Tests: red/green sync page2 AC, unmatched import, idempotency/linking, page failure, repeated pages, queue ownership/dedup; list/stats/ranking unmapped items and dedup; browser missing dialog and linked navigation; full suites/build. Deploy backwards-compatible DB migration + new generated Linux Prisma client/backend + static files with backups. Run owned fixtures first, then real bound-user sync (authorized), verify total809 current baseline and all unmatched visible. Push student branch42411036.

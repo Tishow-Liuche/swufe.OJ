@@ -13,6 +13,7 @@ import { SubmissionService } from '../submission/submission.service';
 import { contestantSubmission } from '../submission/submission-privacy';
 import { ContestCacheService } from './contest-cache.service';
 import { ContestStandingsCalculatorService } from './contest-standings-calculator.service';
+import { externalSolvedIdentity } from '../common/external-solved';
 
 type Viewer = { id: string; role?: string };
 
@@ -515,7 +516,7 @@ export class ContestService {
       }),
       this.prisma.externalSolvedProblem.findMany({
         where,
-        select: { userId: true, problemId: true },
+        select: { userId: true, problemId: true, platform: true, remoteProblemId: true },
       }),
     ]);
     const byUser = new Map<string, any[]>();
@@ -527,7 +528,7 @@ export class ContestService {
     });
     externalSolved.forEach((solved) => {
       const items = externalAcceptedByUser.get(solved.userId) || new Set<string>();
-      items.add(solved.problemId);
+      items.add(externalSolvedIdentity(solved));
       externalAcceptedByUser.set(solved.userId, items);
     });
     const rows = users.map((user) => {

@@ -23,6 +23,8 @@ describe('ContestService practice leaderboard', () => {
         findMany: jest.fn().mockResolvedValue([
           { userId: 'u1', problemId: 'p-local' },
           { userId: 'u1', problemId: 'p-cf' },
+          { userId: 'u1', problemId: null, platform: 'CODEFORCES', remoteProblemId: '999A' },
+          { userId: 'u1', problemId: null, platform: 'CODEFORCES', remoteProblemId: '999B' },
         ]),
       },
     };
@@ -32,11 +34,11 @@ describe('ContestService practice leaderboard', () => {
 
     expect(prisma.externalSolvedProblem.findMany).toHaveBeenCalledWith({
       where: {},
-      select: { userId: true, problemId: true },
+      select: { userId: true, problemId: true, platform: true, remoteProblemId: true },
     });
     expect(rows[0]).toEqual(expect.objectContaining({
       userId: 'u1',
-      solvedCount: 2,
+      solvedCount: 4,
       submissionCount: 2,
       acceptRate: 50,
     }));
