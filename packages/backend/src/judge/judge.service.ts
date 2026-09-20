@@ -30,7 +30,7 @@ interface GoJudgeResult {
   runTime: number;    // ns
   files?: Record<string, string>;
   fileIds?: Record<string, string>;
-  fileError?: Array<{ name: string; message: string }>;
+  fileError?: Array<{ name: string; message: string; type?: string }>;
 }
 
 export interface CompileResult {
@@ -153,7 +153,8 @@ export class JudgeService {
       // Compilation failed
       const stderr = result.files?.['stderr'] || '';
       const stdout = result.files?.['stdout'] || '';
-      const systemError = Boolean(result.error || result.signal) || !['Nonzero Exit Status', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Output Limit Exceeded'].includes(result.status);
+      const outputLimit = this.isOutputLimitEvidence(result);
+      const systemError = Boolean((result.error && !outputLimit) || result.signal || (result.fileError?.length && !outputLimit)) || !['Nonzero Exit Status', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Output Limit Exceeded'].includes(result.status);
       return { success: false, ...(systemError ? { systemError: true } : {}), message: `${stdout}\n${stderr}\n${result.error || ''}`.trim() || `Compilation: ${result.status}` };
     } catch (error: any) {
       this.logger.error(`Compile error: ${error.message}`);
@@ -240,7 +241,7 @@ export class JudgeService {
     try {
       const result = await this.requestRun(request, clockLimit / 1_000_000 + 5000);
 
-      const status = result.fileError?.length || (result.status === 'Accepted' && (result.error || result.signal))
+      const status = (result.fileError?.length && !this.isOutputLimitEvidence(result)) || (result.status === 'Accepted' && (result.error || result.signal))
         ? 'SYSTEM_ERROR' : STATUS_MAP[result.status] || 'SYSTEM_ERROR';
       const timeUsed = Math.round(result.time / 1_000_000);   // ns → ms
       const memoryUsed = Math.round(result.memory / 1024);     // bytes → KB
@@ -268,6 +269,15 @@ export class JudgeService {
     }
   }
 
+  private isOutputLimitEvidence(result: GoJudgeResult): boolean {
+    // go-judge reports truncated stdout/stderr as a collection error as well as OLE.
+    // Only this specific evidence is a contestant limit, not an infrastructure fault.
+    return result.status === 'Output Limit Exceeded'
+      && (!result.error || result.error === 'Output Limit Exceeded')
+      && (result.fileError || []).every((entry) => ['stdout', 'stderr'].includes(entry.name)
+        && entry.type === 'CollectSizeExceeded' && entry.message === 'Output Limit Exceeded');
+  }
+
   private async requestRun(request: GoJudgeRequest, deadlineMs: number): Promise<GoJudgeResult> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), deadlineMs);
@@ -286,7 +296,7 @@ export class JudgeService {
         || !Number.isFinite(result.memory) || result.memory < 0
         || !stringMap(result.files) || !stringMap(result.fileIds)
         || (result.status === 'Accepted' && (typeof result.files?.stdout !== 'string' || typeof result.files?.stderr !== 'string'))
-        || (result.fileError !== undefined && (!Array.isArray(result.fileError) || result.fileError.some((entry) => !entry || typeof entry.name !== 'string' || typeof entry.message !== 'string')))
+        || (result.fileError !== undefined && (!Array.isArray(result.fileError) || result.fileError.some((entry) => !entry || typeof entry.name !== 'string' || typeof entry.message !== 'string' || (entry.type !== undefined && typeof entry.type !== 'string'))))
         || (result.error !== undefined && typeof result.error !== 'string')
         || (result.signal !== undefined && typeof result.signal !== 'string' && typeof result.signal !== 'number')) {
         throw new Error('Malformed sandbox response');

@@ -161,4 +161,23 @@ describe('JudgeService go-judge requests', () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => [{ status: 'Accepted', exitStatus: 0, time: 0, memory: 0, files: { stdout: '', stderr: '' } }] });
     expect(await service.run('cpp', '', 1000, 256, 'artifact')).toEqual(expect.objectContaining({ status: 'ACCEPTED', output: '', stderr: '' }));
   });
+
+  it.each(['stdout', 'stderr'])('keeps sandbox output-limit collector evidence for %s as OLE, not infrastructure error', async (name) => {
+    fetchMock.mockResolvedValue({ok:true,json:async()=>[{
+      status:'Output Limit Exceeded',exitStatus:0,time:43_000_000,memory:36_000_000,
+      error:'Output Limit Exceeded',files:{stdout:'truncated',stderr:''},
+      fileError:[{name,type:'CollectSizeExceeded',message:'Output Limit Exceeded'}],
+    }]});
+    expect((await service.run('python','',1000,256,undefined,'print("large")')).status).toBe('OUTPUT_LIMIT_EXCEEDED');
+    expect(await service.compile('cpp','bad code')).toEqual(expect.objectContaining({success:false}));
+    expect((await service.compile('cpp','bad code')).systemError).not.toBe(true);
+  });
+
+  it('does not hide unrelated copy failures behind an output-limit status', async () => {
+    fetchMock.mockResolvedValue({ok:true,json:async()=>[{
+      status:'Output Limit Exceeded',exitStatus:0,time:0,memory:0,
+      fileError:[{name:'stdout',type:'CopyOutOpenError',message:'disk failure'}],
+    }]});
+    expect((await service.run('python','',1000,256,undefined,'pass')).status).toBe('SYSTEM_ERROR');
+  });
 });
