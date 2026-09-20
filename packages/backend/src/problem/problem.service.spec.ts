@@ -763,6 +763,18 @@ describe('ProblemService createFull with judge data', () => {
     ])).not.toThrow();
   });
 
+  it('keeps history lists lightweight without fetching statement, samples or checker source', async () => {
+    prisma.problem.findMany.mockResolvedValue([]);
+    prisma.problem.count.mockResolvedValue(0);
+    await service.findAuthored({}, { id: 'teacher-1', role: 'TEACHER' });
+    const version = prisma.problem.findMany.mock.calls[0][0].select.versions.select;
+    expect(version.description).toBeUndefined();
+    expect(version.sampleInput).toBeUndefined();
+    expect(version.sampleOutput).toBeUndefined();
+    expect(version.checker).toEqual({ select: { type: true } });
+    expect(version._count).toEqual({ select: { testCases: true } });
+  });
+
   describe('bounded high-compression ZIP import', () => {
     beforeEach(() => {
       prisma.problem.findUnique.mockResolvedValue({ id: 'p1' });

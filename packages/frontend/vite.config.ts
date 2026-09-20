@@ -3,6 +3,14 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Shared tiny icon chunks otherwise add many high-latency requests.
+        manualChunks: { icons: ['@lucide/vue'] },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': {

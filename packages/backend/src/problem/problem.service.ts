@@ -279,10 +279,7 @@ export class ProblemService {
             select: {
               id: true,
               version: true,
-              description: true,
-              sampleInput: true,
-              sampleOutput: true,
-              checker: true,
+              checker: { select: { type: true } },
               _count: { select: { testCases: true } },
             },
           },
