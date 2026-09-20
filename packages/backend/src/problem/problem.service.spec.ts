@@ -769,6 +769,21 @@ describe('ProblemService createFull with judge data', () => {
       prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1, testCases: [], testGroups: [], checker: { type: 'STANDARD' } });
     });
 
+    it('imports a 12 MiB input without copying it into public samples', async () => {
+      const input = '0'.repeat(12 * 1024 * 1024);
+      await service.uploadTestData('p1', zipFile({ 'abs1.in': input, 'abs1.out': '0' }), actor);
+      const data = prisma.problemVersion.create.mock.calls[0][0].data;
+      expect(data.testCases.create[0].input).toBe(input);
+      expect(data.sampleInput || '').toBe('');
+      expect(data.sampleOutput || '').toBe('');
+    });
+
+    it('accepts the 64 MiB entry boundary and rejects larger declarations', () => {
+      const entry = (size: number) => [{ isDirectory: false, header: { size, compressedSize: 1000 } }];
+      expect(() => service.validateZipBudget(entry(64 * 1024 * 1024))).not.toThrow();
+      expect(() => service.validateZipBudget(entry(64 * 1024 * 1024 + 1))).toThrow();
+    });
+
     it.each(['STANDARD', 'SPJ'])('imports real high-ratio %s data without changing its contents', async mode => {
       prisma.problemVersion.findFirst.mockResolvedValue({ id: 'v1', version: 1, testCases: [], testGroups: [], checker: { type: mode } });
       const input = '0 '.repeat(50000);

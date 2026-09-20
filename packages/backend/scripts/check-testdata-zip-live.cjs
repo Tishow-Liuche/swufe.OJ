@@ -29,6 +29,28 @@ async function current(id) {
   assert.equal(login.status, 200, 'Audit teacher login');
   token = (await login.json()).accessToken;
   assert(token, 'Login issued access token');
+  if (process.env.LARGE_IMPORT_AUDIT === '1') {
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const description = 'Large authoring audit '.repeat(50000);
+    const created = await fetch(base + '/api/problems', { method: 'POST', headers, body: JSON.stringify({ title: 'Large audit ' + nonce, description, status: 'DRAFT' }), signal: AbortSignal.timeout(45000) });
+    assert.equal(created.status, 201, '1 MiB create');
+    const problem = await created.json();
+    problems.push(problem.id);
+    const edited = await fetch(base + '/api/problems/' + problem.id, { method: 'PATCH', headers, body: JSON.stringify({ description: description + ' edited' }), signal: AbortSignal.timeout(45000) });
+    assert.equal(edited.status, 200, '1 MiB edit');
+    await edited.arrayBuffer();
+    const bytes = Number(process.env.AUDIT_INPUT_MIB || 12) * 1024 * 1024;
+    const uploaded = await upload(problem.id, zip({ 'abs1.in': '0'.repeat(bytes), 'abs1.out': '0' }));
+    assert.equal(uploaded.status, 201, 'Large test import: ' + (uploaded.data.message || ''));
+    const version = await current(problem.id);
+    assert.equal(Buffer.byteLength(version.testCases[0].input), bytes);
+    assert.equal(version.sampleInput || '', '');
+    assert.equal(version.sampleOutput || '', '');
+    const tooLarge = await fetch(base + '/api/problems', { method: 'POST', headers, body: JSON.stringify({ description: 'x'.repeat(16 * 1024 * 1024) }), signal: AbortSignal.timeout(45000) });
+    assert.equal(tooLarge.status, 413);
+    assert.match((await tooLarge.json()).message, /16 MiB/);
+    console.log(`PASS large authoring: 1 MiB create/edit, ${bytes / 1024 / 1024} MiB test input, no sample bloat, >16 MiB rejected`);
+  }
   for (const mode of ['STANDARD', 'SPJ']) {
     const problem = await db.problem.create({ data: { title: 'Temporary ZIP audit ' + nonce, problemNo: -randomInt(100000000, 999999999), createdById: user.id, status: 'DRAFT', versions: { create: { description: 'Temporary import verification', checker: { create: { type: mode, protocol: 'BOOLEAN_STDOUT', ...(mode === 'SPJ' ? { language: 'python', sourceCode: 'print(True)' } : {}) } } } } } });
     problems.push(problem.id);
@@ -47,7 +69,7 @@ async function current(id) {
     assert.equal((await db.problemVersion.findUnique({ where: { id: original.id }, include: { testCases: true } })).testCases.length, 0);
     console.log(`PASS ${mode}: >100:1 real ZIP imported through authenticated HTTP, contents intact, previous version retained`);
 
-    for (const [name, offset, value] of [['zero-size', 24, 0], ['false-size', 24, 1], ['bad-crc', 16, 0], ['over-limit', 24, 10 * 1024 * 1024 + 1]]) {
+    for (const [name, offset, value] of [['zero-size', 24, 0], ['false-size', 24, 1], ['bad-crc', 16, 0], ['over-limit', 24, 64 * 1024 * 1024 + 1]]) {
       const bad = Buffer.from(buffer), central = bad.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
       bad.writeUInt32LE(value, central + offset);
       assert.equal((await upload(problem.id, bad)).status, 400, name);
@@ -56,7 +78,7 @@ async function current(id) {
     assert.equal((await upload(problem.id, Buffer.from('PKbroken'))).status, 400);
     console.log(`PASS ${mode}: forged zero/short/oversized headers, CRC corruption and malformed ZIP rejected with HTTP 400`);
   }
-})().catch(e => { console.error(e.message); process.exitCode = 1; }).finally(async () => {
+})().catch(e => { console.error(e.message, e.cause?.code || ''); process.exitCode = 1; }).finally(async () => {
   try {
     for (const id of problems) await db.problem.delete({ where: { id } });
     if (user) await db.user.delete({ where: { id: user.id } });

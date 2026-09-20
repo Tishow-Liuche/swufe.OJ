@@ -15,7 +15,7 @@ const PROBLEM_STATUSES = new Set(['DRAFT', 'PUBLISHED', 'CONTEST_RESERVED']);
 const TEST_DATA_REQUIRED_STATUSES = new Set(['PUBLISHED', 'CONTEST_RESERVED']);
 
 const MAX_ZIP_ENTRIES = 200;
-const MAX_ZIP_ENTRY_BYTES = 10 * 1024 * 1024;
+const MAX_ZIP_ENTRY_BYTES = 64 * 1024 * 1024;
 const MAX_ZIP_TOTAL_BYTES = 100 * 1024 * 1024;
 
 @Injectable()
@@ -103,8 +103,11 @@ export class ProblemService {
       const judgeMode: JudgeMode = version.checker?.type === 'SPJ' ? 'SPJ' : 'STANDARD';
       const cases = this.parseTestDataZip(file, judgeMode);
       const samples: Record<string, string> = {};
-      if (!String(version.sampleInput || '').trim()) samples.sampleInput = cases[0].input;
-      if (judgeMode === 'STANDARD' && !String(version.sampleOutput || '').trim()) samples.sampleOutput = cases[0].expectedOutput;
+      // Large judge fixtures are not page samples; avoid bloating subsequent edits.
+      if (Buffer.byteLength(cases[0].input) + Buffer.byteLength(cases[0].expectedOutput) <= 64 * 1024) {
+        if (!String(version.sampleInput || '').trim()) samples.sampleInput = cases[0].input;
+        if (judgeMode === 'STANDARD' && !String(version.sampleOutput || '').trim()) samples.sampleOutput = cases[0].expectedOutput;
+      }
       const created = await this.publishVersion(tx, version, latestProblem, {
         ...samples, testCases: cases,
         testGroups: [{ name: file.originalname, score: 100, testCount: cases.length, order: 1 }],
@@ -688,7 +691,7 @@ export class ProblemService {
         throw new BadRequestException('ZIP 条目大小无效');
       }
       if (size > MAX_ZIP_ENTRY_BYTES) {
-        throw new BadRequestException('单个文件解压后大小超过限制，最大 10MB');
+        throw new BadRequestException('单个文件解压后大小超过限制，最大 64 MiB');
       }
 
       totalSize += size;

@@ -4,11 +4,13 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { configureHttpSecurity } from './common/security-config';
+import { configureRequestBodies } from './common/request-body-config';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
 
   configureHttpSecurity(app, app.get(ConfigService));
+  configureRequestBodies(app.getHttpAdapter().getInstance());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
