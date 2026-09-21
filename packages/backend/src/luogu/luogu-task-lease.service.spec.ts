@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import { LuoguHelperController } from './luogu-helper.controller';
 import {
   LuoguTaskLeaseService,
   normalizeLuoguReportedStatus,
@@ -166,6 +167,82 @@ describe('normalizeLuoguStatus', () => {
 
   it('maps unknown statuses to SYSTEM_ERROR', () => {
     expect(normalizeLuoguStatus('Something strange')).toBe('SYSTEM_ERROR');
+  });
+});
+
+describe('Luogu blocked reports', () => {
+  const report = { failureCode: 'LANGUAGE_MISMATCH', failureMessage: 'Compiler language does not match', rawStatus: 'C selected' };
+  function fixture(patch: any = {}) {
+    const prisma = makePrisma({ submissionId: 's', platformCode: 'LUOGU', status: 'PROCESSING', nonce: 'token', leaseNonce: 'lease', remoteSubmissionId: null, expiresAt: new Date(Date.now() + 60000), ...patch });
+    prisma.remoteSubmissionTask.updateMany.mockResolvedValue({ count: 1 });
+    prisma.submission.updateMany.mockResolvedValue({ count: 1 });
+    prisma.remoteJudgeJob.updateMany.mockResolvedValue({ count: 1 });
+    return { prisma, service: new LuoguTaskLeaseService(prisma) as any };
+  }
+  it('registers report-blocked and forwards authenticated fields', async () => {
+    const lease: any = { reportBlocked: jest.fn().mockResolvedValue({ ok: true }) };
+    const controller: any = new LuoguHelperController(lease);
+    expect(typeof controller.reportBlocked).toBe('function');
+    expect(Reflect.getMetadata('path', controller.reportBlocked)).toBe(':submissionId/report-blocked');
+    expect(Reflect.getMetadata('method', controller.reportBlocked)).toBe(1); // POST
+    await controller.reportBlocked('s', { token: 'token', leaseNonce: 'lease', ...report });
+    expect(lease.reportBlocked).toHaveBeenCalledWith('s', 'token', 'lease', expect.objectContaining(report));
+  });
+  it('atomically records a pre-submit language failure without inventing a verdict', async () => {
+    const { service, prisma } = fixture();
+    await expect(service.reportBlocked('s', 'token', 'lease', report)).resolves.toEqual({ ok: true, submissionId: 's', status: 'REMOTE_ERROR' });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.remoteSubmissionTask.updateMany).toHaveBeenCalledWith({ where: expect.objectContaining({ submissionId: 's', platformCode: 'LUOGU', nonce: 'token', leaseNonce: 'lease', remoteSubmissionId: null, status: 'PROCESSING' }), data: expect.objectContaining({ status: 'FAILED', helperStage: 'LANGUAGE_MISMATCH', failureCode: report.failureCode, failureMessage: report.failureMessage }) });
+    expect(prisma.submission.updateMany).toHaveBeenCalledWith({ where: { id: 's', status: { in: ['PENDING', 'PROCESSING', 'QUEUING', 'JUDGING'] } }, data: { status: 'REMOTE_ERROR', score: 0, compileMessage: report.failureMessage, judgedAt: expect.any(Date) } });
+    expect(prisma.remoteJudgeJob.updateMany).toHaveBeenCalledWith({ where: { submissionId: 's', remoteSubmissionId: null }, data: { finishedAt: expect.any(Date), rawStatus: 'LANGUAGE_MISMATCH: Compiler language does not match\nC selected' } });
+  });
+  it.each([
+    [{ nonce: null }, 'token', 'lease'], [{}, 'wrong', 'lease'], [{}, '', 'lease'],
+    [{}, 'token', 'wrong'], [{}, 'token', ''], [{ leaseNonce: null }, 'token', 'lease'],
+    [{ platformCode: 'CODEFORCES' }, 'token', 'lease'], [{ status: 'COMPLETED' }, 'token', 'lease'],
+    [{ status: 'FAILED' }, 'token', 'lease'], [{ remoteSubmissionId: '123' }, 'token', 'lease'],
+    [{ expiresAt: new Date(0) }, 'token', 'lease'],
+  ])('rejects unsafe task/auth combination %p', async (patch, token, lease) => {
+    const { service, prisma } = fixture(patch);
+    await expect(service.reportBlocked('s', token, lease, report)).rejects.toThrow();
+    expect(prisma.remoteSubmissionTask.updateMany).not.toHaveBeenCalled();
+    expect(prisma.submission.updateMany).not.toHaveBeenCalled();
+  });
+  it.each(['LOGIN_REQUIRED', 'VERIFICATION_REQUIRED'])('accepts authenticated pre-lease %s', async failureCode => {
+    const { service } = fixture({ leaseNonce: null });
+    await expect(service.reportBlocked('s', 'token', undefined, { ...report, failureCode })).resolves.toHaveProperty('status', 'REMOTE_ERROR');
+  });
+  it('accepts FORM_TIMEOUT with an existing matching lease', async () => {
+    const { service } = fixture();
+    await expect(service.reportBlocked('s', 'token', 'lease', { ...report, failureCode: 'FORM_TIMEOUT' })).resolves.toHaveProperty('ok', true);
+  });
+  it.each(['ACCEPTED', '', 'ARBITRARY_ERROR'])('rejects unsupported failure code %s', async failureCode => {
+    const { service, prisma } = fixture();
+    await expect(service.reportBlocked('s', 'token', 'lease', { ...report, failureCode })).rejects.toThrow();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it('aborts when the task changes concurrently', async () => {
+    const { service, prisma } = fixture(); prisma.remoteSubmissionTask.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.reportBlocked('s', 'token', 'lease', report)).rejects.toThrow(ConflictException);
+    expect(prisma.submission.updateMany).not.toHaveBeenCalled();
+  });
+  it('throws inside the transaction when submission is already terminal (rollback)', async () => {
+    const { service, prisma } = fixture(); prisma.submission.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.reportBlocked('s', 'token', 'lease', report)).rejects.toThrow(ConflictException);
+    expect(prisma.remoteJudgeJob.updateMany).not.toHaveBeenCalled();
+  });
+  it('rolls back if the judge job already has a remote ID or is missing', async () => {
+    const { service, prisma } = fixture(); prisma.remoteJudgeJob.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.reportBlocked('s', 'token', 'lease', report)).rejects.toThrow(ConflictException);
+  });
+  it.each(['', '   ', null])('rejects missing human-readable reason %p', async failureMessage => {
+    const { service, prisma } = fixture();
+    await expect(service.reportBlocked('s', 'token', 'lease', { ...report, failureMessage })).rejects.toThrow();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it('requires the current lease even for login reports when a lease exists', async () => {
+    const { service } = fixture();
+    await expect(service.reportBlocked('s', 'token', undefined, { ...report, failureCode: 'LOGIN_REQUIRED' })).rejects.toThrow(ConflictException);
   });
 });
 

@@ -53,4 +53,18 @@ export class LuoguHelperController {
   ) {
     return this.lease.reportResult(id, body.token, body.leaseNonce, body);
   }
+
+  @Post(':submissionId/report-blocked')
+  reportBlocked(
+    @Param('submissionId') id: string,
+    @Body() body: {
+      token: string;
+      leaseNonce?: string;
+      failureCode: string;
+      failureMessage: string;
+      rawStatus?: string;
+    },
+  ) {
+    return this.lease.reportBlocked(id, body.token, body.leaseNonce, body);
+  }
 }

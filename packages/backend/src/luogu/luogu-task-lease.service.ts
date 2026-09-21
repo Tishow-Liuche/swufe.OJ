@@ -274,6 +274,63 @@ export class LuoguTaskLeaseService {
     return { ok: true, submissionId, status };
   }
 
+  async reportBlocked(
+    submissionId: string,
+    token: string,
+    leaseNonce: string | undefined,
+    data: { failureCode: string; failureMessage: string; rawStatus?: string },
+  ) {
+    const allowed = ['LOGIN_REQUIRED', 'VERIFICATION_REQUIRED', 'FORM_TIMEOUT', 'LANGUAGE_MISMATCH'];
+    if (!allowed.includes(data.failureCode)) {
+      throw new BadRequestException('Unsupported helper failure code');
+    }
+    if (typeof data.failureMessage !== 'string' || !data.failureMessage.trim()) {
+      throw new BadRequestException('failureMessage required');
+    }
+    const task = await this.loadTask(submissionId, token);
+    // Unlike older report paths, a missing stored nonce never authenticates.
+    if (!task.nonce || task.nonce !== token) throw new ConflictException('Task token mismatch');
+    const needsLease = ['FORM_TIMEOUT', 'LANGUAGE_MISMATCH'].includes(data.failureCode);
+    if ((task.leaseNonce && task.leaseNonce !== leaseNonce) ||
+        (!task.leaseNonce && (needsLease || !!leaseNonce))) {
+      throw new ConflictException('Lease nonce mismatch');
+    }
+    if (!['PENDING', 'PROCESSING'].includes(task.status) || task.remoteSubmissionId) {
+      throw new ConflictException('Task is not awaiting a helper submission');
+    }
+    const now = new Date();
+    const failureMessage = data.failureMessage.trim().slice(0, 2000);
+    const rawStatus = `${data.failureCode}: ${failureMessage}` +
+      (typeof data.rawStatus === 'string' && data.rawStatus ? `\n${data.rawStatus.slice(0, 500)}` : '');
+    await this.prisma.$transaction(async tx => {
+      // Compare-and-set the authenticated pre-submit state. A concurrent lease,
+      // remote ID or result makes this fail, and all later failures roll back.
+      const changed = await tx.remoteSubmissionTask.updateMany({
+        where: {
+          submissionId, platformCode: 'LUOGU', nonce: token,
+          leaseNonce: task.leaseNonce, status: task.status,
+          remoteSubmissionId: null, expiresAt: { gt: now },
+        },
+        data: {
+          status: 'FAILED', helperStage: data.failureCode,
+          failureCode: data.failureCode, failureMessage,
+        },
+      });
+      if (changed.count !== 1) throw new ConflictException('Task changed before blocked report');
+      const submission = await tx.submission.updateMany({
+        where: { id: submissionId, status: { in: OPEN_STATUSES } },
+        data: { status: 'REMOTE_ERROR', score: 0, compileMessage: failureMessage, judgedAt: now },
+      });
+      if (submission.count !== 1) throw new ConflictException('Submission is already terminal');
+      const job = await tx.remoteJudgeJob.updateMany({
+        where: { submissionId, remoteSubmissionId: null },
+        data: { finishedAt: now, rawStatus },
+      });
+      if (job.count !== 1) throw new ConflictException('Remote judge job is missing or already submitted');
+    });
+    return { ok: true, submissionId, status: 'REMOTE_ERROR' };
+  }
+
   private async loadTask(submissionId: string, token: string) {
     if (!submissionId) throw new BadRequestException('submissionId required');
     if (!token) throw new BadRequestException('token required');
