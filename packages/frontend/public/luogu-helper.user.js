@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - Luogu Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      1.7
+// @version      1.8
 // @description  Auto fill code, auto submit to Luogu, report result back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
 // @match        https://www.luogu.com.cn/*
@@ -23,7 +23,7 @@
 var DEFAULT_API = 'http://127.0.0.1:3000';
 var API_BASE_KEY = 'swufe_oj_api_base';
 var API = resolveApiBase();
-var HELPER_VERSION = '1.7';
+var HELPER_VERSION = '1.8';
 var STATE_KEY = 'swufe_luogu_auto_state';
 var SUBMIT_ONCE_KEY_PREFIX = 'swufe_luogu_submit_once_';
 var LOGIN_REQUIRED_KEY = 'swufe_luogu_login_required_at';
@@ -359,61 +359,58 @@ function findSubmitButton() {
 }
 
 function normalizeStatus(text) {
-  text = String(text || '').toUpperCase();
-  if (/ACCEPTED|答案正确|\bAC\b/.test(text)) return 'ACCEPTED';
-  if (/WRONG ANSWER|答案错误|\bWA\b/.test(text)) return 'WRONG_ANSWER';
-  if (/TIME LIMIT|超时|\bTLE\b/.test(text)) return 'TIME_LIMIT_EXCEEDED';
-  if (/MEMORY LIMIT|内存|\bMLE\b/.test(text)) return 'MEMORY_LIMIT_EXCEEDED';
-  if (/RUNTIME ERROR|运行错误|\bRE\b/.test(text)) return 'RUNTIME_ERROR';
-  if (/COMPILE ERROR|编译错误|\bCE\b/.test(text)) return 'COMPILE_ERROR';
-  if (/WAITING|JUDGING|COMPILING|RUNNING|评测|等待|编译|运行/.test(text)) return 'JUDGING';
-  return '';
+  return normalizeLuoguVerdictStatus(text);
 }
 
 function normalizeLuoguVerdictStatus(text) {
   text = String(text || '').replace(/\s+/g, ' ').trim();
-  var upper = text.toUpperCase();
-  if (/ACCEPTED|答案正确|通过|(?:^|[^A-Z])AC(?:[^A-Z]|$)/i.test(text)) return 'ACCEPTED';
-  if (/WRONG\s+ANSWER|答案错误|(?:^|[^A-Z])WA(?:[^A-Z]|$)/i.test(text)) return 'WRONG_ANSWER';
-  if (/TIME\s+LIMIT\s+EXCEEDED|时间超限|超时|(?:^|[^A-Z])TLE(?:[^A-Z]|$)/i.test(text)) return 'TIME_LIMIT_EXCEEDED';
-  if (/MEMORY\s+LIMIT\s+EXCEEDED|内存超限|超过内存|内存限制超出|(?:^|[^A-Z])MLE(?:[^A-Z]|$)/i.test(text)) return 'MEMORY_LIMIT_EXCEEDED';
-  if (/RUNTIME\s+ERROR|运行错误|(?:^|[^A-Z])RE(?:[^A-Z]|$)/i.test(text)) return 'RUNTIME_ERROR';
-  if (/COMPILE\s+ERROR|编译错误|(?:^|[^A-Z])CE(?:[^A-Z]|$)/i.test(text)) return 'COMPILE_ERROR';
-  if (/WAITING|JUDGING|COMPILING|RUNNING|评测|等待|编译|运行/i.test(text) || /PENDING/.test(upper)) return 'JUDGING';
+  if (/^(?:ACCEPTED|答案正确|通过|AC)$/i.test(text)) return 'ACCEPTED';
+  if (/^(?:WRONG ANSWER|答案错误|WA)$/i.test(text)) return 'WRONG_ANSWER';
+  if (/^(?:TIME LIMIT EXCEEDED|时间超限|超时|TLE)$/i.test(text)) return 'TIME_LIMIT_EXCEEDED';
+  if (/^(?:MEMORY LIMIT EXCEEDED|内存超限|超过内存|内存限制超出|MLE)$/i.test(text)) return 'MEMORY_LIMIT_EXCEEDED';
+  if (/^(?:RUNTIME ERROR|运行错误|RE)$/i.test(text)) return 'RUNTIME_ERROR';
+  if (/^(?:COMPILE ERROR|COMPILATION ERROR|编译错误|CE)$/i.test(text)) return 'COMPILE_ERROR';
+  if (/^(?:OUTPUT LIMIT EXCEEDED|UNKNOWN ERROR|INTERNAL ERROR|OLE|UKE)$/i.test(text)) return 'REMOTE_ERROR';
+  if (/^(?:WAITING|JUDGING|COMPILING|RUNNING|PENDING|等待|评测中|编译中)$/i.test(text)) return 'JUDGING';
   return '';
 }
 
+// Verified against Luogu RecordShow (20260919-2271), not global page text.
+function recordField(label) {
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.l-flex-info-row'));
+  var matches = rows.filter(function(row) {
+    return languageVisible(row) && row.children.length === 2 && visibleText(row.children[0]) === label;
+  });
+  return matches.length === 1 ? visibleText(matches[0].children[1]) : '';
+}
+
 function extractLuoguVerdictText() {
-  var selectors = [
-    '[class*="status"]',
-    '[class*="result"]',
-    '[class*="verdict"]',
-    '[class*="judge"]',
-    'td',
-    'span',
-    'div'
-  ];
-  var seen = [];
-  var candidates = [];
-  for (var i = 0; i < selectors.length; i++) {
-    var nodes = Array.prototype.slice.call(document.querySelectorAll(selectors[i]));
-    for (var j = 0; j < nodes.length; j++) {
-      if (seen.indexOf(nodes[j]) !== -1) continue;
-      seen.push(nodes[j]);
-      var itemText = visibleText(nodes[j]);
-      if (!itemText || itemText.length > 120) continue;
-      candidates.push(itemText);
+  return recordField('评测状态');
+}
+
+function readRecordResult() {
+  var verdict = extractLuoguVerdictText();
+  var status = normalizeLuoguVerdictStatus(verdict);
+  var cases = Array.prototype.slice.call(document.querySelectorAll('.test-case .status'))
+    .filter(languageVisible).map(visibleText);
+  // Unaccepted is an aggregate failure, never Accepted. Only inspect this
+  // record's testcase blocks to resolve its specific failure reason.
+  if (/^Unaccepted$/i.test(verdict)) {
+    for (var i = 0; i < cases.length; i++) {
+      var failure = normalizeLuoguVerdictStatus(cases[i]);
+      if (failure && failure !== 'ACCEPTED' && failure !== 'JUDGING') { status = failure; break; }
     }
   }
-
-  for (var k = 0; k < candidates.length; k++) {
-    var terminal = normalizeLuoguVerdictStatus(candidates[k]);
-    if (terminal && terminal !== 'JUDGING') return candidates[k];
-  }
-  for (var m = 0; m < candidates.length; m++) {
-    if (normalizeLuoguVerdictStatus(candidates[m]) === 'JUDGING') return candidates[m];
-  }
-  return '';
+  var header = document.querySelector('.header-layout .top-row');
+  var metrics = parseUsageMetrics(header ? visibleText(header) : '');
+  var scoreText = recordField('评测分数');
+  return {
+    status: status, verdict: verdict,
+    problemId: (recordField('所属题目').match(/^([A-Z]+\d+)\b/) || [])[1] || '',
+    score: /^\d+(?:\.\d+)?$/.test(scoreText) ? Number(scoreText) : undefined,
+    timeUsed: metrics.timeUsed, memoryUsed: metrics.memoryUsed,
+    rawStatus: '评测状态\n' + verdict + '\n测试点状态\n' + cases.join(' ')
+  };
 }
 
 function parseScore(text) {
@@ -464,10 +461,7 @@ function parseUsageMetrics(text) {
 }
 
 function parseRemoteId() {
-  var m =
-    location.href.match(/record\/(\d+)/i) ||
-    location.href.match(/submission\/(\d+)/i) ||
-    document.body.innerHTML.match(/record\/(\d+)/i);
+  var m = location.pathname.match(/^\/(?:record|submission)\/(\d+)\/?$/i);
   return m ? m[1] : '';
 }
 
@@ -476,14 +470,16 @@ function reportId(id) {
   var st = loadState();
   if (!id || !st.submissionId || !st.token || !st.leaseNonce) return;
   if (st.reportedId === id) return;
-  st.reportedId = id;
-  saveState(st);
   apiRequest('POST', '/api/luogu-submit-helper/' + st.submissionId + '/report-id', {
     token: st.token,
     leaseNonce: st.leaseNonce,
     remoteSubmissionId: id
   }, function(err) {
     if (err) console.warn('[Luogu Helper] report-id failed:', err);
+    else {
+      var current = loadState();
+      if (current.submissionId === st.submissionId) { current.reportedId = id; saveState(current); }
+    }
   });
 }
 
@@ -491,16 +487,24 @@ function reportResult(status, rawText) {
   if (!isActiveTaskState(loadState())) return;
   var st = loadState();
   if (!st.submissionId || !st.token || !st.leaseNonce) return;
-  rawText = document.body.innerText || rawText || '';
-  var rid = parseRemoteId() || st.reportedId || '';
-  var score = parseScore(rawText);
-  var metrics = parseUsageMetrics(rawText);
+  var rid = parseRemoteId();
+  if (!rid || st.reportedId !== rid) { setTimeout(watchResult, 2500); return; }
+  var current = readRecordResult();
+  if (status !== 'REMOTE_ERROR') {
+    if (!current.status || current.status === 'JUDGING' || current.problemId !== st.problemId) {
+      setTimeout(watchResult, 2500); return;
+    }
+    status = current.status;
+    rawText = current.rawStatus;
+  }
+  var score = current.score;
+  var metrics = current;
   if ((metrics.timeUsed === undefined || metrics.memoryUsed === undefined) && status !== 'REMOTE_ERROR') {
     st.metricWaits = (st.metricWaits || 0) + 1;
     saveState(st);
     if (st.metricWaits <= 8) {
       banner('已获得洛谷结果，等待时间/内存数据渲染...', '#3498db');
-      setTimeout(function() { reportResult(status, document.body.innerText || rawText); }, 1500);
+      setTimeout(function() { reportResult(status, rawText); }, 1500);
       return;
     }
   }
@@ -533,13 +537,13 @@ function watchResult() {
   function tick() {
     tries++;
     var rid = parseRemoteId();
-    if (rid) reportId(rid);
 
-    var text = document.body.innerText || '';
-    var verdictText = extractLuoguVerdictText();
-    var status = normalizeLuoguVerdictStatus(verdictText || text);
-    if (status && status !== 'JUDGING') {
-      reportResult(status, verdictText ? (verdictText + '\n' + text) : text);
+    var current = readRecordResult();
+    var st = loadState();
+    if (!isActiveTaskState(st)) return;
+    if (rid && current.problemId === st.problemId) reportId(rid);
+    if (current.status && current.status !== 'JUDGING' && current.problemId === st.problemId && st.reportedId === rid) {
+      reportResult(current.status, current.rawStatus);
       return;
     }
 

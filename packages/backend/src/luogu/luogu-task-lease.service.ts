@@ -155,10 +155,10 @@ export class LuoguTaskLeaseService {
     remoteSubmissionId: string,
   ) {
     const rid = String(remoteSubmissionId || '').trim();
-    if (!rid) throw new BadRequestException('remoteSubmissionId required');
+    if (!/^\d+$/.test(rid)) throw new BadRequestException('numeric remoteSubmissionId required');
 
     const task = await this.loadTask(submissionId, token);
-    if (task.leaseNonce && task.leaseNonce !== leaseNonce) {
+    if (!task.nonce || task.nonce !== token || !task.leaseNonce || task.leaseNonce !== leaseNonce) {
       throw new ConflictException('Lease nonce mismatch');
     }
     if (task.remoteSubmissionId) {
@@ -181,22 +181,26 @@ export class LuoguTaskLeaseService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.remoteSubmissionTask.update({
-        where: { submissionId },
+      const changed = await tx.remoteSubmissionTask.updateMany({
+        where: { submissionId, nonce: token, leaseNonce, remoteSubmissionId: null,
+          status: { in: ['PENDING', 'PROCESSING'] }, expiresAt: { gt: new Date() } },
         data: {
           remoteSubmissionId: rid,
           helperStage: 'REMOTE_ID_REPORTED',
           status: 'PROCESSING',
         },
       });
-      await tx.remoteJudgeJob.update({
-        where: { submissionId },
+      if (changed.count !== 1) throw new ConflictException('Task changed before record binding');
+      const job = await tx.remoteJudgeJob.updateMany({
+        where: { submissionId, remoteSubmissionId: null },
         data: { remoteSubmissionId: rid },
       });
-      await tx.submission.update({
-        where: { id: submissionId },
+      if (job.count !== 1) throw new ConflictException('Remote judge record already bound');
+      const submission = await tx.submission.updateMany({
+        where: { id: submissionId, status: { in: OPEN_STATUSES } },
         data: { status: 'JUDGING' },
       });
+      if (submission.count !== 1) throw new ConflictException('Submission is already terminal');
     });
 
     return { ok: true, submissionId, remoteSubmissionId: rid, status: 'JUDGING' };
@@ -221,7 +225,16 @@ export class LuoguTaskLeaseService {
       throw new ConflictException('Lease nonce mismatch');
     }
 
+    if (!task.nonce || task.nonce !== token || !task.leaseNonce || task.leaseNonce !== leaseNonce) {
+      throw new ConflictException('Task token or lease nonce mismatch');
+    }
+    if (!/^\d+$/.test(String(data.remoteSubmissionId || '')) || data.remoteSubmissionId !== task.remoteSubmissionId) {
+      throw new ConflictException('Result must match the confirmed remote record');
+    }
     const status = normalizeLuoguReportedStatus(data.status, data.rawStatus);
+    if (status === 'ACCEPTED' && !/(?:^|\n)评测状态\s*\nAccepted\s*(?:\n|$)/i.test(data.rawStatus || '')) {
+      throw new BadRequestException('Accepted requires an explicit primary record verdict; update the Luogu helper');
+    }
     const terminal = TERMINAL_STATUSES.has(status);
     const score = normalizeOptionalMetric(data.score) ?? (status === 'ACCEPTED' ? 100 : 0);
     const timeUsed = normalizeOptionalMetric(data.timeUsed);
@@ -230,8 +243,14 @@ export class LuoguTaskLeaseService {
       String(data.remoteSubmissionId || task.remoteSubmissionId || '').trim() || null;
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.submission.update({
-        where: { id: submissionId },
+      const changed = await tx.remoteSubmissionTask.updateMany({
+        where: { submissionId, platformCode: 'LUOGU', nonce: token, leaseNonce,
+          remoteSubmissionId, status: { in: ['PENDING', 'PROCESSING'] }, expiresAt: { gt: new Date() } },
+        data: { status: terminal ? 'COMPLETED' : 'PROCESSING', helperStage: terminal ? 'RESULT_REPORTED' : 'RESULT_POLLING' },
+      });
+      if (changed.count !== 1) throw new ConflictException('Task changed before result report');
+      const submission = await tx.submission.updateMany({
+        where: { id: submissionId, status: { in: OPEN_STATUSES } },
         data: {
           status,
           score,
@@ -241,6 +260,7 @@ export class LuoguTaskLeaseService {
           judgedAt: terminal ? new Date() : undefined,
         },
       });
+      if (submission.count !== 1) throw new ConflictException('Submission is already terminal');
       await tx.submissionCase.deleteMany({
         where: { submissionId, caseIndex: 1 },
       });
@@ -253,22 +273,14 @@ export class LuoguTaskLeaseService {
           memoryUsed,
         },
       });
-      await tx.remoteJudgeJob.update({
-        where: { submissionId },
+      const job = await tx.remoteJudgeJob.updateMany({
+        where: { submissionId, remoteSubmissionId },
         data: {
-          remoteSubmissionId: remoteSubmissionId || undefined,
           rawStatus: data.rawStatus || data.status,
           finishedAt: terminal ? new Date() : undefined,
         },
       });
-      await tx.remoteSubmissionTask.update({
-        where: { submissionId },
-        data: {
-          remoteSubmissionId: remoteSubmissionId || undefined,
-          status: terminal ? 'COMPLETED' : 'PROCESSING',
-          helperStage: terminal ? 'RESULT_REPORTED' : 'RESULT_POLLING',
-        },
-      });
+      if (job.count !== 1) throw new ConflictException('Remote judge record binding changed');
     });
 
     return { ok: true, submissionId, status };
@@ -371,6 +383,17 @@ export function normalizeLuoguStatus(raw: string): string {
     RUNTIME_ERROR: 'RUNTIME_ERROR',
     CE: 'COMPILE_ERROR',
     COMPILE_ERROR: 'COMPILE_ERROR',
+    COMPILATION_ERROR: 'COMPILE_ERROR',
+    答案正确: 'ACCEPTED',
+    通过: 'ACCEPTED',
+    答案错误: 'WRONG_ANSWER',
+    时间超限: 'TIME_LIMIT_EXCEEDED',
+    超时: 'TIME_LIMIT_EXCEEDED',
+    内存超限: 'MEMORY_LIMIT_EXCEEDED',
+    超过内存: 'MEMORY_LIMIT_EXCEEDED',
+    内存限制超出: 'MEMORY_LIMIT_EXCEEDED',
+    运行错误: 'RUNTIME_ERROR',
+    编译错误: 'COMPILE_ERROR',
     OLE: 'SYSTEM_ERROR',
     UKE: 'SYSTEM_ERROR',
     JUDGING: 'JUDGING',
@@ -378,23 +401,28 @@ export function normalizeLuoguStatus(raw: string): string {
     WAITING: 'QUEUING',
     COMPILING: 'JUDGING',
     RUNNING: 'JUDGING',
+    REMOTE_ERROR: 'REMOTE_ERROR',
+    SYSTEM_ERROR: 'SYSTEM_ERROR',
   };
   return map[text] || 'SYSTEM_ERROR';
 }
 
 export function normalizeLuoguReportedStatus(raw: string, rawStatus?: string): string {
   const reported = normalizeLuoguStatus(raw);
-  const text = String(rawStatus || '').replace(/\s+/g, ' ').trim();
+  const text = String(rawStatus || '').trim();
   if (!text) return reported;
-
-  const hasAcceptedVerdict = /ACCEPTED|答案正确|通过|(?:^|[^A-Z])AC(?:[^A-Z]|$)/i.test(text);
-  const hasMemoryExceededVerdict =
-    /MEMORY\s+LIMIT\s+EXCEEDED|内存超限|超过内存|内存限制超出|(?:^|[^A-Z])MLE(?:[^A-Z]|$)/i.test(text);
-
-  if (reported === 'MEMORY_LIMIT_EXCEEDED' && hasAcceptedVerdict && !hasMemoryExceededVerdict) {
-    return 'ACCEPTED';
+  const primary = text.match(/(?:^|\n)评测状态\s*\n([^\r\n]+)/)?.[1]?.trim();
+  if (primary) {
+    const actual = normalizeLuoguStatus(primary);
+    if (/^Unaccepted$/i.test(primary)) {
+      if (reported === 'ACCEPTED') throw new BadRequestException('Unaccepted cannot be reported as Accepted');
+    } else if (actual !== reported && reported !== 'REMOTE_ERROR') {
+      throw new BadRequestException('Reported result conflicts with the primary Luogu verdict');
+    }
+    return reported;
   }
-
+  // Compatibility only for an explicit old verdict prefix, never a substring.
+  if (reported === 'MEMORY_LIMIT_EXCEEDED' && /^Accepted\r?\nMemory Limit\b/i.test(text)) return 'ACCEPTED';
   return reported;
 }
 

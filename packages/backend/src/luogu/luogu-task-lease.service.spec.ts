@@ -138,12 +138,12 @@ describe('LuoguTaskLeaseService', () => {
       expiresAt: new Date('2026-07-14T12:30:00Z'),
     });
     prisma.remoteSubmissionTask.findFirst = jest.fn(async (args: any) => {
-      if (args.where.remoteSubmissionId === 'lg123') return { submissionId: 'sub_old' };
+      if (args.where.remoteSubmissionId === '123') return { submissionId: 'sub_old' };
       return prisma.__state?.task || null;
     });
     const service = new LuoguTaskLeaseService(prisma);
 
-    await expect(service.reportRemoteId('sub_new', 'task-token', 'lease-a', 'lg123'))
+    await expect(service.reportRemoteId('sub_new', 'task-token', 'lease-a', '123'))
       .rejects.toBeInstanceOf(ConflictException);
   });
 });
@@ -247,6 +247,15 @@ describe('Luogu blocked reports', () => {
 });
 
 describe('normalizeLuoguReportedStatus', () => {
+  it('rejects claimed AC while the primary remote verdict is Waiting', () => {
+    expect(() => normalizeLuoguReportedStatus('ACCEPTED', '评测状态\nWaiting\n提交时间\nAC')).toThrow();
+  });
+  it('rejects claimed AC for Unaccepted despite successful test cases', () => {
+    expect(() => normalizeLuoguReportedStatus('ACCEPTED', '评测状态\nUnaccepted\n提交时间\nAC\nWA')).toThrow();
+  });
+  it('never promotes MLE to AC because of an unrelated successful test case', () => {
+    expect(normalizeLuoguReportedStatus('MLE', '评测状态\nUnaccepted\n测试点\nAC\nMLE')).toBe('MEMORY_LIMIT_EXCEEDED');
+  });
   it('does not let generic memory-limit page text override an accepted Luogu verdict', () => {
     expect(
       normalizeLuoguReportedStatus(
@@ -254,6 +263,37 @@ describe('normalizeLuoguReportedStatus', () => {
         'Accepted\nMemory Limit 128 MB\nTime Limit 1.00s',
       ),
     ).toBe('ACCEPTED');
+  });
+});
+
+describe('Luogu result binding', () => {
+  function fixture(overrides = {}) {
+    const prisma = makePrisma({ submissionId: 's', platformCode: 'LUOGU', nonce: 'token', leaseNonce: 'lease', status: 'PROCESSING', remoteSubmissionId: '123', expiresAt: new Date(Date.now() + 60000), ...overrides });
+    return { prisma, service: new LuoguTaskLeaseService(prisma) };
+  }
+  const result = { remoteSubmissionId: '123', status: 'ACCEPTED', rawStatus: '评测状态\nAccepted\n测试点状态\nAC', score: 100 };
+  it('rejects a different remote record ID before writing', async () => {
+    const { prisma, service } = fixture();
+    await expect(service.reportResult('s', 'token', 'lease', { ...result, remoteSubmissionId: '456' })).rejects.toThrow();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it('requires a confirmed record binding', async () => {
+    const { service } = fixture({ remoteSubmissionId: null });
+    await expect(service.reportResult('s', 'token', 'lease', result)).rejects.toThrow();
+  });
+  it('requires authenticated stored token and lease', async () => {
+    const { service } = fixture({ nonce: null, leaseNonce: null });
+    await expect(service.reportResult('s', 'token', 'lease', result)).rejects.toThrow();
+  });
+  it('requires primary verdict evidence for AC', async () => {
+    const { service } = fixture();
+    await expect(service.reportResult('s', 'token', 'lease', { ...result, rawStatus: 'AC' })).rejects.toThrow();
+  });
+  it('rejects a concurrently changed task using compare-and-set', async () => {
+    const { prisma, service } = fixture();
+    await expect(service.reportResult('s', 'token', 'lease', result)).rejects.toThrow();
+    expect(prisma.remoteSubmissionTask.updateMany).toHaveBeenCalled();
+    expect(prisma.submission.update).not.toHaveBeenCalled();
   });
 });
 
