@@ -13,6 +13,7 @@ describe('CfAcceptedSyncService', () => {
       problemSource: {
         findMany: jest.fn(),
       },
+      problem: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       externalSolvedProblem: {
         findMany: jest.fn().mockResolvedValue([]),
         upsert: jest.fn().mockResolvedValue({}),
@@ -208,5 +209,21 @@ describe('CfAcceptedSyncService', () => {
     jest.spyOn(service as any, 'fetchUserStatus').mockResolvedValue([{ id: 1, creationTimeSeconds: 1700000000, problem: { contestId: 4, index: 'A', rating: 1200 }, verdict: 'OK', timeConsumedMillis: 1, memoryConsumedBytes: 1024 }]);
     expect((await service.syncUserAccepted('u1')).unchangedCount).toBe(1);
     expect(prisma.externalSolvedProblem.upsert).not.toHaveBeenCalled();
+  });
+
+  it('corrects a published local CF difficulty from its actual rated submission', async () => {
+    prisma.externalAccount.findFirst.mockResolvedValue({ remoteUsername: 'tourist' });
+    prisma.problemSource.findMany.mockResolvedValue([{ remoteProblemId: '2232D', problemId: 'local', problem: { status: 'PUBLISHED', difficulty: 'POINT_3' } }]);
+    jest.spyOn(service as any, 'fetchUserStatus').mockResolvedValue([{ id: 1, creationTimeSeconds: 1700000000, problem: { contestId: 2232, index: 'D', rating: 2000 }, verdict: 'OK' }]);
+    await service.syncUserAccepted('u1');
+    expect(prisma.problem.updateMany).toHaveBeenCalledWith({ where: { id: 'local', status: 'PUBLISHED', difficulty: 'POINT_3' }, data: { difficulty: 'POINT_4' } });
+  });
+
+  it('does not overwrite hidden or missing-rating local difficulty during accepted sync', async () => {
+    prisma.externalAccount.findFirst.mockResolvedValue({ remoteUsername: 'tourist' });
+    prisma.problemSource.findMany.mockResolvedValue([{ remoteProblemId: '4A', problemId: 'local', problem: { status: 'DRAFT', difficulty: null } }, { remoteProblemId: '5A', problemId: 'local2', problem: { status: 'PUBLISHED', difficulty: 'POINT_3' } }]);
+    jest.spyOn(service as any, 'fetchUserStatus').mockResolvedValue([{ id: 1, creationTimeSeconds: 1700000000, problem: { contestId: 4, index: 'A', rating: 2000 }, verdict: 'OK' }, { id: 2, creationTimeSeconds: 1700000000, problem: { contestId: 5, index: 'A' }, verdict: 'OK' }]);
+    await service.syncUserAccepted('u1');
+    expect(prisma.problem.updateMany).not.toHaveBeenCalled();
   });
 });

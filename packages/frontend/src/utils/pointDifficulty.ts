@@ -63,6 +63,11 @@ export function normalizePointDifficulty(value?: string | null): PointDifficulty
   const raw = String(value || '').trim().toUpperCase();
   if (!raw || ['NULL', 'NONE', 'UNRATED'].includes(raw)) return null;
   if (byValue.has(raw as PointDifficulty)) return raw as PointDifficulty;
+  if (/^\d+$/.test(raw)) {
+    const rating = Number(raw);
+    if (!Number.isInteger(rating) || rating < 800) return null;
+    return rating <= 1000 ? 'POINT_0' : rating <= 1300 ? 'POINT_1' : rating <= 1600 ? 'POINT_2' : rating <= 1900 ? 'POINT_3' : rating <= 2400 ? 'POINT_4' : 'POINT_5';
+  }
   return legacyMap[raw] || null;
 }
 

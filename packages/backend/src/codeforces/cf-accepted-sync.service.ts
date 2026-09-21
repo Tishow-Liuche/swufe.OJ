@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as https from 'https';
 import { isDeepStrictEqual } from 'node:util';
+import { mapCfRatingToPointDifficulty } from '../problem/point-difficulty';
 
 interface CfApiSubmission {
   id: number;
@@ -72,7 +73,7 @@ export class CfAcceptedSyncService {
             platform: 'CODEFORCES',
             remoteProblemId: { in: remoteIds },
           },
-          select: { problemId: true, remoteProblemId: true, problem: { select: { status: true } } },
+          select: { problemId: true, remoteProblemId: true, problem: { select: { status: true, difficulty: true } } },
         })
       : [];
     const sourceByRemoteId = new Map(sources.map((source) => [source.remoteProblemId, source]));
@@ -93,6 +94,16 @@ export class CfAcceptedSyncService {
       const source = sourceByRemoteId.get(remoteProblemId);
       const existing = existingByRemote.get(remoteProblemId);
       if (source && (!source.problem || source.problem.status === 'PUBLISHED')) matchedCount++;
+
+      // A real upstream rating may correct stale imported bands. Missing metadata
+      // is not proof of being unrated; never erase a known or hidden difficulty here.
+      const ratedDifficulty = mapCfRatingToPointDifficulty(submission.problem?.rating);
+      if (ratedDifficulty && source?.problem?.status === 'PUBLISHED' && source.problem.difficulty !== ratedDifficulty) {
+        await this.prisma.problem.updateMany({
+          where: { id: source.problemId, status: 'PUBLISHED', difficulty: source.problem.difficulty },
+          data: { difficulty: ratedDifficulty },
+        });
+      }
 
       const acceptedAt = new Date(submission.creationTimeSeconds * 1000);
       const remoteSubmissionId = String(submission.id);

@@ -116,7 +116,7 @@ export class LuoguAdapter implements SyncAdapter {
     return resp.text();
   }
 
-  private mapDifficulty(diff: number): string {
+  private mapDifficulty(diff: number): string | null {
     return mapLuoguDifficultyToPointDifficulty(diff);
   }
 }

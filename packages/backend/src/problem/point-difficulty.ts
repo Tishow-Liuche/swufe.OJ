@@ -53,19 +53,19 @@ const LEGACY_DIFFICULTY_MAP: Record<string, PointDifficulty> = {
   'NOI-': 'POINT_5',
   'IOI+': 'POINT_5',
   '3000': 'POINT_5',
-  UNRATED: 'POINT_1',
 };
 
 export function normalizePointDifficulty(value?: string | number | null): PointDifficulty | null {
   const normalized = String(value || '').trim().toUpperCase();
   if (!normalized || normalized === 'UNRATED' || normalized === 'NONE' || normalized === 'NULL') return null;
   if (POINT_VALUES.has(normalized as PointDifficulty)) return normalized as PointDifficulty;
-  return LEGACY_DIFFICULTY_MAP[normalized] || 'POINT_1';
+  if (/^\d+$/.test(normalized)) return mapCfRatingToPointDifficulty(Number(normalized));
+  return LEGACY_DIFFICULTY_MAP[normalized] || null;
 }
 
-export function mapCfRatingToPointDifficulty(rating?: number | null): PointDifficulty {
+export function mapCfRatingToPointDifficulty(rating?: number | null): PointDifficulty | null {
   const value = Number(rating);
-  if (!Number.isFinite(value) || value <= 0) return 'POINT_1';
+  if (!Number.isInteger(value) || value < 800) return null;
   if (value <= 1000) return 'POINT_0';
   if (value <= 1300) return 'POINT_1';
   if (value <= 1600) return 'POINT_2';
@@ -74,9 +74,9 @@ export function mapCfRatingToPointDifficulty(rating?: number | null): PointDiffi
   return 'POINT_5';
 }
 
-export function mapLuoguDifficultyToPointDifficulty(difficulty?: number | null): PointDifficulty {
+export function mapLuoguDifficultyToPointDifficulty(difficulty?: number | null): PointDifficulty | null {
   const value = Number(difficulty);
-  if (!Number.isFinite(value)) return 'POINT_1';
+  if (!Number.isInteger(value) || value < 1 || value > 8) return null;
   if (value <= 1) return 'POINT_0';
   if (value <= 3) return 'POINT_1';
   if (value <= 4) return 'POINT_2';

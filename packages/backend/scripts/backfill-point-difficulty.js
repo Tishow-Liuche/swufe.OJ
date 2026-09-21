@@ -7,29 +7,8 @@ const readline = require('readline');
 
 const prisma = new PrismaClient();
 
-const POINTS = ['POINT_0', 'POINT_1', 'POINT_2', 'POINT_3', 'POINT_4', 'POINT_5'];
-
-function mapCfRatingToPointDifficulty(rating) {
-  const value = Number(rating);
-  if (!Number.isFinite(value) || value <= 0) return 'POINT_1';
-  if (value <= 1000) return 'POINT_0';
-  if (value <= 1300) return 'POINT_1';
-  if (value <= 1600) return 'POINT_2';
-  if (value <= 1900) return 'POINT_3';
-  if (value <= 2400) return 'POINT_4';
-  return 'POINT_5';
-}
-
-function mapLuoguDifficultyToPointDifficulty(difficulty) {
-  const value = Number(difficulty);
-  if (!Number.isFinite(value)) return 'POINT_1';
-  if (value <= 1) return 'POINT_0';
-  if (value <= 3) return 'POINT_1';
-  if (value <= 4) return 'POINT_2';
-  if (value <= 5) return 'POINT_3';
-  if (value <= 6) return 'POINT_4';
-  return 'POINT_5';
-}
+const POINTS = ['POINT_0', 'POINT_1', 'POINT_2', 'POINT_3', 'POINT_4', 'POINT_5', null];
+const { mapCfRatingToPointDifficulty, mapLuoguDifficultyToPointDifficulty } = require('../dist/src/problem/point-difficulty');
 
 function addToGroup(groups, point, problemId) {
   if (!POINTS.includes(point)) throw new Error(`Invalid SWUFE Point difficulty: ${point}`);
@@ -42,7 +21,7 @@ async function updateGroups(groups, dryRun) {
   const summary = {};
   for (const point of POINTS) {
     const ids = groups.get(point) || [];
-    summary[point] = ids.length;
+    summary[point || 'UNRATED'] = ids.length;
     if (dryRun || ids.length === 0) continue;
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
@@ -74,7 +53,7 @@ async function backfillCodeforces(dryRun) {
   let missing = 0;
   for (const source of sources) {
     const point = byRemoteId.get(source.remoteProblemId);
-    if (!point) {
+    if (!byRemoteId.has(source.remoteProblemId)) {
       missing++;
       continue;
     }
@@ -123,7 +102,7 @@ async function backfillLuogu(dryRun) {
   let missing = 0;
   for (const source of sources) {
     const point = byPid.get(source.remoteProblemId);
-    if (!point) {
+    if (!byPid.has(source.remoteProblemId)) {
       missing++;
       continue;
     }
@@ -170,6 +149,7 @@ async function backfillQoj(dryRun) {
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
+  if (!dryRun) throw new Error('Legacy writes disabled. Use audit-problem-difficulty.cjs dry-run/apply with reviewed upstream evidence and backup.');
   const before = {
     CODEFORCES: await countByPlatform('CODEFORCES'),
     LUOGU: await countByPlatform('LUOGU'),

@@ -37,7 +37,7 @@ describe('SWUFE Point difficulty mapping', () => {
   });
 
   it('maps Luogu eight-level difficulty values into the requested SWUFE Point bands', () => {
-    expect(mapLuoguDifficultyToPointDifficulty(0)).toBe('POINT_0');
+    expect(mapLuoguDifficultyToPointDifficulty(0)).toBeNull();
     expect(mapLuoguDifficultyToPointDifficulty(1)).toBe('POINT_0');
     expect(mapLuoguDifficultyToPointDifficulty(2)).toBe('POINT_1');
     expect(mapLuoguDifficultyToPointDifficulty(3)).toBe('POINT_1');
@@ -57,5 +57,23 @@ describe('SWUFE Point difficulty mapping', () => {
       'POINT_4',
       'POINT_5',
     ]);
+  });
+
+  it('never fabricates difficulty for missing or invalid upstream ratings', () => {
+    for (const value of [undefined, null, 0, -1, NaN, Infinity]) {
+      expect(mapCfRatingToPointDifficulty(value)).toBeNull();
+      expect(mapLuoguDifficultyToPointDifficulty(value)).toBeNull();
+    }
+    expect(mapLuoguDifficultyToPointDifficulty(9)).toBeNull();
+    expect(mapLuoguDifficultyToPointDifficulty(2.5)).toBeNull();
+    expect(normalizePointDifficulty('unknown-value')).toBeNull();
+  });
+
+  it('normalizes all CF rating values, including upper bands omitted from old lookup tables', () => {
+    for (let rating = 800; rating <= 4000; rating += 100) {
+      const expected = rating <= 1000 ? 'POINT_0' : rating <= 1300 ? 'POINT_1' : rating <= 1600 ? 'POINT_2' : rating <= 1900 ? 'POINT_3' : rating <= 2400 ? 'POINT_4' : 'POINT_5';
+      expect(mapCfRatingToPointDifficulty(rating)).toBe(expected);
+      expect(normalizePointDifficulty(String(rating))).toBe(expected);
+    }
   });
 });

@@ -30,7 +30,7 @@ export interface FormattedCfStatement {
   timeLimit: number;
   memoryLimit: number;
   tags: string[];
-  difficulty: string;
+  difficulty: string | null;
 }
 
 export function normalizeCfProblemId(problem: Partial<CfProblemJson>): string | null {
@@ -126,6 +126,6 @@ function cleanText(value?: string | null): string {
   return String(value || '').replace(/\r\n/g, '\n').trim();
 }
 
-function mapRating(rating?: number): string {
+function mapRating(rating?: number): string | null {
   return mapCfRatingToPointDifficulty(rating);
 }

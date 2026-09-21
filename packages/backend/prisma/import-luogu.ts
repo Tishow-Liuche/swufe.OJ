@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as readline from 'readline';
+import { mapLuoguDifficultyToPointDifficulty } from '../src/problem/point-difficulty';
 
 const p = new PrismaClient();
 
@@ -21,14 +22,7 @@ interface LuoguProblem {
   locale: string;
 }
 
-function mapDifficulty(d: number): string {
-  if (d <= 1) return 'POINT_0';
-  if (d <= 3) return 'POINT_1';
-  if (d <= 4) return 'POINT_2';
-  if (d <= 5) return 'POINT_3';
-  if (d <= 6) return 'POINT_4';
-  return 'POINT_5';
-}
+const mapDifficulty = mapLuoguDifficultyToPointDifficulty;
 
 function buildDescription(p: LuoguProblem): string {
   let md = '';
