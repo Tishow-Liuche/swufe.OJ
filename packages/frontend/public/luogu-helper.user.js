@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - Luogu Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      1.6
+// @version      1.7
 // @description  Auto fill code, auto submit to Luogu, report result back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
 // @match        https://www.luogu.com.cn/*
@@ -23,7 +23,7 @@
 var DEFAULT_API = 'http://127.0.0.1:3000';
 var API_BASE_KEY = 'swufe_oj_api_base';
 var API = resolveApiBase();
-var HELPER_VERSION = '1.6';
+var HELPER_VERSION = '1.7';
 var STATE_KEY = 'swufe_luogu_auto_state';
 var SUBMIT_ONCE_KEY_PREFIX = 'swufe_luogu_submit_once_';
 var LOGIN_REQUIRED_KEY = 'swufe_luogu_login_required_at';
@@ -223,7 +223,8 @@ function ensureSubmitPanel() {
     history.replaceState(null, '', location.pathname + '#submit');
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   }
-  clickByText([/^提交$/, /提交答案/, /Submit/i]);
+  // The hash opens the panel. Never click arbitrary "Submit" text here:
+  // it may already be the live form's submit button.
 }
 
 function findTextarea() {
@@ -256,39 +257,105 @@ function setCode(code) {
   return true;
 }
 
-function chooseLanguage(lang) {
-  var labelMap = { cpp: /C\+\+|G\+\+|Clang/i, c: /^C$|GCC/i, python: /Python|PyPy/i, java: /Java/i };
-  var want = labelMap[lang] || labelMap.cpp;
-  var selects = Array.prototype.slice.call(document.querySelectorAll('select'));
-  for (var i = 0; i < selects.length; i++) {
-    var opts = Array.prototype.slice.call(selects[i].options || []);
-    for (var j = 0; j < opts.length; j++) {
-      if (want.test(opts[j].textContent || '')) {
-        selects[i].value = opts[j].value;
-        selects[i].dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      }
-    }
-  }
+function languageFamily(text) {
+  text = String(text || '').trim();
+  if (/^(?:C\+\+|G\+\+)(?:\d+)?(?:\s|\(|$)/i.test(text)) return 'cpp';
+  if (/^C(?:\d+)?(?:\s|\(|$)/i.test(text) && !/\+\+/.test(text)) return 'c';
+  if (/^(?:Python|PyPy)(?:\d+(?:\.\d+)*)?(?:\s|\(|$)/i.test(text)) return 'python';
+  if (/^Java(?:\d+)?(?:\s|\(|$)/i.test(text)) return 'java';
+  return '';
+}
 
-  clickByText([/语言|Language/i]);
-  var items = Array.prototype.slice.call(document.querySelectorAll('li,div,span,button'));
-  for (var k = 0; k < items.length; k++) {
-    if (want.test(visibleText(items[k]))) {
-      items[k].click();
-      return true;
-    }
+function languageVisible(el) {
+  return !!(el && el.isConnected && el.getClientRects().length &&
+    getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden],[aria-hidden="true"]'));
+}
+
+function languageControls() {
+  // Only actual controls, never arbitrary ancestors containing language names.
+  return Array.prototype.slice.call(document.querySelectorAll('select,[role="combobox"],.lfe-select,.lang-select.combo-wrapper'))
+    .filter(function(el) {
+      if (!languageVisible(el) || el.disabled || el.classList.contains('disabled') || el.getAttribute('aria-disabled') === 'true') return false;
+      if (el.tagName === 'SELECT') {
+        return Array.prototype.some.call(el.options, function(o) { return !!languageFamily(o.textContent); });
+      }
+      return el.matches('.lang-select.combo-wrapper') || /语言|language/i.test(el.getAttribute('aria-label') || '') ||
+        !!languageFamily(languageSelectionText(el));
+    });
+}
+
+function languageSelectionText(control) {
+  if (control.tagName === 'SELECT') return control.selectedOptions.length ? control.selectedOptions[0].textContent : '';
+  if (control.matches('.lang-select.combo-wrapper')) return visibleText(control.querySelector('.text'));
+  var selected = control.querySelector('.current,.selected,[aria-selected="true"],input');
+  if (selected) return selected.value || visibleText(selected);
+  // A combobox's own caption is authoritative only without an embedded menu.
+  var clone = control.cloneNode(true);
+  Array.prototype.forEach.call(clone.querySelectorAll('[role="listbox"],.dropdown,.options,ul'), function(menu) { menu.remove(); });
+  return visibleText(clone);
+}
+
+function isLanguageSelected(lang) {
+  var controls = languageControls();
+  return controls.length === 1 && languageFamily(languageSelectionText(controls[0])) === lang;
+}
+
+function languageMenu(control) {
+  var menuId = control.getAttribute('aria-controls') || control.getAttribute('aria-owns');
+  if (menuId) return document.getElementById(menuId);
+  if (control.matches('.lang-select.combo-wrapper')) {
+    // Columba LCombo teleports its menu to #app. Match the component's Vue
+    // scope attributes, never a hardcoded build hash or arbitrary page text.
+    if (!control.classList.contains('shown') || document.querySelectorAll('.combo-wrapper.shown').length !== 1) return null;
+    var scopes = control.getAttributeNames().filter(function(name) { return /^data-v-/.test(name); });
+    var menus = Array.prototype.slice.call(document.querySelectorAll('#app > .dropdown')).filter(function(menu) {
+      return languageVisible(menu) && scopes.some(function(scope) { return menu.hasAttribute(scope); });
+    });
+    return menus.length === 1 ? menus[0] : null;
   }
-  return false;
+  return control.querySelector('[role="listbox"],.dropdown,.options,ul');
+}
+
+function chooseLanguage(lang) {
+  if (['cpp', 'c', 'python', 'java'].indexOf(lang) === -1) return false;
+  var controls = languageControls();
+  if (controls.length !== 1) return false; // Ambiguous or changed page: fail closed.
+  var control = controls[0];
+  if (isLanguageSelected(lang)) return true;
+  if (control.tagName === 'SELECT') {
+    var option = Array.prototype.find.call(control.options, function(o) {
+      return !o.disabled && !(o.parentElement && o.parentElement.disabled) && languageFamily(o.textContent) === lang;
+    });
+    if (!option) return false;
+    control.value = option.value;
+    control.dispatchEvent(new Event('input', { bubbles: true }));
+    control.dispatchEvent(new Event('change', { bubbles: true }));
+    return isLanguageSelected(lang);
+  }
+  var menu = languageMenu(control);
+  if (!menu || !languageVisible(menu)) {
+    if (!control.classList.contains('shown') && control.getAttribute('aria-expanded') !== 'true') control.click();
+    menu = languageMenu(control);
+  }
+  if (!menu || !languageVisible(menu)) return false;
+  var items = Array.prototype.slice.call(menu.querySelectorAll('[role="option"],li,.item'));
+  var match = items.find(function(item) {
+    return languageVisible(item) && item.getAttribute('aria-disabled') !== 'true' &&
+      !item.classList.contains('disabled') && languageFamily(visibleText(item)) === lang;
+  });
+  if (match) match.click();
+  return isLanguageSelected(lang);
 }
 
 function findSubmitButton() {
-  var candidates = Array.prototype.slice.call(document.querySelectorAll('button,input[type="submit"],a'));
+  var candidates = Array.prototype.slice.call(document.querySelectorAll('button,input[type="submit"],a[role="button"]'));
+  var matches = [];
   for (var i = 0; i < candidates.length; i++) {
     var t = visibleText(candidates[i]) || candidates[i].value || '';
-    if (/提交|Submit/i.test(t) && !/记录|题解|列表/.test(t)) return candidates[i];
+    if (languageVisible(candidates[i]) && !candidates[i].disabled && candidates[i].getAttribute('aria-disabled') !== 'true' &&
+        /^(?:提交评测|Submit to Judge|提交|Submit)$/i.test(t)) matches.push(candidates[i]);
   }
-  return null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function normalizeStatus(text) {
@@ -553,11 +620,15 @@ function startSubmitFlow() {
       function fillAndClick() {
         attempts++;
         ensureSubmitPanel();
-        chooseLanguage(task.language);
+        var languageOk = chooseLanguage(task.language);
         var codeOk = setCode(task.sourceCode);
         var button = findSubmitButton();
-        if (!codeOk || !button) {
+        if (!languageOk || !codeOk || !button) {
           if (attempts > 80) {
+            if (!languageOk) {
+              reportBlockedForTask(loadState(), 'LANGUAGE_MISMATCH', '无法确认洛谷编译语言与 OJ 一致，已停止自动提交。');
+              return;
+            }
             reportBlockedForTask(loadState(), 'FORM_TIMEOUT', '洛谷提交表单、代码编辑器或提交按钮长时间未就绪。');
             banner('洛谷提交表单未就绪，请刷新洛谷页面重试。', '#e74c3c');
             return;
@@ -567,12 +638,21 @@ function startSubmitFlow() {
           return;
         }
 
-        cur = loadState();
-        cur.submittedAt = Math.floor(Date.now() / 1000);
-        saveState(cur);
-        sv(SUBMIT_ONCE_KEY_PREFIX + task.submissionId, '1');
         banner('正在自动提交到洛谷...', '#3498db');
         setTimeout(function() {
+          if (!isLanguageSelected(task.language)) {
+            reportBlockedForTask(loadState(), 'LANGUAGE_MISMATCH', '洛谷编译语言在提交前发生变化，已停止自动提交。');
+            return;
+          }
+          button = findSubmitButton();
+          if (!button || button.disabled || !languageVisible(button)) {
+            reportBlockedForTask(loadState(), 'FORM_TIMEOUT', '洛谷提交按钮未就绪，已停止自动提交。');
+            return;
+          }
+          cur = loadState();
+          cur.submittedAt = Math.floor(Date.now() / 1000);
+          saveState(cur);
+          sv(SUBMIT_ONCE_KEY_PREFIX + task.submissionId, '1');
           button.click();
           setTimeout(watchResult, 2500);
         }, 300);

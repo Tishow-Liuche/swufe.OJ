@@ -5,7 +5,7 @@ const helperPath = path.resolve('public/luogu-helper.user.js');
 const source = fs.readFileSync(helperPath, 'utf8');
 
 const expectations = [
-  ['helper version is bumped for login retry fix', /@version\s+1\.4/],
+  ['helper version includes verified language selection', /@version\s+1\.7\b/],
   ['login wait clears stale task state', /markLoginRequired\(\)/],
   ['result reporting requires active state', /isActiveTaskState\(loadState\(\)\)/],
   ['script records helper version in state', /helperVersion:\s*HELPER_VERSION/],
