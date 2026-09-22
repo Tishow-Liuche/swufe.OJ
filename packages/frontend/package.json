@@ -12,6 +12,8 @@
     "test:luogu-language": "node scripts/test-luogu-language.mjs",
     "test:luogu-verdict": "node scripts/test-luogu-verdict.mjs",
     "test:oj-helpers": "node scripts/check-oj-helper-installer.mjs",
+    "test:helper-presence": "node scripts/test-helper-presence.mjs",
+    "test:helper-install-flow": "node scripts/test-helper-install-flow.mjs",
     "test:leaderboard": "node scripts/check-leaderboard-frame.mjs",
     "test:contest-creator": "node scripts/check-contest-creator.mjs",
     "test:contest-live-board": "node scripts/check-contest-live-board.mjs",

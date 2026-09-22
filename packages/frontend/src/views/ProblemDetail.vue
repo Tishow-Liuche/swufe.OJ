@@ -22,6 +22,8 @@ import { useAuthStore } from '../stores/auth';
 import { hideContestHints } from './contest/problem-visibility';
 import { createSubmissionPoller, isFinalSubmission } from '../utils/submission-poller';
 import { editorDraftKey, readEditorDraft, saveEditorDraft } from '../utils/editor-draft';
+import { detectHelper, helperPlatform, type HelperPlatform } from '../utils/helper-presence';
+import HelperInstallDialog from '../components/HelperInstallDialog.vue';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -34,6 +36,7 @@ const code = ref('');
 const language = ref('cpp');
 const result = ref<any>(null);
 const submitting = ref(false);
+const missingHelper = ref<HelperPlatform | null>(null);
 const errorMsg = ref('');
 const showAllCases = ref(false);
 const isExternal = ref(false);
@@ -377,19 +380,26 @@ async function copyCfCode() {
 async function submitCode() {
   if (submitting.value || !problem.value) return;
   submitting.value = true;
-  resultPoller.stop();
-  errorMsg.value = '';
-  result.value = null;
-  isExternal.value = false;
+  const submittedProblemId = problem.value.id;
   const submittedCode = code.value;
   const submittedLanguage = language.value;
   try {
     void persistDraft();
+    const platform = helperPlatform(problem.value);
+    if (platform && !(await detectHelper(platform))) {
+      if (!disposed && problem.value?.id === submittedProblemId) missingHelper.value = platform;
+      return;
+    }
+    if (disposed || problem.value?.id !== submittedProblemId) return;
+    resultPoller.stop();
+    errorMsg.value = '';
+    result.value = null;
+    isExternal.value = false;
     const submitUrl = contestId.value
       ? `/api/contests/${contestId.value}/submit`
       : (isAuthorPreview.value ? '/api/submissions/preview' : '/api/submissions');
     const { data } = await api.post(submitUrl, {
-      problemId: problem.value.id,
+      problemId: submittedProblemId,
       language: submittedLanguage,
       sourceCode: submittedCode,
     });
@@ -596,6 +606,8 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
 
       <ProblemDiscussionPanel v-if="!hideHints" :problem-id="problem.id" :problem-title="problem.title" />
     </template>
+
+    <HelperInstallDialog v-if="missingHelper" :platform="missingHelper" @close="missingHelper = null" />
 
     <!-- 第三方 OJ 远程提交引导弹窗 -->
     <div v-if="cfDialog" class="cf-overlay" @click.self="cfDialog = false">

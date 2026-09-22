@@ -1,7 +1,11 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - Luogu Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      1.8
+// @version      1.9
+// @match        https://test.singularitylab.online/*
+// @match        https://singularitylab.online/*
+// @match        http://localhost/*
+// @match        http://127.0.0.1/*
 // @description  Auto fill code, auto submit to Luogu, report result back to SWUFE OJ, then close the helper tab.
 // @author       OJ Team
 // @match        https://www.luogu.com.cn/*
@@ -20,10 +24,24 @@
 (function() {
 'use strict';
 
+// On SWUFE OJ this script only announces availability; never run submit logic.
+if (['test.singularitylab.online', 'singularitylab.online', 'localhost', '127.0.0.1'].indexOf(location.hostname) !== -1) {
+  window.addEventListener('message', function(event) {
+    var data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.type !== 'SWUFE_HELPER_PING' || data.platform !== 'LUOGU' ||
+        typeof data.requestId !== 'string' || data.requestId.length > 128) return;
+    window.postMessage({ type: 'SWUFE_HELPER_PONG', platform: 'LUOGU',
+      requestId: data.requestId, version: '1.9' }, location.origin);
+  });
+  return;
+}
+
+
 var DEFAULT_API = 'http://127.0.0.1:3000';
 var API_BASE_KEY = 'swufe_oj_api_base';
 var API = resolveApiBase();
-var HELPER_VERSION = '1.8';
+var HELPER_VERSION = '1.9';
 var STATE_KEY = 'swufe_luogu_auto_state';
 var SUBMIT_ONCE_KEY_PREFIX = 'swufe_luogu_submit_once_';
 var LOGIN_REQUIRED_KEY = 'swufe_luogu_login_required_at';

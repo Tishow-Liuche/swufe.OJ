@@ -5,7 +5,7 @@ const helperPath = path.resolve('public/luogu-helper.user.js');
 const source = fs.readFileSync(helperPath, 'utf8');
 
 const expectations = [
-  ['helper version includes scoped verdict selection', /@version\s+1\.8\b/],
+  ['helper version includes installation detection', /@version\s+1\.9\b/],
   ['login wait clears stale task state', /markLoginRequired\(\)/],
   ['result reporting requires active state', /isActiveTaskState\(loadState\(\)\)/],
   ['script records helper version in state', /helperVersion:\s*HELPER_VERSION/],
