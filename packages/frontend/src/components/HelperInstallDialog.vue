@@ -23,7 +23,7 @@ async function recheck() {
     <div class="helper-install-body">
       <p>未检测到可用的 <strong>{{ helperNames[platform] }}</strong> 提交脚本。</p>
       <p class="helper-install-hint">脚本用于自动填写代码、选择语言和回传评测结果。本次尚未提交，你的代码会保留。</p>
-      <ol><li>打开安装页，按提示安装脚本管理器和对应平台的脚本。</li><li>已安装的用户，请确认脚本已启用并更新到最新版。</li><li>安装后刷新本页，再点击提交代码。</li></ol>
+      <ol><li>打开安装页，安装三平台整合脚本，或更新已有的对应平台独立脚本。两种方式不要同时启用。</li><li>Edge / Chrome 用户请检查扩展详情中的“允许用户脚本”和网站访问权限；部分版本还需启用开发者模式。</li><li>确认脚本已启用并更新后，刷新本页再提交代码。</li></ol>
       <p v-if="checked" role="status" class="helper-install-hint">仍未检测到脚本。请确认浏览器已允许脚本运行，并刷新本页后重试。</p>
       <footer><button :disabled="checking" @click="recheck">{{ checking ? '正在检测…' : '重新检测' }}</button><a href="/install-oj-helpers.html" target="_blank" rel="noopener noreferrer">前往安装</a></footer>
     </div>

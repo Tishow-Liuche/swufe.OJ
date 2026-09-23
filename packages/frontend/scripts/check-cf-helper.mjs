@@ -5,7 +5,7 @@ const helperPath = path.resolve('public/cf-helper.user.js');
 const source = fs.readFileSync(helperPath, 'utf8');
 
 const expectations = [
-  ['helper version includes installation detection', /@version\s+7\.6/],
+  ['helper version includes sandbox-safe detection', /@version\s+7\.7/],
   ['login wait clears stale task state', /markLoginRequired\(\)/],
   ['status page ignores stale submitted state', /isActiveSubmittedState\(loadState\(\)\)/],
   ['script records the helper version in state', /helperVersion:\s*HELPER_VERSION/],

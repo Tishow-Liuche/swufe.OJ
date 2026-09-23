@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - QOJ Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      2.6
+// @version      2.7
 // @match        https://test.singularitylab.online/*
 // @match        https://singularitylab.online/*
 // @match        http://localhost/*
@@ -27,20 +27,21 @@
 if (['test.singularitylab.online', 'singularitylab.online', 'localhost', '127.0.0.1'].indexOf(location.hostname) !== -1) {
   window.addEventListener('message', function(event) {
     var data = event.data;
-    if (event.source !== window || event.origin !== location.origin || !data ||
+    // Tampermonkey wraps window; MessageEvent.source is the real page window.
+    if (event.source !== document.defaultView || event.origin !== location.origin || !data ||
         data.type !== 'SWUFE_HELPER_PING' || data.platform !== 'QOJ' ||
         typeof data.requestId !== 'string' || data.requestId.length > 128) return;
     window.postMessage({ type: 'SWUFE_HELPER_PONG', platform: 'QOJ',
-      requestId: data.requestId, version: '2.6' }, location.origin);
+      requestId: data.requestId, version: '2.7' }, location.origin);
   });
   return;
 }
 
 
   var DEFAULT_API = 'http://127.0.0.1:3000';
-  var API_BASE_KEY = 'swufe_oj_api_base';
+  var API_BASE_KEY = 'swufe_qoj_api_base';
   var API = resolveApiBase();
-  var HELPER_VERSION = '2.6';
+  var HELPER_VERSION = '2.7';
   var STATE_KEY = 'swufe_qoj_auto_state';
   var SUBMIT_ONCE_KEY_PREFIX = 'swufe_qoj_submit_once_';
   var BLOCKED_REPORT_KEY_PREFIX = 'swufe_qoj_blocked_reported_';

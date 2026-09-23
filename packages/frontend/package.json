@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/build-helper-bundle.mjs",
     "build": "vue-tsc -b && vite build",
     "test:markdown": "node scripts/check-markdown-renderer.mjs",
     "test:cf-helper": "node scripts/check-cf-helper.mjs",
@@ -13,6 +14,9 @@
     "test:luogu-verdict": "node scripts/test-luogu-verdict.mjs",
     "test:oj-helpers": "node scripts/check-oj-helper-installer.mjs",
     "test:helper-presence": "node scripts/test-helper-presence.mjs",
+    "test:helper-bundle": "node --test scripts/test-helper-bundle.mjs",
+    "test:tampermonkey": "node scripts/test-tampermonkey-presence.mjs",
+    "test:tampermonkey-install": "node scripts/test-tampermonkey-install.mjs",
     "test:helper-install-flow": "node scripts/test-helper-install-flow.mjs",
     "test:leaderboard": "node scripts/check-leaderboard-frame.mjs",
     "test:contest-creator": "node scripts/check-contest-creator.mjs",

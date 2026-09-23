@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -97,19 +97,23 @@
 <body>
   <main>
     <section class="hero">
-      <h1>SWUFE Singularity OJ One-Click Installer</h1>
+      <h1>SWUFE OJ 脚本安装</h1>
       <p class="subtitle">
-        Install or update the Codeforces, Luogu, and QOJ Tampermonkey helpers. After installation, external submissions opened from SWUFE OJ can auto-fill code, auto-click submit, and report submission IDs or verdicts back to SWUFE OJ.
+        安装一次整合脚本，即可在 Codeforces、洛谷和 QOJ 自动填写代码、提交并回传结果。
       </p>
       <div class="actions">
-        <button type="button" onclick="installAllHelpers()">一键安装三个脚本 / Install all three helpers</button>
-        <a class="btn secondary" href="/">Back to SWUFE OJ</a>
+        <a id="install-all" class="btn" href="/oj-helpers.user.js?v=1.0" target="_blank" rel="noopener noreferrer">一键安装三平台整合脚本</a>
+        <button type="button" class="secondary" onclick="checkHelpers()">检测安装状态</button>
+        <a class="btn secondary" href="/">返回 OJ</a>
       </div>
       <div id="installer-status" class="notice" role="status" aria-live="polite">
-        点击一键安装后，浏览器会依次打开 Codeforces、洛谷、QOJ 三个脚本安装确认页。
+        只打开一个安装确认页。请在 Tampermonkey 中点击“安装 / 更新”，然后刷新 OJ 页面。
       </div>
       <div class="notice">
-        Browser security still requires Tampermonkey confirmation for each script. Click Install or Update in each tab. If popups are blocked, use the individual buttons below.
+        <strong>旧用户注意：</strong>整合脚本与三个独立脚本二选一。改用整合脚本前，请在 Tampermonkey 中停用原有三个独立脚本，避免重复交题。也可以只更新下方独立脚本，不安装整合版。
+      </div>
+      <div class="notice">
+        <strong>Edge / Chrome：</strong>先安装 <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener noreferrer">Tampermonkey</a>。在浏览器“扩展 → Tampermonkey → 详情”中启用“允许用户脚本”（部分版本需要开发者模式），并允许它在本 OJ 和对应外站运行。网页不能代替你开启浏览器扩展权限。
       </div>
     </section>
 
@@ -117,39 +121,44 @@
       <article class="card cf">
         <h2>Codeforces Helper</h2>
         <p>Fetches pending SWUFE OJ code, selects language, fills Codeforces source, clicks Submit, reports the Codeforces SID.</p>
-        <a class="btn" href="/cf-helper.user.js?v=7.6">Install / Update CF</a>
+        <a class="btn" href="/cf-helper.user.js?v=7.7" target="_blank" rel="noopener noreferrer">安装 / 更新 CF 独立脚本</a>
       </article>
       <article class="card luogu">
         <h2>Luogu Helper</h2>
         <p>Opens Luogu submit panel, fills code, submits, polls verdict, and reports AC/WA/TLE/MLE/CE back to SWUFE OJ.</p>
-        <a class="btn" href="/luogu-helper.user.js?v=1.9">Install / Update Luogu</a>
+        <a class="btn" href="/luogu-helper.user.js?v=1.10" target="_blank" rel="noopener noreferrer">安装 / 更新洛谷独立脚本</a>
       </article>
       <article class="card qoj">
         <h2>QOJ Helper</h2>
         <p>Opens the QOJ submit tab, fills code, clicks the real bottom <code>Submit</code> button, and reports the verdict.</p>
-        <a class="btn" href="/qoj-helper.user.js?v=2.6">Install / Update QOJ</a>
+        <a class="btn" href="/qoj-helper.user.js?v=2.7" target="_blank" rel="noopener noreferrer">安装 / 更新 QOJ 独立脚本</a>
       </article>
     </section>
   </main>
 
   <script>
-    function installAllHelpers() {
-      var urls = ['/cf-helper.user.js?v=7.6', '/luogu-helper.user.js?v=1.9', '/qoj-helper.user.js?v=2.6'];
+    function checkHelpers() {
       var status = document.getElementById('installer-status');
-      if (status) status.textContent = '正在依次打开三个脚本安装页，请在 Tampermonkey 页面点击 Install / Update。';
-      urls.forEach(function (url, index) {
-        setTimeout(function () {
-          var opened = window.open(url, '_blank', 'noopener,noreferrer');
-          if (!opened && status) {
-            status.textContent = '浏览器拦截了弹窗，请允许弹窗或使用下方三个单独安装按钮。';
-          } else if (status && index === urls.length - 1) {
-            status.textContent = '三个脚本安装页已打开。请逐个确认安装，之后回到 SWUFE OJ 直接提交即可。';
-          }
-        }, index * 500);
+      var requestId = crypto.randomUUID();
+      var found = {};
+      var names = { CODEFORCES: 'CF', LUOGU: '洛谷', QOJ: 'QOJ' };
+      status.textContent = '正在检测实际运行状态…';
+      function receive(event) {
+        var data = event.data;
+        if (event.source !== window || event.origin !== location.origin || !data ||
+            data.type !== 'SWUFE_HELPER_PONG' || data.requestId !== requestId || !names[data.platform]) return;
+        found[data.platform] = data.version;
+      }
+      window.addEventListener('message', receive);
+      Object.keys(names).forEach(function(platform) {
+        window.postMessage({ type: 'SWUFE_HELPER_PING', platform: platform, requestId: requestId }, location.origin);
       });
-    }
-    function openAllHelpers() {
-      installAllHelpers();
+      setTimeout(function() {
+        window.removeEventListener('message', receive);
+        status.textContent = Object.keys(names).map(function(platform) {
+          return names[platform] + '：' + (found[platform] ? '已就绪 v' + found[platform] : '未检测到运行');
+        }).join('；') + '。刚安装后请先刷新此页；未就绪时检查扩展权限及启用状态。';
+      }, 1500);
     }
   </script>
 </body>

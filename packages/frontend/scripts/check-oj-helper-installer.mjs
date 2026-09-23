@@ -67,7 +67,9 @@ assertMatch(installer, /SWUFE Singularity OJ One-Click Installer/, 'Unified inst
 assertMatch(installer, /cf-helper\.user\.js/, 'Unified installer must link Codeforces helper');
 assertMatch(installer, /luogu-helper\.user\.js/, 'Unified installer must link Luogu helper');
 assertMatch(installer, /qoj-helper\.user\.js/, 'Unified installer must link QOJ helper');
-assertMatch(installer, /openAllHelpers/, 'Unified installer must expose one-click open-all install action');
+assertMatch(installer, /id="install-all"[^>]+href="\/oj-helpers\.user\.js/, 'Unified installer must directly link a single combined helper');
+assertNoMatch(installer, /window\.open\(/, 'Installer must not depend on multiple popup windows');
+assertFile('public/oj-helpers.user.js');
 assertMatch(problemDetail, /withSwufeOjApiParam/, 'ProblemDetail must append SWUFE OJ API base to external submit URLs');
 assertMatch(problemDetail, /swufeOjApi/, 'External submit URLs must carry swufeOjApi for deployed server callbacks');
 
@@ -77,7 +79,7 @@ for (const helper of helpers) {
   assertNoMatch(source, /@(?:downloadURL|updateURL)\s+http:\/\/localhost:5173/i, `${helper.label} helper still points Tampermonkey updates to localhost`);
   assertMatch(source, /@connect\s+\*/, `${helper.label} helper must allow the deployed SWUFE OJ API host`);
   assertMatch(source, /swufeOjApi/, `${helper.label} helper does not read deployed SWUFE OJ API base from external submit URL`);
-  assertMatch(source, /swufe_oj_api_base/, `${helper.label} helper does not persist deployed SWUFE OJ API base`);
+  assertMatch(source, /swufe_(?:cf|luogu|qoj)_api_base/, `${helper.label} helper does not persist its own deployed SWUFE OJ API base`);
   assertMatch(source, helper.lookupApi, `${helper.label} helper does not fetch pending OJ task`);
   assertMatch(source, helper.reportApi, `${helper.label} helper does not report result/SID back to OJ`);
   assertMatch(source, helper.codeFill, `${helper.label} helper does not contain code insertion logic`);

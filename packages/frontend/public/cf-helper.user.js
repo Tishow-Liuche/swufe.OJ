@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - Codeforces Auto Submit Helper
 // @namespace    https://oj.example.com
-// @version      7.6
+// @version      7.7
 // @match        https://test.singularitylab.online/*
 // @match        https://singularitylab.online/*
 // @match        http://localhost/*
@@ -29,20 +29,21 @@
 if (['test.singularitylab.online', 'singularitylab.online', 'localhost', '127.0.0.1'].indexOf(location.hostname) !== -1) {
   window.addEventListener('message', function(event) {
     var data = event.data;
-    if (event.source !== window || event.origin !== location.origin || !data ||
+    // Tampermonkey wraps window; MessageEvent.source is the real page window.
+    if (event.source !== document.defaultView || event.origin !== location.origin || !data ||
         data.type !== 'SWUFE_HELPER_PING' || data.platform !== 'CODEFORCES' ||
         typeof data.requestId !== 'string' || data.requestId.length > 128) return;
     window.postMessage({ type: 'SWUFE_HELPER_PONG', platform: 'CODEFORCES',
-      requestId: data.requestId, version: '7.6' }, location.origin);
+      requestId: data.requestId, version: '7.7' }, location.origin);
   });
   return;
 }
 
 
 var DEFAULT_API = 'http://127.0.0.1:3000';
-var API_BASE_KEY = 'swufe_oj_api_base';
+var API_BASE_KEY = 'swufe_cf_api_base';
 var API = resolveApiBase();
-var HELPER_VERSION = '7.6';
+var HELPER_VERSION = '7.7';
 var L = { cpp: '54', c: '43', python: '31', java: '60' };
 var STATE_KEY = 'swufe_cf_auto_state';
 var LOGIN_REQUIRED_KEY = 'swufe_cf_login_required_at';
