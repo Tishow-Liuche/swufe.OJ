@@ -305,13 +305,21 @@ async function resolveWrongBook(favorite: boolean) {
 const cfDialog = ref(false);
 const cfData = ref<any>(null);
 const copySuccess = ref(false);
-const cfOpenBlocked = ref(false);
 const cfAutoMessage = ref('');
+const remoteTaskFinished = computed(() => {
+  const id = cfData.value?.submissionId;
+  if (!id) return false;
+  return [result.value, ...problemSubmissions.value]
+    .some(item => item?.id === id && isFinalSubmission(item.status));
+});
+watch(remoteTaskFinished, finished => {
+  if (finished) cfDialog.value = false;
+}, { flush: 'sync' });
 
-function openExternalUrl(url?: string): boolean {
-  if (!url) return false;
-  const opened = globalThis.window?.open(url, '_blank', 'noopener,noreferrer');
-  return !!opened;
+function openExternalUrl(url?: string) {
+  if (!url) return;
+  // noopener may return null even when the tab opens successfully.
+  globalThis.window?.open(url, '_blank', 'noopener,noreferrer');
 }
 
 async function loadProblemSubmissions() {
@@ -365,7 +373,11 @@ function withSwufeOjApiParam(url?: string) {
 }
 
 function retryOpenCf() {
-  cfOpenBlocked.value = !openExternalUrl(cfData.value?.url);
+  if (remoteTaskFinished.value) {
+    cfDialog.value = false;
+    return;
+  }
+  openExternalUrl(cfData.value?.url);
 }
 
 async function copyCfCode() {
@@ -392,6 +404,8 @@ async function submitCode() {
     }
     if (disposed || problem.value?.id !== submittedProblemId) return;
     resultPoller.stop();
+    cfDialog.value = false;
+    cfData.value = null;
     errorMsg.value = '';
     result.value = null;
     isExternal.value = false;
@@ -428,13 +442,13 @@ async function submitCode() {
           ? (qojLangNames[submittedLanguage] || submittedLanguage)
           : (isLuogu ? (luoguLangNames[submittedLanguage] || submittedLanguage) : (langNames[submittedLanguage] || submittedLanguage)),
         code: submittedCode,
-        submissionId: data.submissionId,
+        submissionId: data.submissionId || data.id,
       };
       cfDialog.value = true;
       cfAutoMessage.value = '正在打开 ' + cfData.value.platform + ' 并自动提交。完成后标签页会自动关闭，结果会回到这里。';
       copyCfCode();
-      cfOpenBlocked.value = !openExternalUrl(cfData.value.url);
-      startPolling(data.submissionId);
+      openExternalUrl(cfData.value.url);
+      startPolling(cfData.value.submissionId);
     } else {
       startPolling(data.submissionId || data.id);
     }
@@ -618,8 +632,8 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
         </div>
         <div class="cf-dialog-body">
           <p style="margin-bottom:12px">{{ cfAutoMessage }}</p>
-          <p v-if="cfOpenBlocked" style="margin:0 0 12px; color:#e65100; font-size:14px;">
-            浏览器拦截了新标签页。点击下方按钮继续同一个提交任务。
+          <p style="margin:0 0 12px; color:var(--text-secondary); font-size:14px;">
+            如果没有打开外站页面，可点击下方按钮继续同一个提交任务；已打开则无需重复点击。结果返回后此窗口会自动关闭。
           </p>
 
           <div class="cf-step">
