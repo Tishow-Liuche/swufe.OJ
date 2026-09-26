@@ -4,6 +4,9 @@ const { PrismaClient } = require('@prisma/client');
 const { ProblemService } = require('../dist/src/problem/problem.service');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
+const AdmZip = require('adm-zip');
+const {createHash} = require('node:crypto');
+const {streamTestDataEntry} = require('../dist/src/problem/test-data-zip');
 const schema = 'oj_memory_probe_' + Date.now();
 const admin = new PrismaClient();
 const url = new URL(process.env.DATABASE_URL);
@@ -24,10 +27,22 @@ async function signatures(versionId) {
   for (const name of ['Problem','ProblemVersion','ProblemTestCase','Checker','TestGroup','ProblemTag','ProblemSource']) {
     await admin.$executeRawUnsafe(`CREATE TABLE "${schema}"."${name}" (LIKE public."${name}" INCLUDING ALL)`);
   }
-  await db.problem.create({data:{id:'probe',problemNo:1,title:'isolated memory probe',source:'LOCAL',status:'DRAFT',versions:{create:{id:'v1',version:1,description:'original',checker:{create:{type:'STANDARD'}}}}}});
+  const mode = process.env.PROBE_JUDGE_MODE || 'STANDARD';
+  assert(['STANDARD','SPJ'].includes(mode));
+  await db.problem.create({data:{id:'probe',problemNo:1,title:'isolated memory probe',source:'LOCAL',status:'DRAFT',versions:{create:{id:'v1',version:1,description:'original',checker:{create:{type:mode}}}}}});
   const imported = await service.uploadTestData('probe',file(inputPath),actor);
   const before = await signatures(imported.versionId);
   assert(before.length > 0);
+  const zip = new AdmZip(inputPath);
+  const inputs = zip.getEntries().filter(e=>/\d+\.in$/i.test(e.entryName)).sort((a,b)=>Number(a.entryName.match(/(\d+)\.in$/i)[1])-Number(b.entryName.match(/(\d+)\.in$/i)[1]));
+  assert.equal(before.length, inputs.length);
+  for(let i=0;i<inputs.length;i++) {
+    for(const [field,entry] of [['input',inputs[i]],['output',zip.getEntry(inputs[i].entryName.replace(/\.in$/i,'.out')) || zip.getEntry(inputs[i].entryName.replace(/\.in$/i,'.ans'))]]) {
+      const hash=createHash('md5');
+      if(entry) for await(const chunk of streamTestDataEntry(entry,64*1024*1024)) hash.update(chunk);
+      assert.equal(before[i][field],hash.digest('hex'),'stored bytes must match archive '+field);
+    }
+  }
   for (let i=0;i<3;i++) {
     await service.update('probe',{description:`edited ${i}`},actor);
     const detail = await service.findManageable('probe',actor);
@@ -44,7 +59,7 @@ async function signatures(versionId) {
     assert.equal(await db.problemVersion.count(),count,'failed import rolled back');
     assert.equal((await db.problemVersion.findFirst({where:{isCurrent:true}})).id,second.versionId);
   }
-  console.log(JSON.stringify({pass:true,testCases:before.length,inputBytes:before.reduce((n,x)=>n+x.bytes,0),peakRssMiB:Math.ceil(peak/1048576),editorBytes:JSON.stringify(await service.findManageable('probe',actor)).length}));
+  console.log(JSON.stringify({pass:true,mode,testCases:before.length,inputBytes:before.reduce((n,x)=>n+x.bytes,0),peakRssMiB:Math.ceil(peak/1048576),editorBytes:JSON.stringify(await service.findManageable('probe',actor)).length}));
 })().catch(e=>{console.error(e.message);process.exitCode=1}).finally(async()=>{
   clearInterval(meter);await db.$disconnect();
   if(!/^oj_memory_probe_\d+$/.test(schema)) throw Error('unsafe cleanup target');

@@ -104,12 +104,6 @@ export class ProblemService {
       const latestProblem = await tx.problem.findUniqueOrThrow({ where: { id: problemId } });
       const judgeMode: JudgeMode = version.checker?.type === 'SPJ' ? 'SPJ' : 'STANDARD';
       const cases = this.parseTestDataZip(file, judgeMode);
-      // SPJ ignores reference output contents, but supplied files must still be valid.
-      for (const tc of cases) {
-        if (tc.discardedOutputEntry) {
-          for await (const _chunk of streamTestDataEntry(tc.discardedOutputEntry, MAX_ZIP_ENTRY_BYTES)) { /* validate only */ }
-        }
-      }
       const samples: Record<string, string> = {};
       // Large judge fixtures are not page samples; avoid bloating subsequent edits.
       if (cases[0].byteSize <= 64 * 1024) {
@@ -651,7 +645,7 @@ export class ProblemService {
       }
       return {
         input,
-        expectedOutput: judgeMode === 'SPJ' ? '' : expectedOutput,
+        expectedOutput,
         score: Number.isFinite(Number(tc.score)) ? Number(tc.score) : 10,
         order: index + 1,
         isSample: Boolean(tc.isSample),
@@ -722,11 +716,10 @@ export class ProblemService {
       }
       return {
         get input() { return readTestDataEntry(item.input!, MAX_ZIP_ENTRY_BYTES).toString('utf8'); },
-        get expectedOutput() { return judgeMode === 'SPJ' ? '' : readTestDataEntry(item.output!, MAX_ZIP_ENTRY_BYTES).toString('utf8'); },
+        get expectedOutput() { return item.output ? readTestDataEntry(item.output, MAX_ZIP_ENTRY_BYTES).toString('utf8') : ''; },
         inputEntry: item.input,
-        outputEntry: judgeMode === 'SPJ' ? undefined : item.output,
-        discardedOutputEntry: judgeMode === 'SPJ' ? item.output : undefined,
-        byteSize: item.input.header.size + (judgeMode === 'SPJ' ? 0 : item.output!.header.size),
+        outputEntry: item.output,
+        byteSize: item.input.header.size + (item.output?.header.size ?? 0),
         score: score + (position === cases.length - 1 ? rest : 0),
         order: position + 1,
         isSample: false,

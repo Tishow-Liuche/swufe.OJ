@@ -212,7 +212,7 @@ function insertImageIntoSample(markdown: string) {
           <label>评测方式 <span class="required">*</span></label>
           <select v-model="form.judgeMode">
             <option value="STANDARD">普通题：1.in + 1.out / 1.ans</option>
-            <option value="SPJ">SPJ：只需要 1.in，使用评测代码判定</option>
+            <option value="SPJ">SPJ：输入文件必需，参考输出按评测代码需要上传</option>
           </select>
         </div>
         <div class="form-group">
@@ -266,7 +266,7 @@ function insertImageIntoSample(markdown: string) {
 3.in
 ...
 100.in</pre>
-        <p>也支持 abs1.in、test2.in 等以正整数编号结尾的文件名，按末尾数字排序。SPJ 不需要输出文件，用户程序输出会作为评测代码的标准输入。</p>
+        <p>也支持 abs1.in、test2.in 等以正整数编号结尾的文件名，按末尾数字排序。若 SPJ 需要官方答案，请一起上传同名 .out 或 .ans；上传的参考输出会保留并写入评测文件 output，未上传则为空。用户程序输出作为评测代码的标准输入。</p>
       </div>
       <input type="file" accept=".zip" @change="onZipSelected" />
       <p v-if="testDataFile" class="file-name">已选择：{{ testDataFile.name }}</p>

@@ -266,7 +266,7 @@ onMounted(loadProblem);
           普通题：支持 1.in + 1.out / 1.ans，也支持 abs1.in + abs1.out 等带前缀的文件名。名称须以正整数编号结尾，输入输出完整同名，按末尾数字排序；每组只保留一个输出文件。
         </div>
         <div class="format-box spj" v-else>
-          SPJ：ZIP 内只需要 1.in、abs1.in、test2.in 等以正整数编号结尾的输入文件，按末尾数字排序；判题由下方 SPJ 代码完成。
+          SPJ：ZIP 内必须有 1.in、abs1.in、test2.in 等以正整数编号结尾的输入文件，按末尾数字排序。若 SPJ 需要官方答案，请同时上传同名 .out 或 .ans；参考输出会保留并写入评测文件 output，未上传则为空。
         </div>
         <input type="file" accept=".zip" @change="onZipSelected" />
         <p v-if="testDataFile" class="file-name">已选择：{{ testDataFile.name }}</p>

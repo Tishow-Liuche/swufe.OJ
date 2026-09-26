@@ -10,7 +10,7 @@ describe('bounded authoring queries', () => {
     expect(chunks.filter((c:any[])=>c[1]==='input').map((c:any[])=>c[3]).join('')).toBe(input);
     expect(chunks.filter((c:any[])=>c[1]==='output').map((c:any[])=>c[3]).join('')).toBe('ok');
   });
-  it('rejects corrupt supplied SPJ outputs even when their content is discarded', async () => {
+  it('rejects corrupt supplied SPJ outputs before creating a version', async () => {
     const zip = new AdmZip(); zip.addFile('1.in', Buffer.from('x')); zip.addFile('1.out', Buffer.from('y'));
     const buffer = zip.toBuffer();
     let offset = buffer.indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));
@@ -19,7 +19,7 @@ describe('bounded authoring queries', () => {
     const db:any = {problem:{findUnique:jest.fn().mockResolvedValue({id:'p'}),findUniqueOrThrow:jest.fn().mockResolvedValue({id:'p'})}, problemVersion:{findFirst:jest.fn().mockResolvedValue({id:'v',checker:{type:'SPJ'},testGroups:[],testCases:[]}),updateMany:jest.fn(),create:jest.fn().mockResolvedValue({id:'v2'})},$executeRaw:jest.fn()};
     db.$transaction=(fn:any)=>fn(db);
     const service = new ProblemService(db,{} as any,{assertCanManage:jest.fn()} as any);
-    await expect(service.uploadTestData('p',{originalname:'data.zip',buffer,size:buffer.length} as any,{id:'t',role:'TEACHER'})).rejects.toThrow('损坏');
+    await expect(service.uploadTestData('p',{originalname:'data.zip',buffer,size:buffer.length} as any,{id:'t',role:'TEACHER'})).rejects.toThrow(/损坏|校验值/);
     expect(db.problemVersion.create).not.toHaveBeenCalled();
   });
   it('does not load test bodies for editor detail or version locking', async () => {
