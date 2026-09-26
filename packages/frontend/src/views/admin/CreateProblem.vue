@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import api from '../../api/client';
+import { authoringRequestOptions, authoringError } from '../../utils/authoring-request';
 import { renderMarkdownWithMath } from '../../utils/markdown';
 import { pointDifficultyOptions } from '../../utils/pointDifficulty';
 import SpjProtocolSelect from '../../components/SpjProtocolSelect.vue';
@@ -98,6 +99,7 @@ async function createProblem() {
   submitting.value = true;
   result.value = null;
   uploadResult.value = null;
+  let stage = '创建题目';
   try {
     const tags = form.tags.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean);
     const payload = {
@@ -109,22 +111,25 @@ async function createProblem() {
       sampleInput: buildSampleText('input'),
       sampleOutput: buildSampleText('output'),
     };
-    const { data: created } = await api.post('/api/problems', payload);
+    const { data: created } = await api.post('/api/problems', payload, authoringRequestOptions('save'));
     result.value = created;
 
     const fd = new FormData();
+    stage = '上传测试数据（题目草稿已创建）';
     fd.append('file', testDataFile.value as File);
     const { data: imported } = await api.post(`/api/problems/${created.id}/testdata`, fd, {
+      ...authoringRequestOptions('upload'),
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     uploadResult.value = imported;
 
     if (['PUBLISHED', 'CONTEST_RESERVED'].includes(form.status)) {
-      await api.patch(`/api/problems/${created.id}/status`, { status: form.status });
+      stage = '发布题目（测试数据已保存）';
+      await api.patch(`/api/problems/${created.id}/status`, { status: form.status }, authoringRequestOptions('save'));
       result.value = { ...created, status: form.status };
     }
   } catch (e: any) {
-    error.value = e.response?.data?.message || '创建或上传测试数据失败';
+    error.value = authoringError(e, stage);
   } finally {
     submitting.value = false;
   }

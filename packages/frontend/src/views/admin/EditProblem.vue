@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import api from '../../api/client';
+import { authoringRequestOptions, authoringError } from '../../utils/authoring-request';
 import { renderMarkdownWithMath } from '../../utils/markdown';
 import { pointDifficultyOptions } from '../../utils/pointDifficulty';
 import SpjProtocolSelect from '../../components/SpjProtocolSelect.vue';
@@ -146,6 +147,7 @@ async function saveProblem() {
   if (error.value) return;
 
   saving.value = true;
+  let stage = '保存题目信息';
   try {
     const tags = form.tags.split(/[,，\s]+/).map((tag) => tag.trim()).filter(Boolean);
     const targetStatus = form.status;
@@ -168,26 +170,29 @@ async function saveProblem() {
       spjSourceCode: form.judgeMode === 'SPJ' ? form.spjSourceCode : undefined,
       spjProtocol: form.judgeMode === 'SPJ' ? form.spjProtocol : undefined,
       status: targetStatus === 'DRAFT' ? 'DRAFT' : undefined,
-    });
+    }, authoringRequestOptions('save'));
 
     if (testDataFile.value) {
+      stage = '上传测试数据（题目信息已保存）';
       const fd = new FormData();
       fd.append('file', testDataFile.value);
       const { data } = await api.post(`/api/problems/${problemId.value}/testdata`, fd, {
+        ...authoringRequestOptions('upload'),
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       existingTestCount.value = data.testCount || existingTestCount.value;
     }
 
     if (['PUBLISHED', 'CONTEST_RESERVED'].includes(targetStatus)) {
-      await api.patch(`/api/problems/${problemId.value}/status`, { status: targetStatus });
+      stage = '更新发布状态（题目及测试数据已保存）';
+      await api.patch(`/api/problems/${problemId.value}/status`, { status: targetStatus }, authoringRequestOptions('save'));
     }
 
     message.value = '题目已保存';
     testDataFile.value = null;
     await loadProblem();
   } catch (e: any) {
-    error.value = e.response?.data?.message || '保存题目失败';
+    error.value = authoringError(e, stage);
   } finally {
     saving.value = false;
   }
