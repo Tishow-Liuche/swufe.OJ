@@ -10,6 +10,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubmissionService } from '../submission/submission.service';
+import { nicknameFilter } from '../common/submission-search';
 import { contestantSubmission } from '../submission/submission-privacy';
 import { ContestCacheService } from './contest-cache.service';
 import { ContestStandingsCalculatorService } from './contest-standings-calculator.service';
@@ -385,7 +386,7 @@ export class ContestService {
     if (!acquired) throw new BadRequestException(`提交过于频繁，请 ${cooldownSeconds} 秒后再试`);
   }
 
-  async contestSubmissions(id: string, viewer: Viewer, mine = false) {
+  async contestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -406,7 +407,7 @@ export class ContestService {
       },
     ]));
     const items = await this.prisma.contestSubmission.findMany({
-      where: { contestId: id, ...(mine ? { submission: { userId: viewer.id } } : {}) },
+      where: { contestId: id, ...((mine || nickname?.trim()) ? { submission: { ...(mine ? { userId: viewer.id } : {}), ...nicknameFilter(nickname) } } : {}) },
       take: 80,
       orderBy: { submission: { createdAt: 'desc' } },
       include: {

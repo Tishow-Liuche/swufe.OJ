@@ -65,6 +65,21 @@ const activeTab = ref<'overview' | 'accepted' | 'submissions' | 'settings'>('ove
 
 const allSubmissions = ref<any[]>([]);
 const subsLoading = ref(false);
+const submissionNickname = ref('');
+const appliedSubmissionNickname = ref('');
+const submissionPage = ref(1);
+const submissionTotal = ref(0);
+const submissionError = ref('');
+let submissionRequest = 0;
+function searchSubmissions() {
+  appliedSubmissionNickname.value = submissionNickname.value.trim();
+  submissionPage.value = 1;
+  void loadAllSubmissions();
+}
+function changeSubmissionPage(delta: number) {
+  submissionPage.value += delta;
+  void loadAllSubmissions();
+}
 const acceptedProblems = ref<any[]>([]);
 const acceptedLoading = ref(false);
 const selectedSubmission = ref<any>(null);
@@ -343,13 +358,21 @@ function resetAwardForm() {
 }
 
 async function loadAllSubmissions() {
+  const request = ++submissionRequest;
   subsLoading.value = true;
+  submissionError.value = '';
   activeTab.value = 'submissions';
   try {
-    const { data } = await api.get('/api/submissions', { params: { pageSize: 100 } });
+    const { data } = await api.get('/api/submissions', { params: { pageSize: 50, page: submissionPage.value, nickname: appliedSubmissionNickname.value || undefined } });
+    if (request !== submissionRequest) return;
     allSubmissions.value = data.items || [];
+    submissionTotal.value = data.total || 0;
+  } catch (e: any) {
+    if (request !== submissionRequest) return;
+    allSubmissions.value = [];
+    submissionError.value = e.response?.data?.message || '提交记录加载失败，请重试';
   } finally {
-    subsLoading.value = false;
+    if (request === submissionRequest) subsLoading.value = false;
   }
 }
 
@@ -624,18 +647,29 @@ void [
       </section>
 
       <section v-else-if="activeTab === 'submissions'" class="profile-panel">
-        <div class="panel-title"><h2>提交记录</h2><span>{{ allSubmissions.length }} 条</span></div>
+        <div class="panel-title"><h2>提交记录</h2><span>共 {{ submissionTotal }} 条</span></div>
+        <form class="submission-search" @submit.prevent="searchSubmissions">
+          <input v-model="submissionNickname" maxlength="100" aria-label="搜索提交者昵称" placeholder="输入提交者昵称" />
+          <button type="submit">搜索</button>
+          <button type="button" @click="submissionNickname = ''; searchSubmissions()">重置</button>
+        </form>
+        <p v-if="submissionError" role="alert">{{ submissionError }}</p>
         <div v-if="subsLoading" class="empty-state">正在加载提交记录…</div>
         <div v-else-if="allSubmissions.length" class="submission-list">
           <button v-for="sub in allSubmissions" :key="sub.id" class="submission-row" @click="viewDetail(sub)">
             <span class="status-dot" :style="{ background: statusColors[sub.status] || '#8996a6' }">{{ statusLabels[sub.status] || sub.status }}</span>
-            <span class="sub-title">{{ problemDisplayTitle(sub.problem) }}</span>
+            <span class="sub-title">{{ problemDisplayTitle(sub.problem) }}<small class="submission-author">{{ sub.user?.nickname || sub.user?.username || '未知用户' }}<template v-if="sub.user?.nickname && sub.user?.username">（{{ sub.user.username }}）</template> · {{ new Date(sub.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</small></span>
             <span class="sub-meta">{{ sub.language }}</span>
             <span class="sub-time" v-if="hasMetric(sub.timeUsed) || hasMetric(sub.memoryUsed)">{{ hasMetric(sub.timeUsed) ? `${sub.timeUsed}ms` : '-' }} / {{ hasMetric(sub.memoryUsed) ? formatMemoryKb(sub.memoryUsed) : '-' }}</span>
             <span class="sub-time" v-else-if="shouldShowScore(sub.status, sub.score)">{{ sub.score }} 分</span>
           </button>
         </div>
         <div v-else class="empty-state">暂无提交记录。</div>
+        <div class="submission-search">
+          <button :disabled="subsLoading || submissionPage <= 1" @click="changeSubmissionPage(-1)">上一页</button>
+          <span>第 {{ submissionPage }} / {{ Math.max(1, Math.ceil(submissionTotal / 50)) }} 页</span>
+          <button :disabled="subsLoading || submissionPage * 50 >= submissionTotal" @click="changeSubmissionPage(1)">下一页</button>
+        </div>
       </section>
 
       <section v-else class="settings-grid">
@@ -1338,6 +1372,11 @@ void [
   max-height: 620px;
   overflow-y: auto;
 }
+.submission-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
+.submission-search input { min-width: 0; width: min(260px, 100%); padding: 9px 12px; border: 1px solid #dbe3eb; border-radius: 8px; background: transparent; color: inherit; }
+.submission-search button { padding: 9px 14px; border: 1px solid #dbe3eb; border-radius: 8px; background: #f3f7fb; color: inherit; cursor: pointer; }
+.submission-search button:disabled { opacity: .45; cursor: default; }
+.submission-author { display: block; font-size: 12px; color: #738196; font-weight: normal; margin-top: 5px; overflow-wrap: anywhere; white-space: normal; }
 
 .submission-row {
   display: grid;

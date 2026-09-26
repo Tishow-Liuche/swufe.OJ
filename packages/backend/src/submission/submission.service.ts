@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CfSubmissionService } from '../codeforces/cf-submission.service';
 import { LuoguSubmissionService } from '../luogu/luogu-submission.service';
 import { QojSubmissionService } from '../qoj/qoj-submission.service';
+import { nicknameFilter } from '../common/submission-search';
 
 @Injectable()
 export class SubmissionService {
@@ -163,7 +164,7 @@ export class SubmissionService {
     const { userId, problemId, status } = q;
     const page = Math.max(1, Number.parseInt(String(q.page ?? '1'), 10) || 1);
     const pageSize = Math.min(100, Math.max(1, Number.parseInt(String(q.pageSize ?? '20'), 10) || 20));
-    const where: any = {};
+    const where: any = { ...nicknameFilter(q.nickname) };
     if (userId) where.userId = userId;
     if (problemId) where.problemId = problemId;
     if (status) where.status = status;
@@ -172,7 +173,7 @@ export class SubmissionService {
         select: { id: true, status: true, language: true, score: true, timeUsed: true,
           memoryUsed: true, createdAt: true,
           problem: { select: { id: true, problemNo: true, title: true, source: true } },
-          user: { select: { id: true, username: true } } },
+          user: { select: { id: true, username: true, nickname: true } } },
         skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: 'desc' } }),
       this.prisma.submission.count({ where }),
     ]);

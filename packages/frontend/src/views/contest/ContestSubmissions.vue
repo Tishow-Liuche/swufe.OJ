@@ -7,7 +7,14 @@ import ContestSubmissionDialog from './ContestSubmissionDialog.vue';
 const props = defineProps<{ contest: Contest }>(); const auth = useAuthStore();
 const allowed = computed(() => canViewFeed(props.contest, auth.user));
 const onlyMine = ref(false);
-const { data, error, loading, updatedAt, refresh } = useContestFeed<{ items: any[] }>(() => `/api/contests/${props.contest.id}/submissions${onlyMine.value ? '?mine=true' : ''}`, () => allowed.value);
+const nickname = ref('');
+const appliedNickname = ref('');
+const { data, error, loading, updatedAt, refresh } = useContestFeed<{ items: any[] }>(() => {
+  const params = new URLSearchParams();
+  if (onlyMine.value) params.set('mine', 'true');
+  if (appliedNickname.value) params.set('nickname', appliedNickname.value);
+  return `/api/contests/${props.contest.id}/submissions${params.size ? '?' + params.toString() : ''}`;
+}, () => allowed.value);
 const selectedId = ref('');
 </script>
 <template>
@@ -16,6 +23,11 @@ const selectedId = ref('');
     <p v-if="!allowed" class="arena-empty">该比赛的提交记录仅限参赛者查看，请先报名。</p>
     <template v-else>
       <div class="submission-filter-toolbar">
+        <form class="submission-search" @submit.prevent="appliedNickname = nickname.trim(); selectedId = ''">
+          <input v-model="nickname" maxlength="100" aria-label="搜索选手昵称" placeholder="输入选手昵称" />
+          <button class="arena-button secondary" type="submit">搜索</button>
+          <button class="arena-button secondary" type="button" @click="nickname = ''; appliedNickname = ''; selectedId = ''">重置</button>
+        </form>
         <button class="arena-button" :class="onlyMine ? 'primary' : 'secondary'" :aria-pressed="onlyMine" @click="onlyMine = !onlyMine; selectedId = ''">仅查看自己的提交</button>
       </div>
       <p v-if="error" class="arena-error" role="alert">{{ error }}</p>
@@ -31,7 +43,9 @@ const selectedId = ref('');
 </template>
 <style scoped>
 .arena-submissions .arena-section-head { margin-bottom: 0; }
-.submission-filter-toolbar { display: flex; justify-content: flex-end; padding-block: 16px; }
+.submission-filter-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-block: 16px; }
+.submission-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.submission-search input { min-width: 0; max-width: 100%; padding: 9px 12px; border: 1px solid #dbe3eb; border-radius: 8px; background: transparent; color: inherit; }
 .arena-submissions .arena-table-wrap { max-height: min(520px, 55vh); max-height: min(520px, 55dvh); min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .arena-submissions .arena-table-wrap:focus-visible { outline: 2px solid #2874eb; outline-offset: 2px; }
 .submissions-table th { position: sticky; top: 0; z-index: 1; }
