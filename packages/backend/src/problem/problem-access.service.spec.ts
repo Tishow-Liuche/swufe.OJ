@@ -15,6 +15,25 @@ describe('ProblemAccessService', () => {
     access = new ProblemAccessService(prisma);
   });
 
+  it.each(['EDIT', 'MANAGE_TESTDATA', 'MANAGE_CHECKER'] as ProblemAction[])('shares LOCAL %s with teachers, including unowned history', async action => {
+    for (const createdById of ['teacher-b', null]) {
+      prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'LOCAL', createdById, permissions: [] });
+      await expect(access.assertCanManage('p1', teacher, action)).resolves.toMatchObject({ id: 'p1' });
+    }
+  });
+
+  it.each(['PUBLISH', 'DELETE', 'MANAGE'] as ProblemAction[])('does not share %s', async action => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'LOCAL', createdById: 'teacher-b', permissions: [] });
+    await expect(access.assertCanManage('p1', teacher, action)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('does not share editing with students or imported problems', async () => {
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'LOCAL', createdById: 'teacher-b', permissions: [] });
+    await expect(access.assertCanManage('p1', { id: 's1', role: 'STUDENT' }, 'EDIT')).rejects.toBeInstanceOf(ForbiddenException);
+    prisma.problem.findUnique.mockResolvedValue({ id: 'p1', source: 'CODEFORCES', createdById: 'teacher-b', permissions: [] });
+    await expect(access.assertCanManage('p1', teacher, 'EDIT')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it.each([
     ['a legacy problem', { id: 'legacy', createdById: null, permissions: [] }, teacher, 'EDIT'],
     ['a legacy problem with a stale delegate', {

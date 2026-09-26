@@ -240,7 +240,7 @@ export class ProblemService {
     const where: any = { source: 'LOCAL' };
     const currentPage = Math.max(Number(page) || 1, 1);
     const currentPageSize = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
-    if (viewer.role !== 'ADMIN') where.createdById = viewer.id;
+    if (!['ADMIN', 'TEACHER'].includes(viewer.role)) throw new ForbiddenException('仅教师和管理员可访问历史录题');
     if (status) where.status = status;
     if (keyword) {
       const search = String(keyword).trim();

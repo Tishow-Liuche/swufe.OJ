@@ -35,9 +35,10 @@ export class SubmissionService {
       where: { id: dto.problemId },
       include: { versions: { where: { isCurrent: true } }, sourceInfo: true },
     });
-    const canPreviewReserved = problem?.status === 'CONTEST_RESERVED'
+    const canPreviewReserved = ['CONTEST_RESERVED', 'DRAFT'].includes(problem?.status || '')
+      && problem?.source === 'LOCAL'
       && !!options.authorPreviewActor
-      && (options.authorPreviewActor.role === 'ADMIN' || problem.createdById === options.authorPreviewActor.id);
+      && ['ADMIN', 'TEACHER'].includes(options.authorPreviewActor.role || '');
     const canSubmit = problem?.status === 'PUBLISHED'
       || (options.allowContestReserved && problem?.status === 'CONTEST_RESERVED')
       || canPreviewReserved;

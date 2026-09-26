@@ -34,6 +34,7 @@ describe('SubmissionService contest reserved access', () => {
   }
 
   const reservedProblem = {
+    source: 'LOCAL',
     id: 'problem-1',
     status: 'CONTEST_RESERVED',
     createdById: 'teacher-1',
@@ -106,16 +107,16 @@ describe('SubmissionService contest reserved access', () => {
     }));
   });
 
-  it('does not let another teacher verify someone else\'s contest reserved problem', async () => {
+  it('lets another teacher verify a shared contest reserved problem', async () => {
     const { service, prisma } = createService(reservedProblem);
 
     await expect(service.submit('teacher-2', {
       problemId: 'problem-1',
       language: 'cpp',
       sourceCode: 'int main() { return 0; }',
-    }, { authorPreviewActor: { id: 'teacher-2', role: 'TEACHER' } })).rejects.toBeInstanceOf(NotFoundException);
+    }, { authorPreviewActor: { id: 'teacher-2', role: 'TEACHER' } })).resolves.toMatchObject({ mode: 'LOCAL' });
 
-    expect(prisma.submission.create).not.toHaveBeenCalled();
+    expect(prisma.submission.create).toHaveBeenCalled();
   });
 
   it('allows another local submission while the user has one active submission outside cooldown', async () => {

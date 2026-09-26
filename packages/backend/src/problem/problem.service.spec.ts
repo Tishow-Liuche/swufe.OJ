@@ -566,7 +566,7 @@ describe('ProblemService createFull with judge data', () => {
     }));
   });
 
-  it('lists only authored local problems for teachers', async () => {
+  it('lists shared local problems for teachers', async () => {
     prisma.problem.findMany.mockResolvedValue([]);
     prisma.problem.count.mockResolvedValue(0);
 
@@ -577,7 +577,6 @@ describe('ProblemService createFull with judge data', () => {
 
     const expectedWhere = {
       source: 'LOCAL',
-      createdById: 'teacher-1',
       status: 'DRAFT',
       OR: [
         { title: { contains: 'math', mode: 'insensitive' } },

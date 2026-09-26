@@ -15,6 +15,7 @@ it('uses long timeouts for edit and ZIP replacement, preserves selected ZIP on f
     await vi.waitFor(() => expect(state.loading).toBe(false));
     const zip = new File(['zip'], 'data.zip');
     state.testDataFile = zip;
+    mocks.patch.mockClear();
     mocks.patch.mockResolvedValue({ data: {} });
     mocks.post.mockRejectedValue({ code: 'ECONNABORTED' });
     await state.saveProblem();
@@ -27,5 +28,6 @@ it('uses long timeouts for edit and ZIP replacement, preserves selected ZIP on f
     await state.saveProblem();
     expect(state.error).toBe('');
     expect(state.message).toBe('题目已保存');
+    expect(mocks.patch.mock.calls.every(([url]) => !url.endsWith('/status'))).toBe(true);
   } finally { app.unmount(); }
 });

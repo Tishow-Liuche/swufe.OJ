@@ -14,6 +14,7 @@ const router = useRouter();
 const problemId = computed(() => String(route.params.id || ''));
 const loading = ref(false);
 const saving = ref(false);
+const loadedStatus = ref('');
 const preview = ref(false);
 const error = ref('');
 const message = ref('');
@@ -129,6 +130,7 @@ async function loadProblem() {
     form.hint = version.hint || '';
     form.dataRange = version.dataRange || '';
     form.status = data.status || 'DRAFT';
+    loadedStatus.value = form.status;
     form.judgeMode = checker.type === 'SPJ' ? 'SPJ' : 'STANDARD';
     form.spjLanguage = checker.language || 'python';
     form.spjSourceCode = checker.sourceCode || '';
@@ -183,7 +185,7 @@ async function saveProblem() {
       existingTestCount.value = data.testCount || existingTestCount.value;
     }
 
-    if (['PUBLISHED', 'CONTEST_RESERVED'].includes(targetStatus)) {
+    if (targetStatus !== loadedStatus.value && ['PUBLISHED', 'CONTEST_RESERVED'].includes(targetStatus)) {
       stage = '更新发布状态（题目及测试数据已保存）';
       await api.patch(`/api/problems/${problemId.value}/status`, { status: targetStatus }, authoringRequestOptions('save'));
     }

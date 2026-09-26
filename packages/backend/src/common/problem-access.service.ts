@@ -28,8 +28,11 @@ export class ProblemAccessService {
       return problem;
     }
 
-    // Historical records have no owner. Keep them admin-only until an
-    // administrator explicitly assigns one, regardless of stale grants.
+    if (actor.role === 'TEACHER' && problem.source === 'LOCAL'
+      && ['EDIT', 'MANAGE_TESTDATA', 'MANAGE_CHECKER'].includes(action)) return problem;
+
+    // Shared editing does not grant publication, deletion or delegation.
+    // Unowned records still require an administrator for those actions.
     if (!problem.createdById) throw new ForbiddenException('无权管理该题目');
 
     const delegated = problem.permissions.some((permission) => (
@@ -55,6 +58,7 @@ export class ProblemAccessService {
       where: { id: problemId },
       select: {
         id: true,
+        source: true,
         createdById: true,
         permissions: {
           select: { targetType: true, targetId: true, permission: true },
