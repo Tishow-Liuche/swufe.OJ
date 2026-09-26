@@ -33,8 +33,9 @@ describe('immutable judge versions', () => {
     expect(db.checker.upsert).not.toHaveBeenCalled();
     expect(db.problemVersion.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
       checker: { create: expect.objectContaining({ sourceCode: 'print(False)', protocol: 'LEGACY' }) },
-      testCases: { create: [expect.objectContaining({ input: 'old' })] },
     }) }));
+    expect(db.problemVersion.create.mock.calls[0][0].data.testCases).toBeUndefined();
+    expect(db.$executeRaw.mock.calls.some(([sql]:any[]) => sql.join('').includes('INSERT INTO "ProblemTestCase"'))).toBe(true);
   });
   it('new SPJ defaults to strict boolean protocol', async () => {
     await service.createFull({ title: 'p', description: 'd', judgeMode: 'SPJ', spjLanguage: 'python', spjSourceCode: 'print(True)' }, actor);

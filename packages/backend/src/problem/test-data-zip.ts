@@ -1,6 +1,34 @@
 import { BadRequestException } from '@nestjs/common';
 import type AdmZip from 'adm-zip';
-import { inflateRawSync } from 'node:zlib';
+import { inflateRawSync, createInflateRaw } from 'node:zlib';
+import { Readable } from 'node:stream';
+
+/** Streaming equivalent of readTestDataEntry, with the same size and CRC checks. */
+export async function* streamTestDataEntry(entry: AdmZip.IZipEntry, maxBytes: number): AsyncGenerator<Buffer> {
+  const { size, compressedSize, method, flags, crc } = entry.header;
+  if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes || flags & 1 || ![0, 8].includes(method)) {
+    throw new BadRequestException('测试数据 ZIP 条目大小、压缩方式或加密标记无效');
+  }
+  const compressed = entry.getCompressedData();
+  if (compressed.length !== compressedSize) throw new BadRequestException('测试数据 ZIP 条目被截断');
+  const source = Readable.from((function* () {
+    for (let i = 0; i < compressed.length; i += 65536) yield compressed.subarray(i, i + 65536);
+  })());
+  const stream = method === 8 ? source.pipe(createInflateRaw()) : source;
+  let length = 0, checksum = 0xffffffff;
+  try {
+    for await (const value of stream) {
+      const data = Buffer.from(value);
+      length += data.length;
+      if (length > size || length > maxBytes) throw new Error('expansion limit');
+      for (const byte of data) checksum = (checksum >>> 8) ^ crcTable[(checksum ^ byte) & 0xff];
+      yield data;
+    }
+    if (length !== size || ((checksum ^ 0xffffffff) >>> 0) !== (crc >>> 0)) throw new Error('CRC/size mismatch');
+  } catch {
+    throw new BadRequestException(`测试文件 ${entry.entryName.slice(0, 120)} 损坏或实际大小超过限制`);
+  } finally { source.destroy(); stream.destroy(); }
+}
 
 // ZIP uses the standard reflected CRC-32 polynomial (also works on Node 20).
 const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {

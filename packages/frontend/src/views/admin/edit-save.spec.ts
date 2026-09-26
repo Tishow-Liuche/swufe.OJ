@@ -1,10 +1,13 @@
 import { createApp } from 'vue';
 import { expect, it, vi } from 'vitest';
 import EditProblem from './EditProblem.vue';
-const mocks = vi.hoisted(() => ({ patch: vi.fn(), post: vi.fn() }));
+const mocks = vi.hoisted(() => ({ patch: vi.fn(), post: vi.fn(), failLoad: false }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { id: 'p1' } }), useRouter: () => ({ push() {} }) }));
 vi.mock('../../api/client', () => ({ default: {
-  get: async () => ({ data: { title: '测试题', status: 'PUBLISHED', versions: [{ description: '题面', testCases: [{}] }] } }),
+  get: async () => {
+    if (mocks.failLoad) throw new Error('load failed');
+    return { data: { id: 'p1', title: '测试题', status: 'PUBLISHED', versions: [{ description: '题面', testCases: [{}] }] } };
+  },
   patch: mocks.patch, post: mocks.post,
 } }));
 it('uses long timeouts for edit and ZIP replacement, preserves selected ZIP on failure', async () => {
@@ -30,4 +33,22 @@ it('uses long timeouts for edit and ZIP replacement, preserves selected ZIP on f
     expect(state.message).toBe('题目已保存');
     expect(mocks.patch.mock.calls.every(([url]) => !url.endsWith('/status'))).toBe(true);
   } finally { app.unmount(); }
+});
+it('blocks empty editing after load failure and supports retry', async () => {
+  mocks.failLoad = true;
+  mocks.patch.mockClear();
+  const app = createApp(EditProblem);
+  const host = document.createElement('div'); app.mount(host);
+  const state = (app as any)._instance.setupState;
+  try {
+    await vi.waitFor(() => expect(state.loading).toBe(false));
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    expect(host.querySelector('textarea')).toBeNull();
+    await state.saveProblem();
+    expect(mocks.patch).not.toHaveBeenCalled();
+    mocks.failLoad = false;
+    (host.querySelector('[role="alert"] button') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(host.querySelector('textarea')).not.toBeNull());
+    expect(state.form.description).toBe('题面');
+  } finally { mocks.failLoad = false; app.unmount(); }
 });

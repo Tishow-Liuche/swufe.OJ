@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { tmpdir } from 'node:os';
+import { TestdataImportInterceptor } from './testdata-import.interceptor';
 import { ProblemService } from './problem.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -33,7 +35,7 @@ export class ProblemController {
   @Post(':id/testdata')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('TEACHER', 'ADMIN')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(TestdataImportInterceptor, FileInterceptor('file', { dest: tmpdir(), limits: { fileSize: 50 * 1024 * 1024 } }))
   uploadTestData(@Param('id') id: string, @UploadedFile() file: Express.Multer.File, @Req() req: any) {
     return this.problem.uploadTestData(id, file, req.user);
   }

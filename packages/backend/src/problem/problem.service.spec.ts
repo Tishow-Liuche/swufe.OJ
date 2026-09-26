@@ -776,7 +776,10 @@ describe('ProblemService createFull with judge data', () => {
       const input = '0'.repeat(12 * 1024 * 1024);
       await service.uploadTestData('p1', zipFile({ 'abs1.in': input, 'abs1.out': '0' }), actor);
       const data = prisma.problemVersion.create.mock.calls[0][0].data;
-      expect(data.testCases.create[0].input).toBe(input);
+      expect(data.testCases).toBeUndefined();
+      const chunks = prisma.$executeRaw.mock.calls.filter(([sql, kind]: any[]) => sql.join('').includes('INSERT INTO pg_temp.oj_import_chunks') && kind === 'input');
+      expect(chunks.map((call: any[]) => call[3]).join('')).toBe(input);
+      expect(chunks.every((call: any[]) => call[3].length <= 300000)).toBe(true);
       expect(data.sampleInput || '').toBe('');
       expect(data.sampleOutput || '').toBe('');
     });

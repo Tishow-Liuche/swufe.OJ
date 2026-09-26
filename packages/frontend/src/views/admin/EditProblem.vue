@@ -13,6 +13,7 @@ const route = useRoute();
 const router = useRouter();
 const problemId = computed(() => String(route.params.id || ''));
 const loading = ref(false);
+const loaded = ref(false);
 const saving = ref(false);
 const loadedStatus = ref('');
 const preview = ref(false);
@@ -111,10 +112,12 @@ function insertImageAfterSamples(markdown: string) {
 
 async function loadProblem() {
   loading.value = true;
+  loaded.value = false;
   error.value = '';
   try {
-    const { data } = await api.get(`/api/problems/mine/created/${problemId.value}`);
-    const version = data.versions?.[0] || {};
+    const { data } = await api.get(`/api/problems/mine/created/${problemId.value}`, authoringRequestOptions('save'));
+    const version = data.versions?.[0];
+    if (!data.id || !version) throw new Error('题目或当前版本缺失，已禁止保存');
     const checker = version.checker || {};
     form.title = data.title || '';
     form.description = version.description || '';
@@ -136,14 +139,16 @@ async function loadProblem() {
     form.spjSourceCode = checker.sourceCode || '';
     form.spjProtocol = checker.type === 'SPJ' ? checker.protocol || 'LEGACY' : 'BOOLEAN_STDOUT';
     existingTestCount.value = version.testCases?.length || 0;
+    loaded.value = true;
   } catch (e: any) {
-    error.value = e.response?.data?.message || '加载题目失败';
+    error.value = e.response?.data?.message || e.message || '加载题目失败';
   } finally {
     loading.value = false;
   }
 }
 
 async function saveProblem() {
+  if (!loaded.value || loading.value || saving.value) return;
   error.value = validationError.value;
   message.value = '';
   if (error.value) return;
@@ -220,6 +225,10 @@ onMounted(loadProblem);
     </div>
 
     <div v-if="loading" class="card">正在加载题目...</div>
+    <div v-else-if="!loaded" class="card error-card" role="alert">
+      <p>{{ error || '题目未加载，已禁止编辑和保存，原数据未因此清空。' }}</p>
+      <button class="btn-secondary" @click="loadProblem">重新加载</button>
+    </div>
     <template v-else>
       <div class="card">
         <h3>基础信息</h3>

@@ -6,7 +6,10 @@ import { PROBLEM_ACTIONS, ProblemAccessService, type ProblemAction, type Problem
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { normalizePointDifficulty } from './point-difficulty';
-import { readTestDataEntry } from './test-data-zip';
+import { readTestDataEntry, streamTestDataEntry } from './test-data-zip';
+import { randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
+import { statSync } from 'node:fs';
 
 type JudgeMode = 'STANDARD' | 'SPJ';
 
@@ -101,9 +104,15 @@ export class ProblemService {
       const latestProblem = await tx.problem.findUniqueOrThrow({ where: { id: problemId } });
       const judgeMode: JudgeMode = version.checker?.type === 'SPJ' ? 'SPJ' : 'STANDARD';
       const cases = this.parseTestDataZip(file, judgeMode);
+      // SPJ ignores reference output contents, but supplied files must still be valid.
+      for (const tc of cases) {
+        if (tc.discardedOutputEntry) {
+          for await (const _chunk of streamTestDataEntry(tc.discardedOutputEntry, MAX_ZIP_ENTRY_BYTES)) { /* validate only */ }
+        }
+      }
       const samples: Record<string, string> = {};
       // Large judge fixtures are not page samples; avoid bloating subsequent edits.
-      if (Buffer.byteLength(cases[0].input) + Buffer.byteLength(cases[0].expectedOutput) <= 64 * 1024) {
+      if (cases[0].byteSize <= 64 * 1024) {
         if (!String(version.sampleInput || '').trim()) samples.sampleInput = cases[0].input;
         if (judgeMode === 'STANDARD' && !String(version.sampleOutput || '').trim()) samples.sampleOutput = cases[0].expectedOutput;
       }
@@ -112,7 +121,7 @@ export class ProblemService {
         testGroups: [{ name: file.originalname, score: 100, testCount: cases.length, order: 1 }],
       });
       return { status: 'imported', fileName: file.originalname, size: file.size, testCount: cases.length, judgeMode, versionId: created.id };
-    }, { timeout: 30000 });
+    }, { timeout: 120000 });
   }
 
   async uploadImage(file: Express.Multer.File) {
@@ -503,7 +512,7 @@ export class ProblemService {
           where: { isCurrent: true },
           take: 1,
           include: {
-            testCases: { orderBy: { order: 'asc' } },
+            testCases: { select: { id: true }, orderBy: { order: 'asc' } },
             checker: true,
           },
         },
@@ -543,7 +552,7 @@ export class ProblemService {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`problem-version:${problemId}`}, 0))`;
     const version = await tx.problemVersion.findFirst({
       where: { problemId, isCurrent: true }, orderBy: { version: 'desc' },
-      include: { checker: true, testCases: { orderBy: { order: 'asc' } }, testGroups: true },
+      include: { checker: true, testCases: { select: { id: true }, orderBy: { order: 'asc' } }, testGroups: true },
     });
     if (!version) throw new NotFoundException('题目版本不存在');
     return version;
@@ -562,7 +571,9 @@ export class ProblemService {
     const checker = value.checker;
     // Old rows and their test cases remain immutable for queued submissions/rejudges.
     await tx.problemVersion.updateMany({ where: { problemId: problem.id, isCurrent: true }, data: { isCurrent: false } });
-    return tx.problemVersion.create({ data: {
+    const replacing = Object.prototype.hasOwnProperty.call(patch, 'testCases');
+    const small = replacing && patch.testCases.reduce((sum: number, tc: any) => sum + (tc.byteSize ?? Buffer.byteLength(tc.input || '') + Buffer.byteLength(tc.expectedOutput || '')), 0) <= 256 * 1024;
+    const created = await tx.problemVersion.create({ data: {
       problemId: problem.id, version: previous.version + 1, isCurrent: true,
       description: value.description, inputFormat: value.inputFormat, outputFormat: value.outputFormat,
       sampleInput: value.sampleInput, sampleOutput: value.sampleOutput, hint: value.hint, dataRange: value.dataRange,
@@ -571,9 +582,56 @@ export class ProblemService {
       ...(checker ? { checker: { create: {
         type: checker.type, language: checker.language, sourceCode: checker.sourceCode, protocol: checker.protocol || 'LEGACY',
       } } } : {}),
-      testCases: { create: value.testCases.map(({ input, expectedOutput, score, order, isSample }: any) => ({ input, expectedOutput, score, order, isSample })) },
+      ...(small ? { testCases: { create: patch.testCases.map(({ input, expectedOutput, score, order, isSample }: any) => ({ input, expectedOutput, score, order, isSample })) } } : {}),
       testGroups: { create: value.testGroups.map(({ name, score, testCount, order }: any) => ({ name, score, testCount, order })) },
     } });
+    if (!replacing) {
+      await tx.$executeRaw`INSERT INTO "ProblemTestCase" ("id", "problemVersionId", "input", "expectedOutput", "score", "order", "isSample", "createdAt", "updatedAt")
+        SELECT md5(${created.id} || ':' || "id"), ${created.id}, "input", "expectedOutput", "score", "order", "isSample", NOW(), NOW()
+        FROM "ProblemTestCase" WHERE "problemVersionId" = ${previous.id}`;
+    } else if (!small) {
+      await this.writeStreamedCases(tx, created.id, patch.testCases);
+    }
+    return created;
+  }
+
+  private async writeStreamedCases(tx: Prisma.TransactionClient, versionId: string, cases: any[]) {
+    await tx.$executeRaw`CREATE TEMP TABLE oj_import_chunks (kind text, seq integer, content text) ON COMMIT DROP`;
+    for (const tc of cases) {
+      await tx.$executeRaw`TRUNCATE pg_temp.oj_import_chunks`;
+      for (const [kind, entry] of [['input', tc.inputEntry], ['output', tc.outputEntry]] as const) {
+        const decoder = new StringDecoder('utf8');
+        let pending = '', seq = 0;
+        const flush = async () => {
+          if (pending.includes('\0')) throw new BadRequestException('测试数据必须是文本，不能包含 NUL 字符');
+          await tx.$executeRaw`INSERT INTO pg_temp.oj_import_chunks(kind, seq, content) VALUES (${kind}, ${seq++}, ${pending})`;
+          pending = '';
+        };
+        if (entry) {
+          for await (const chunk of streamTestDataEntry(entry, MAX_ZIP_ENTRY_BYTES)) {
+            pending += decoder.write(chunk);
+            if (pending.length >= 256 * 1024) await flush();
+          }
+          pending += decoder.end();
+        } else {
+          const value = String(kind === 'input' ? tc.input ?? '' : tc.expectedOutput ?? '');
+          for (let start = 0; start < value.length;) {
+            let end = Math.min(start + 256 * 1024, value.length);
+            // Keep UTF-16 surrogate pairs together across SQL parameters.
+            if (end < value.length && value.charCodeAt(end - 1) >= 0xd800 && value.charCodeAt(end - 1) <= 0xdbff) end--;
+            pending = value.slice(start, end);
+            await flush();
+            start = end;
+          }
+        }
+        if (pending) await flush();
+      }
+      await tx.$executeRaw`INSERT INTO "ProblemTestCase" ("id", "problemVersionId", "input", "expectedOutput", "score", "order", "isSample", "createdAt", "updatedAt")
+        VALUES (${randomUUID()}, ${versionId},
+          COALESCE((SELECT string_agg(content, '' ORDER BY seq) FROM pg_temp.oj_import_chunks WHERE kind = 'input'), ''),
+          COALESCE((SELECT string_agg(content, '' ORDER BY seq) FROM pg_temp.oj_import_chunks WHERE kind = 'output'), ''),
+          ${tc.score}, ${tc.order}, ${tc.isSample}, NOW(), NOW())`;
+    }
   }
 
   private normalizeInlineTestCases(
@@ -621,19 +679,19 @@ export class ProblemService {
     if (!file.originalname.toLowerCase().endsWith('.zip')) {
       throw new BadRequestException('测试数据必须是 ZIP 格式');
     }
-    if (!file.buffer || file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b) {
+    if (!file.path && (!file.buffer || file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b)) {
       throw new BadRequestException('无效的 ZIP 文件');
     }
 
-    if (file.buffer.length > 50 * 1024 * 1024) throw new BadRequestException('测试数据 ZIP 不能超过 50MB');
+    if ((file.path ? statSync(file.path).size : file.buffer.length) > 50 * 1024 * 1024) throw new BadRequestException('测试数据 ZIP 不能超过 50MB');
     let entries: AdmZip.IZipEntry[];
     try {
-      entries = new AdmZip(file.buffer).getEntries();
+      entries = new AdmZip(file.path || file.buffer).getEntries();
     } catch {
       throw new BadRequestException('ZIP 文件结构损坏，请重新打包后上传');
     }
     this.validateZipBudget(entries);
-    const byName = new Map<string, { name: string; index: number; input?: string; output?: string }>();
+    const byName = new Map<string, { name: string; index: number; input?: AdmZip.IZipEntry; output?: AdmZip.IZipEntry }>();
     for (const entry of entries) {
       if (entry.isDirectory) continue;
       const normalized = entry.entryName.replace(/\\/g, '/');
@@ -648,7 +706,7 @@ export class ProblemService {
       const item = byName.get(name) || { name, index };
       const field = kind === 'in' ? 'input' : 'output';
       if (item[field] !== undefined) throw new BadRequestException(`测试点 ${name} 的${kind === 'in' ? '输入' : '输出'}文件重复，请保留一份同名文件`);
-      item[field] = readTestDataEntry(entry, MAX_ZIP_ENTRY_BYTES).toString('utf8');
+      item[field] = entry;
       byName.set(name, item);
     }
 
@@ -663,8 +721,12 @@ export class ProblemService {
         throw new BadRequestException(`普通题缺少 ${item.name}.out 或 ${item.name}.ans 输出文件`);
       }
       return {
-        input: item.input,
-        expectedOutput: judgeMode === 'SPJ' ? '' : item.output!,
+        get input() { return readTestDataEntry(item.input!, MAX_ZIP_ENTRY_BYTES).toString('utf8'); },
+        get expectedOutput() { return judgeMode === 'SPJ' ? '' : readTestDataEntry(item.output!, MAX_ZIP_ENTRY_BYTES).toString('utf8'); },
+        inputEntry: item.input,
+        outputEntry: judgeMode === 'SPJ' ? undefined : item.output,
+        discardedOutputEntry: judgeMode === 'SPJ' ? item.output : undefined,
+        byteSize: item.input.header.size + (judgeMode === 'SPJ' ? 0 : item.output!.header.size),
         score: score + (position === cases.length - 1 ? rest : 0),
         order: position + 1,
         isSample: false,
