@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import api from '../../api/client';
 import { authoringRequestOptions, authoringError } from '../../utils/authoring-request';
-import { renderMarkdownWithMath } from '../../utils/markdown';
+import { renderStatement } from '../../utils/statement-render';
 import { pointDifficultyOptions } from '../../utils/pointDifficulty';
 import SpjProtocolSelect from '../../components/SpjProtocolSelect.vue';
 
@@ -73,7 +73,7 @@ function onZipSelected(e: Event) {
 }
 
 function renderMd(text: string) {
-  return renderMarkdownWithMath(text);
+  return renderStatement(text);
 }
 
 async function uploadAuthoringImage(file: File) {

@@ -12,9 +12,8 @@ import { java } from '@codemirror/lang-java';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { tagLabel } from '../utils/tagLabels';
 import ProblemDiscussionPanel from '../components/ProblemDiscussionPanel.vue';
-import { sanitizeStatementHtml } from '../security/sanitize-statement';
 import 'katex/dist/katex.min.css';
-import { renderMarkdownWithMath } from '../utils/markdown';
+import { renderStatement } from '../utils/statement-render';
 import { pointDifficultyLabel } from '../utils/pointDifficulty';
 import { Star } from '@lucide/vue';
 import ProblemStateBadges from '../components/ProblemStateBadges.vue';
@@ -469,7 +468,7 @@ function startPolling(id: string) {
 }
 
 function renderMd(text: string): string {
-  return sanitizeStatementHtml(renderMarkdownWithMath(text));
+  return renderStatement(text);
 }
 
 function splitSampleSections(text?: string | null): string[] {

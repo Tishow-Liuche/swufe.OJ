@@ -3,7 +3,6 @@ import AdmZip from 'adm-zip';
 import * as path from 'path';
 import { FileUploadService } from '../common/file-upload.service';
 import { PROBLEM_ACTIONS, ProblemAccessService, type ProblemAction, type ProblemActor } from '../common/problem-access.service';
-import { sanitizeProblemContent } from '../common/content-sanitizer';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { normalizePointDifficulty } from './point-difficulty';
@@ -60,7 +59,7 @@ export class ProblemService {
       version: 1,
       timeLimit: dto.timeLimit || 1000,
       memoryLimit: dto.memoryLimit || 256,
-      description: sanitizeProblemContent(dto.description),
+      description: dto.description,
       inputFormat: this.sanitizeOptionalContent(dto.inputFormat),
       outputFormat: this.sanitizeOptionalContent(dto.outputFormat),
       sampleInput: this.sanitizeOptionalContent(dto.sampleInput),
@@ -535,7 +534,9 @@ export class ProblemService {
   }
 
   private sanitizeOptionalContent(value?: string) {
-    return value === undefined ? undefined : sanitizeProblemContent(value);
+    // Authored fields are Markdown/plain source, not HTML. Sanitize rendered HTML
+    // at every display boundary; HTML parsing here destroys inequalities/code.
+    return value;
   }
 
   private async lockCurrentVersion(tx: Prisma.TransactionClient, problemId: string) {

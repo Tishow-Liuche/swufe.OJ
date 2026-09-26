@@ -2,14 +2,6 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import AdmZip from 'adm-zip';
 import { ProblemService } from './problem.service';
 
-jest.mock('sanitize-html', () => ({
-  __esModule: true,
-  default: (html: string) => String(html)
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/\s+on\w+="[^"]*"/gi, '')
-    .replace(/<=/g, '&lt;=')
-    .replace(/<img([^>]*)>/gi, '<img$1 />'),
-}));
 
 describe('ProblemService createFull with judge data', () => {
   let service: ProblemService;
@@ -194,17 +186,17 @@ describe('ProblemService createFull with judge data', () => {
     }));
   });
 
-  it('sanitizes statement HTML before it is persisted', async () => {
+  it('preserves Markdown source losslessly; HTML is sanitized at rendering', async () => {
     prisma.problem.create.mockResolvedValue({ id: 'p-sanitized' });
 
     await service.createFull({
       title: 'Sanitized',
-      description: '<img src="https://example.com/a.png" onerror="alert(1)"><script>alert(2)</script>',
+      description: '$$a_i<a_{i-1}$$\n\n后续题面\n```\nH -> V -> H\n#include <iostream>\n```',
     } as any, actor);
 
     const version = prisma.problem.create.mock.calls[0][0].data.versions.create;
-    expect(version.description).toContain('<img src="https://example.com/a.png" />');
-    expect(version.description).not.toMatch(/script|onerror/i);
+    expect(version.description).toBe('$$a_i<a_{i-1}$$\n\n后续题面\n```\nH -> V -> H\n#include <iostream>\n```');
+    expect((service as any).sanitizeOptionalContent('1 -> 2\n<input>\nend')).toBe('1 -> 2\n<input>\nend');
   });
 
   it('checks specific delegated actions before changing an existing problem', async () => {
@@ -662,7 +654,7 @@ describe('ProblemService createFull with judge data', () => {
         sampleInput: '1 2\n',
         sampleOutput: '3\n',
         hint: 'hint',
-        dataRange: 'n &lt;= 10',
+        dataRange: 'n <= 10',
     }));
     expect(prisma.problemTag.deleteMany).toHaveBeenCalledWith({ where: { problemId: 'p1' } });
     expect(prisma.problemTag.createMany).toHaveBeenCalledWith({
