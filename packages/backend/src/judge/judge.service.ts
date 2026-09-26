@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+type RuntimeInput = string | { fileId: string };
+interface RunOptions { outputLimitMb?: number; cacheOutput?: boolean; }
+
 interface GoJudgeRequest {
   cmd: Array<{
     args: string[];
     env?: string[];
     files?: Array<{
       content?: string;
+      fileId?: string;
       name?: string;
       max?: number;
     }>;
@@ -45,6 +49,7 @@ export interface RunResult {
   timeUsed: number;    // ms
   memoryUsed: number;  // KB
   output: string;
+  outputFileId?: string;
   exitStatus?: number;
   signal?: number | string;
   error?: string;
@@ -170,6 +175,7 @@ export class JudgeService {
     memoryLimitMb: number,
     compileFileId?: string,
     sourceCode?: string,
+    options: RunOptions = {},
   ): Promise<RunResult> {
     return this.runWithFiles(
       language,
@@ -178,25 +184,30 @@ export class JudgeService {
       memoryLimitMb,
       compileFileId,
       sourceCode,
+      {},
+      options,
     );
   }
 
   /** Run code with optional companion files for special judges. */
   async runWithFiles(
     language: string,
-    input: string,
+    input: RuntimeInput,
     timeLimitMs: number,
     memoryLimitMb: number,
     compileFileId?: string,
     sourceCode?: string,
-    files: Record<string, string> = {},
+    files: Record<string, RuntimeInput> = {},
+    options: RunOptions = {},
   ): Promise<RunResult> {
     const langConfig = LANGUAGE_CONFIG[language];
     if (!langConfig) {
       return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: '', error: 'Unsupported language' };
     }
 
-    if (!Number.isFinite(timeLimitMs) || timeLimitMs <= 0 || timeLimitMs > 300_000
+    const outputLimitMb = options.outputLimitMb ?? 10;
+    if (!Number.isFinite(outputLimitMb) || outputLimitMb <= 0 || outputLimitMb > 1024
+      || !Number.isFinite(timeLimitMs) || timeLimitMs <= 0 || timeLimitMs > 300_000
       || !Number.isFinite(memoryLimitMb) || memoryLimitMb <= 0) {
       return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: '', error: 'Invalid sandbox resource limits' };
     }
@@ -217,7 +228,7 @@ export class JudgeService {
       if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
         return { status: 'SYSTEM_ERROR', timeUsed: 0, memoryUsed: 0, output: '', error: `Invalid SPJ file name: ${name}` };
       }
-      copyIn[name] = { content: content ?? '' };
+      copyIn[name] = typeof content === 'string' ? { content } : content;
     }
 
     const request: GoJudgeRequest = {
@@ -225,8 +236,8 @@ export class JudgeService {
         args: langConfig.runCommand,
         env: ['PATH=/usr/bin:/bin:/usr/local/bin'],
         files: [
-          { content: input },                   // stdin
-          { name: 'stdout', max: 10_485_760 },  // 10MB
+          typeof input === 'string' ? { content: input } : input,
+          { name: 'stdout', max: outputLimitMb * 1024 * 1024 },
           { name: 'stderr', max: 10_240 },
         ],
         cpuLimit,
@@ -234,12 +245,16 @@ export class JudgeService {
         memoryLimit,
         procLimit: 50,
         copyIn,
-        copyOut: ['stdout', 'stderr'],
+        copyOut: options.cacheOutput ? ['stderr'] : ['stdout', 'stderr'],
+        ...(options.cacheOutput ? { copyOutCached: ['stdout'] } : {}),
       }],
     };
 
+    let outputFileId: string | undefined;
     try {
       const result = await this.requestRun(request, clockLimit / 1_000_000 + 5000);
+      outputFileId = options.cacheOutput ? result.fileIds?.stdout : undefined;
+      const output = outputFileId ? await this.outputPreview(outputFileId) : result.files?.stdout || '';
 
       const status = (result.fileError?.length && !this.isOutputLimitEvidence(result)) || (result.status === 'Accepted' && (result.error || result.signal))
         ? 'SYSTEM_ERROR' : STATUS_MAP[result.status] || 'SYSTEM_ERROR';
@@ -250,7 +265,8 @@ export class JudgeService {
         status: status === 'ACCEPTED' && result.exitStatus !== 0 ? 'RUNTIME_ERROR' : status,
         timeUsed,
         memoryUsed,
-        output: result.files?.['stdout'] || '',
+        output,
+        ...(outputFileId ? { outputFileId } : {}),
         exitStatus: result.exitStatus,
         signal: result.signal,
         error: result.error || result.fileError?.map((entry) => `${entry.name}: ${entry.message}`).join('; '),
@@ -258,6 +274,7 @@ export class JudgeService {
         sandboxStatus: result.status,
       };
     } catch (error: any) {
+      if (outputFileId) await this.deleteFile(outputFileId);
       this.logger.error(`Run error: ${error.message}`);
       return {
         status: 'SYSTEM_ERROR',
@@ -267,6 +284,55 @@ export class JudgeService {
         error: error.message,
       };
     }
+  }
+
+  private async *outputChunks(fileId: string): AsyncGenerator<string> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      const response = await fetch(`${this.baseUrl}/file/${encodeURIComponent(fileId)}`, { signal: controller.signal });
+      if (!response.ok || !response.body) throw new Error(`Sandbox output download failed: ${response.status}`);
+      reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield decoder.decode(value, { stream: true });
+      }
+      yield decoder.decode();
+    } finally {
+      await reader?.cancel().catch(() => {});
+      controller.abort(); clearTimeout(timer);
+    }
+  }
+
+  private async outputPreview(fileId: string): Promise<string> {
+    let preview = '';
+    for await (const chunk of this.outputChunks(fileId)) {
+      const remaining = 32768 - preview.length;
+      preview += chunk.slice(0, remaining);
+      if (chunk.length > remaining) return preview + '\n[output truncated]';
+    }
+    return preview;
+  }
+
+  async compareCachedOutput(fileId: string, expectedOutput: string): Promise<boolean> {
+    const expected = String(expectedOutput ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/[ \t\n]+$/g, '');
+    let offset = 0, pendingCR = false;
+    const matches = (text: string) => {
+      const count = Math.min(text.length, expected.length - offset);
+      if (text.slice(0, count) !== expected.slice(offset, offset + count)) return false;
+      offset += count;
+      return /^[ \t\n]*$/.test(text.slice(count));
+    };
+    for await (let chunk of this.outputChunks(fileId)) {
+      if (pendingCR) { chunk = '\r' + chunk; pendingCR = false; }
+      if (chunk.endsWith('\r')) { chunk = chunk.slice(0, -1); pendingCR = true; }
+      if (!matches(chunk.replace(/\r\n/g, '\n').replace(/\r/g, '\n'))) return false;
+    }
+    if (pendingCR && !matches('\n')) return false;
+    return offset === expected.length;
   }
 
   private isOutputLimitEvidence(result: GoJudgeResult): boolean {
@@ -295,10 +361,17 @@ export class JudgeService {
         || !Number.isFinite(result.time) || result.time < 0
         || !Number.isFinite(result.memory) || result.memory < 0
         || !stringMap(result.files) || !stringMap(result.fileIds)
-        || (result.status === 'Accepted' && (typeof result.files?.stdout !== 'string' || typeof result.files?.stderr !== 'string'))
+        || (result.status === 'Accepted' && ((request.cmd[0].copyOut || []).some(name => typeof result.files?.[name] !== 'string')
+          || (request.cmd[0].copyOutCached || []).some(name => typeof result.fileIds?.[name] !== 'string' || !result.fileIds[name].trim())))
         || (result.fileError !== undefined && (!Array.isArray(result.fileError) || result.fileError.some((entry) => !entry || typeof entry.name !== 'string' || typeof entry.message !== 'string' || (entry.type !== undefined && typeof entry.type !== 'string'))))
         || (result.error !== undefined && typeof result.error !== 'string')
         || (result.signal !== undefined && typeof result.signal !== 'string' && typeof result.signal !== 'number')) {
+        // A malformed response can still own cached artifacts. Release only the
+        // cache names requested by this command, never arbitrary response keys.
+        for (const name of request.cmd[0].copyOutCached || []) {
+          const id = result?.fileIds?.[name];
+          if (typeof id === 'string' && id.trim()) await this.deleteFile(id);
+        }
         throw new Error('Malformed sandbox response');
       }
       return result;

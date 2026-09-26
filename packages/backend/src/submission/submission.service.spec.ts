@@ -40,6 +40,7 @@ describe('SubmissionService contest reserved access', () => {
     createdById: 'teacher-1',
     timeLimit: 1000,
     memoryLimit: 256,
+    outputLimit: 1024,
     versions: [{ id: 'version-1' }],
     sourceInfo: null,
   };
@@ -83,6 +84,7 @@ describe('SubmissionService contest reserved access', () => {
       submissionId: 'submission-1',
       problemId: 'problem-1',
       language: 'cpp',
+      outputLimit: 1024,
     }), { priority: 1 });
   });
 

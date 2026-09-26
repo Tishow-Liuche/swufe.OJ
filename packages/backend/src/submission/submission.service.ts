@@ -88,7 +88,7 @@ export class SubmissionService {
       await this.judgeQueue.add('local-judge', {
         submissionId: submission.id, problemId: dto.problemId,
         language: dto.language, sourceCode: dto.sourceCode,
-        timeLimit: problem.timeLimit, memoryLimit: problem.memoryLimit,
+        timeLimit: problem.timeLimit, memoryLimit: problem.memoryLimit, outputLimit: problem.outputLimit,
       }, { priority: 1 });
     } catch (error) {
       await this.prisma.$transaction(async (tx) => {
@@ -250,11 +250,11 @@ export class SubmissionService {
     await this.prisma.judgeTask.upsert({ where: { submissionId: id },
       create: { submissionId: id }, update: { retryCount: 0, startedAt: null, finishedAt: null } });
     const problem = await this.prisma.problem.findUnique({ where: { id: sub.problemId },
-      select: { timeLimit: true, memoryLimit: true } });
+      select: { timeLimit: true, memoryLimit: true, outputLimit: true } });
     await this.judgeQueue.add('local-judge', {
       submissionId: id, problemId: sub.problemId, language: sub.language,
       sourceCode: sub.sourceCode, timeLimit: problem?.timeLimit || 1000,
-      memoryLimit: problem?.memoryLimit || 256 }, { priority: 2 });
+      memoryLimit: problem?.memoryLimit || 256, outputLimit: problem?.outputLimit ?? 64 }, { priority: 2 });
     return { id, status: 'QUEUING' };
   }
 }

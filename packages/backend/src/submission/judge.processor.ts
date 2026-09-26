@@ -16,6 +16,7 @@ interface JudgeJob {
   sourceCode: string;
   timeLimit: number;
   memoryLimit: number;
+  outputLimit?: number;
 }
 
 interface ProblemTestCaseForJudge {
@@ -93,7 +94,7 @@ export class JudgeProcessor extends WorkerHost {
       }
       const submission = await this.prisma.submission.findUnique({
         where: { id: data.submissionId },
-        select: { problemId: true, problemVersionId: true },
+        select: { problemId: true, problemVersionId: true, problem: { select: { outputLimit: true } } },
       });
       if (!submission || submission.problemId !== data.problemId || submission.problemVersionId === undefined) {
         await this.failSubmission(data.submissionId, 'SYSTEM_ERROR', 'Submission snapshot identity is missing or mismatched');
@@ -115,7 +116,8 @@ export class JudgeProcessor extends WorkerHost {
         where: { id: data.submissionId },
         data: { status: 'COMPILING' },
       });
-      const limits = { ...data, timeLimit: version.timeLimit ?? data.timeLimit, memoryLimit: version.memoryLimit ?? data.memoryLimit };
+      const limits = { ...data, timeLimit: version.timeLimit ?? data.timeLimit, memoryLimit: version.memoryLimit ?? data.memoryLimit,
+        outputLimit: data.outputLimit ?? submission.problem?.outputLimit ?? 64 };
       const compileResult = await this.judge.compile(data.language, data.sourceCode);
       if (compileResult.fileId) artifacts.add(compileResult.fileId);
       if (!compileResult.success) {
@@ -169,7 +171,9 @@ export class JudgeProcessor extends WorkerHost {
           limits.memoryLimit,
           compileResult.fileId,
           data.sourceCode,
+          { outputLimitMb: limits.outputLimit, cacheOutput: true },
         );
+        if (result.outputFileId) artifacts.add(result.outputFileId);
 
         maxTime = Math.max(maxTime, result.timeUsed);
         maxMemory = Math.max(maxMemory, result.memoryUsed);
@@ -177,16 +181,22 @@ export class JudgeProcessor extends WorkerHost {
         let caseStatus = result.status;
         if (caseStatus === 'ACCEPTED') {
           if (useSpj && checkerCompileResult) {
-            const verdict = await this.judgeWithSpj(checker, checkerCompileResult, result.output, tc, limits);
+            const verdict = await this.judgeWithSpj(checker, checkerCompileResult, result.output, tc, limits, result.outputFileId);
             caseStatus = verdict.status;
             systemMessage = verdict.message;
-          } else caseStatus = this.compareOutput(result.output, tc.expectedOutput)
+          } else caseStatus = (result.outputFileId
+            ? await this.judge.compareCachedOutput(result.outputFileId, tc.expectedOutput)
+            : this.compareOutput(result.output, tc.expectedOutput))
               ? 'ACCEPTED'
               : 'WRONG_ANSWER';
         }
         if (caseStatus === 'SYSTEM_ERROR') {
           finalStatus = 'SYSTEM_ERROR';
           systemMessage ||= `Sandbox system error: ${result.error || result.stderr || result.sandboxStatus || result.output || 'unknown failure'}`;
+        }
+        if (result.outputFileId) {
+          await this.judge.deleteFile(result.outputFileId);
+          artifacts.delete(result.outputFileId);
         }
 
         pendingCases.push({
@@ -261,10 +271,12 @@ export class JudgeProcessor extends WorkerHost {
     userOutput: string,
     testCase: ProblemTestCaseForJudge,
     data: JudgeJob,
+    outputFileId?: string,
   ) {
+    const candidateOutput = outputFileId ? { fileId: outputFileId } : userOutput;
     const checkerResult: RunResult = await this.judge.runWithFiles(
       checker.language || 'python',
-      userOutput,
+      candidateOutput,
       Math.min(30_000, Math.max(2000, data.timeLimit)),
       Math.min(1024, Math.max(256, data.memoryLimit)),
       checkerCompileResult.fileId,
@@ -272,7 +284,7 @@ export class JudgeProcessor extends WorkerHost {
       {
         input: testCase.input,
         output: testCase.expectedOutput || '',
-        user_output: userOutput,
+        user_output: candidateOutput,
       },
     );
     const status = this.checkerVerdict(checkerResult, checker.protocol || 'LEGACY');

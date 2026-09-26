@@ -82,7 +82,30 @@ describe('JudgeProcessor local test data judging', () => {
       prisma.problemVersion.findFirst.mockClear();
       await processor.process(job);
       expect(prisma.problemVersion.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'v-original', problemId: 'p1' } }));
-      expect(judge.run).toHaveBeenCalledWith('cpp', 'input-0', 4200, 512, 'program', 'code');
+      expect(judge.run).toHaveBeenCalledWith('cpp', 'input-0', 4200, 512, 'program', 'code', {outputLimitMb:64,cacheOutput:true});
+    });
+
+    it('uses the configured output limit and passes cached stdout to SPJ, then deletes it', async () => {
+      prepare('SPJ', ['ACCEPTED']);
+      job.data.outputLimit = 1024;
+      judge.run.mockReset().mockResolvedValue({status:'ACCEPTED',timeUsed:1,memoryUsed:1,output:'preview',outputFileId:'out-id'});
+      try {
+        await processor.process(job);
+        expect(judge.run.mock.calls[0][6]).toEqual({outputLimitMb:1024,cacheOutput:true});
+        expect(judge.runWithFiles.mock.calls[0][1]).toEqual({fileId:'out-id'});
+        expect(judge.runWithFiles.mock.calls[0][6].user_output).toEqual({fileId:'out-id'});
+        expect(judge.deleteFile).toHaveBeenCalledWith('out-id');
+      } finally { delete job.data.outputLimit; }
+    });
+
+    it('compares the cached full standard output rather than its preview', async () => {
+      prepare('STANDARD', ['ACCEPTED']);
+      judge.run.mockReset().mockResolvedValue({status:'ACCEPTED',timeUsed:1,memoryUsed:1,output:'ok',outputFileId:'out-id'});
+      judge.compareCachedOutput = jest.fn().mockResolvedValue(false);
+      const result = await processor.process(job);
+      expect(result.status).toBe('WRONG_ANSWER');
+      expect(judge.compareCachedOutput).toHaveBeenCalledWith('out-id','ok');
+      expect(judge.deleteFile).toHaveBeenCalledWith('out-id');
     });
 
     it('fails closed when a stored snapshot is missing', async () => {

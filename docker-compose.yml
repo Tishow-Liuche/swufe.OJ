@@ -87,7 +87,7 @@ services:
     container_name: oj-go-judge
     privileged: true
     restart: unless-stopped
-    mem_limit: 768m
+    mem_limit: ${GO_JUDGE_MEMORY_LIMIT:-768m}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -100,7 +100,7 @@ services:
       -enable-metrics
       -parallelism ${GO_JUDGE_PARALLELISM:-1}
       -tmp-fs-param size=256m,nr_inodes=8k
-      -output-limit 268435456
+      -output-limit 2147483648
       -copy-out-limit 67108864
       -force-gc-target 20971520
       -force-gc-interval 5s
@@ -108,7 +108,7 @@ services:
     ports:
       - "127.0.0.1:5050:5050"
       - "127.0.0.1:5052:5052"
-    shm_size: 512m
+    shm_size: ${GO_JUDGE_SHM_SIZE:-512m}
 
 volumes:
   postgres_data:
