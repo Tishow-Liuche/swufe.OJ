@@ -15,6 +15,7 @@ import { contestantSubmission } from '../submission/submission-privacy';
 import { ContestCacheService } from './contest-cache.service';
 import { ContestStandingsCalculatorService } from './contest-standings-calculator.service';
 import { externalSolvedIdentity } from '../common/external-solved';
+import { importContestParticipants } from './participant-import';
 
 type Viewer = { id: string; role?: string };
 
@@ -193,6 +194,12 @@ export class ContestService {
       update: {},
     });
     return { participant, state: this.stateOf(contest, participant) };
+  }
+
+  async importParticipants(id: string, viewer: Viewer, body: unknown) {
+    const result = await importContestParticipants(this.prisma, id, viewer, body);
+    if (result.imported) await this.contestCache?.invalidateContest(id);
+    return result;
   }
 
   async startVirtual(id: string, viewer: Viewer) {

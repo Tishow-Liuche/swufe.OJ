@@ -41,6 +41,12 @@ export class ContestController {
     return this.contests.register(id, req.user, dto.password, dto);
   }
 
+  @Post(':id/participants/import')
+  @UseGuards(AuthGuard('jwt'))
+  importParticipants(@Param('id') id: string, @Req() req: any, @Body() body: unknown) {
+    return this.contests.importParticipants(id, req.user, body);
+  }
+
   @Post(':id/virtual')
   @UseGuards(AuthGuard('jwt'))
   startVirtual(@Param('id') id: string, @Req() req: any) {

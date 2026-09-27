@@ -4,6 +4,7 @@ import { useTimestamp } from '@vueuse/core';
 import api from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
 import { canManageContest, dateText, errorText, type Contest } from './contest';
+import ContestParticipantImport from './ContestParticipantImport.vue';
 const props = defineProps<{ contest: Contest }>();
 const emit = defineEmits<{ reload: [] }>();
 const auth = useAuthStore();
@@ -59,5 +60,6 @@ async function act(virtual = false) {
         <button v-if="contest.state === 'ENDED' && contest.allowUpsolve && !contest.participant && (contest.visibility === 'PUBLIC' || canManageContest(contest, auth.user))" class="arena-button secondary" :disabled="busy" @click="act(true)">开始虚拟比赛</button>
       </div>
     </div>
+    <ContestParticipantImport :contest="contest" @reload="emit('reload')" />
   </section>
 </template>
