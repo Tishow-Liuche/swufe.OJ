@@ -397,7 +397,7 @@ export class ContestService {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
-        participants: { select: { userId: true } },
+        participants: { select: { userId: true, realName: true, studentId: true } },
         problems: {
           orderBy: { order: 'asc' },
           include: { problem: { select: { id: true, problemNo: true, title: true } } },
@@ -413,8 +413,14 @@ export class ContestService {
         title: problem.problem?.title || `Problem ${this.problemLabel(index)}`,
       },
     ]));
+    const search = nickname?.trim().slice(0, 100);
+    const identityFilter = search && contest.visibility === 'CAMPUS_PRIVATE'
+      ? { OR: [nicknameFilter(search), { userId: { in: contest.participants
+          .filter(p => `${p.realName || ''}（${p.studentId || ''}）`.toLowerCase().includes(search.toLowerCase()))
+          .map(p => p.userId) } }] }
+      : nicknameFilter(search);
     const items = await this.prisma.contestSubmission.findMany({
-      where: { contestId: id, ...((mine || nickname?.trim()) ? { submission: { ...(mine ? { userId: viewer.id } : {}), ...nicknameFilter(nickname) } } : {}) },
+      where: { contestId: id, ...((mine || search) ? { submission: { ...(mine ? { userId: viewer.id } : {}), ...identityFilter } } : {}) },
       take: 80,
       orderBy: { submission: { createdAt: 'desc' } },
       include: {
@@ -439,7 +445,7 @@ export class ContestService {
           timeUsed: submission.timeUsed,
           memoryUsed: submission.memoryUsed,
           createdAt: submission.createdAt,
-          user: submission.user,
+          user: this.contestSubmissionUser(contest, submission.user),
           problem: {
             id: submission.problem?.id || submission.problemId,
             title: meta?.title || submission.problem?.title || submission.problemId,
@@ -454,7 +460,7 @@ export class ContestService {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
-        participants: { select: { userId: true } },
+        participants: { select: { userId: true, realName: true, studentId: true } },
         submissions: {
           where: { submissionId },
           take: 1,
@@ -480,7 +486,18 @@ export class ContestService {
     }
     const item = contest.submissions[0];
     if (!item) throw new NotFoundException('提交记录不属于该比赛');
-    return canManage ? item.submission : contestantSubmission(item.submission);
+    const submission = { ...item.submission, user: this.contestSubmissionUser(contest, item.submission.user) };
+    return canManage ? submission : contestantSubmission(submission);
+  }
+
+  private contestSubmissionUser<T extends { id: string }>(contest: {
+    visibility: string; participants?: Array<{ userId: string; realName?: string | null; studentId?: string | null }>;
+  }, user: T): T & { displayName?: string } {
+    if (contest.visibility !== 'CAMPUS_PRIVATE' || !user) return user;
+    const participant = contest.participants?.find(p => p.userId === user.id);
+    return participant?.realName && participant.studentId
+      ? { ...user, displayName: `${participant.realName}（${participant.studentId}）` }
+      : user;
   }
 
   async saveSnapshot(id: string, viewer: Viewer) {

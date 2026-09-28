@@ -26,7 +26,7 @@ onUnmounted(() => { generation++; controller?.abort(); dialog.value?.close(); })
     <p v-if="loading" role="status">正在加载提交…</p><p v-else-if="error" class="arena-error" role="alert">{{ error }}</p>
     <template v-else-if="detail">
       <dl class="arena-facts">
-        <div><dt>选手</dt><dd>{{ detail.user?.nickname || detail.user?.username }}</dd></div>
+        <div><dt>选手</dt><dd>{{ detail.user?.displayName || detail.user?.nickname || detail.user?.username }}</dd></div>
         <div><dt>题目</dt><dd>{{ problemDisplayTitle(detail.problem) }}</dd></div>
         <div><dt>结果 / 语言</dt><dd>{{ statusText(detail.status) }} / {{ detail.language }}</dd></div>
         <div><dt>实际耗时 / 内存</dt><dd>{{ detail.timeUsed ?? '—' }} ms / {{ detail.memoryUsed ?? '—' }} KB</dd></div>
