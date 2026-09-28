@@ -15,7 +15,7 @@
 - [x] Add `common/account-throttler.guard.ts` and `.spec.ts`: verify JWT signature/expiry before taking `sub`; never trust decoded-only JWT or caller-provided identity headers. Authentication endpoints retain IP protection, with login/refresh identity buckets as amended below. Wire global provider and update security baseline expectation. Retain route limit/TTL decorators.
 - [x] Run `npm test -- --runInBand` and `npm run build` in backend, get independent security/concurrency review, fix findings.
 - [x] Recreate prior isolated 100-user/8-problem/2000-submission fixture on the same 2-core host. Patch only test API files, not production. Re-run exact 20/50/100-user phases plus shared-IP scenario with synthetic judging; keep 12-second timeout and safety stops. Retain raw before/after data. If passed, run near-boundary 5.2-second submission interval to distinguish cooldown rejects from actual overload, and public resource check.
-- [ ] Record results and limitations, commit/push only `42411036`; deploy changed compiled API files via derived image with backups and health rollback; run read-only production privacy/identity checks and confirm no test schema, tokens, queues, containers remain. No teacher-host changes.
+- [x] Record results and limitations, commit/push only `42411036`; deploy changed compiled API files via derived image with backups and health rollback; run read-only production privacy/identity checks and confirm no test schema, tokens, queues, containers remain. No teacher-host changes.
 
 ## Acceptance
 
