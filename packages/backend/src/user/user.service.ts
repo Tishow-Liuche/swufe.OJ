@@ -982,7 +982,7 @@ export class UserService {
     return this.prisma.user.findMany({
       where: { deletedAt: null },
       select: {
-        id: true, username: true, email: true, nickname: true,
+        id: true, username: true, email: true, nickname: true, studentId: true,
         role: true, school: true, requestedRole: true,
         teacherApplicationStatus: true, createdAt: true,
         _count: { select: { submissions: true } },

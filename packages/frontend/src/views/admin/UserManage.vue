@@ -138,7 +138,7 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
         </thead>
         <tbody>
           <tr v-for="u in users" :key="u.id">
-            <td><strong>{{ u.username }}</strong><small>{{ u.nickname || u.email }}</small></td>
+            <td><div><strong :title="u.username">{{ u.nickname || u.username }}</strong><small v-if="u.studentId?.trim()">学号：{{ u.studentId }}</small></div></td>
             <td>{{ u.school || '-' }}</td>
             <td>
               <span class="role-tag" :class="roleClass(u)">{{ roleLabel(u) }}</span>
