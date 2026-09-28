@@ -5,7 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { AccountThrottlerGuard } from './common/account-throttler.guard';
 import { configureHttpSecurity } from './common/security-config';
 import { AppModule } from './app.module';
 import { AuthController } from './auth/auth.controller';
@@ -48,7 +48,7 @@ describe('HTTP security baseline', () => {
   it('installs a global throttler and a stricter five-request window on authentication entry points', () => {
     const providers = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, AppModule) || [];
     expect(providers).toEqual(expect.arrayContaining([
-      expect.objectContaining({ provide: APP_GUARD, useClass: ThrottlerGuard }),
+      expect.objectContaining({ provide: APP_GUARD, useClass: AccountThrottlerGuard }),
     ]));
 
     for (const handler of [

@@ -16,11 +16,13 @@ import { ContestCacheService } from './contest-cache.service';
 import { ContestStandingsCalculatorService } from './contest-standings-calculator.service';
 import { externalSolvedIdentity } from '../common/external-solved';
 import { importContestParticipants } from './participant-import';
+import { BoundedReadCache } from '../common/bounded-read-cache';
 
 type Viewer = { id: string; role?: string };
 
 @Injectable()
 export class ContestService {
+  private readonly readCache = new BoundedReadCache(128);
   constructor(
     private readonly prisma: PrismaService,
     private readonly submissions: SubmissionService,
@@ -335,6 +337,30 @@ export class ContestService {
   }
 
   async standings(id: string, viewer: Viewer) {
+    const key = await this.contestReadKey(id, viewer, 'standings');
+    return this.readCache.get(key, 2000, () => this.calculateStandings(id, viewer));
+  }
+
+  private async contestReadKey(id: string, viewer: Viewer, kind: string) {
+    const contest = await this.prisma.contest.findUnique({
+      where: { id },
+      select: {
+        id: true, visibility: true, createdBy: true, updatedAt: true,
+        startTime: true, endTime: true, freezeTime: true,
+        participants: { where: { userId: viewer.id }, take: 1, select: { userId: true } },
+      },
+    });
+    if (!contest) throw new NotFoundException('比赛不存在');
+    this.assertCanViewStandings(contest, viewer);
+    const now = Date.now();
+    const phase = now >= contest.endTime?.getTime() ? 'ended'
+      : now < contest.startTime?.getTime() ? 'upcoming'
+      : contest.freezeTime && now >= contest.freezeTime.getTime() ? 'frozen' : 'live';
+    return JSON.stringify([id, kind, viewer.role === 'ADMIN' || contest.createdBy === viewer.id,
+      contest.updatedAt, contest.visibility, contest.startTime, contest.endTime, contest.freezeTime, phase]);
+  }
+
+  private async calculateStandings(id: string, viewer: Viewer) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -354,13 +380,9 @@ export class ContestService {
         },
       },
     });
-    if (!contest) throw new NotFoundException('?????');
+    if (!contest) throw new NotFoundException('比赛不存在');
     this.assertCanViewStandings(contest, viewer);
     const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
-    if (!canManage) {
-      const cached = await this.contestCache?.getStandings(id);
-      if (cached) return cached;
-    }
     const result = this.standingsCalculator.calculate({
       contest,
       participants: contest.participants,
@@ -369,9 +391,6 @@ export class ContestService {
       now: new Date(),
       canManage,
     });
-    if (!canManage) {
-      await this.contestCache?.setStandings(id, result, Number(process.env.CONTEST_STANDINGS_CACHE_TTL_SECONDS || 3));
-    }
     return result;
   }
 
@@ -394,6 +413,13 @@ export class ContestService {
   }
 
   async contestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string) {
+    // Personalized/search responses must not enter the shared feed cache.
+    if (mine || nickname?.trim()) return this.loadContestSubmissions(id, viewer, mine, nickname);
+    const key = await this.contestReadKey(id, viewer, 'submissions');
+    return this.readCache.get(key, 1000, () => this.loadContestSubmissions(id, viewer));
+  }
+
+  private async loadContestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -425,7 +451,9 @@ export class ContestService {
       orderBy: { submission: { createdAt: 'desc' } },
       include: {
         submission: {
-          include: {
+          select: {
+            id: true, userId: true, problemId: true, status: true, language: true,
+            score: true, timeUsed: true, memoryUsed: true, createdAt: true,
             user: { select: { id: true, username: true, nickname: true, avatar: true } },
             problem: { select: { id: true, problemNo: true, title: true } },
           },

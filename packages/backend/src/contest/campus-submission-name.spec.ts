@@ -11,7 +11,7 @@ describe('campus contest submission identity',()=>{
     expect((await service.contestSubmissions('c1',actor)).items[0].user.displayName).toBe('张三（42411036）');
     expect((await service.contestSubmissionDetail('c1','s1',actor)).user).toMatchObject({displayName:'张三（42411036）'});
     expect(user.nickname).toBe('Account nickname');
-    expect(db.contest.findUnique.mock.calls[0][0].include.participants.select).toMatchObject({realName:true,studentId:true});
+    expect(db.contest.findUnique.mock.calls.find(([q])=>q.include?.participants)?.[0].include.participants.select).toMatchObject({realName:true,studentId:true});
   });
   it.each(['PUBLIC','PRIVATE','PASSWORD'])('does not change non-campus %s identity',async visibility=>{
     const {service}=fixture(visibility);expect((await service.contestSubmissions('c1',{id:'u1'})).items[0].user).toEqual(user);
