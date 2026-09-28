@@ -41,7 +41,7 @@ describe('auth store', () => {
 
     await auth.setAuth('memory-token');
 
-    expect(client.setAccessToken).toHaveBeenCalledWith('memory-token');
+    expect(client.setAccessToken).toHaveBeenCalledWith('memory-token', { newSession: true });
     expect(auth.token).toBe('memory-token');
     expect(auth.user).toEqual(profile);
     expect(setItem).not.toHaveBeenCalled();
@@ -109,6 +109,19 @@ describe('auth store', () => {
     await auth.setAuth('new-login');
     fail({ response: { status: 401 } });
     await oldRestore;
+    expect(auth.token).toBe('new-login');
+    expect(auth.user).toEqual(profile);
+    expect(client.clearAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('does not clear a newer login when an older logout finishes', async () => {
+    const auth = useAuthStore();
+    let finish!: () => void;
+    client.api.post.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({}); }));
+    const logout = auth.logout();
+    await auth.setAuth('new-login');
+    finish();
+    await logout;
     expect(auth.token).toBe('new-login');
     expect(auth.user).toEqual(profile);
     expect(client.clearAccessToken).not.toHaveBeenCalled();

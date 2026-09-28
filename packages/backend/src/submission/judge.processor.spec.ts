@@ -328,22 +328,72 @@ describe('JudgeProcessor local test data judging', () => {
       expect(judge.deleteFile).toHaveBeenCalledWith('program');
     });
 
-    it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024'])('rethrows transient database %s for queue retry without publishing SYSTEM_ERROR', async (code) => {
+    it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024'])('durably delays transient database %s without publishing SYSTEM_ERROR', async (code) => {
       prepare('STANDARD', ['TIME_LIMIT_EXCEEDED', 'ACCEPTED']);
       const failure = Object.assign(new Error('database temporarily unavailable'), { code });
       prisma.$executeRaw.mockRejectedValue(failure);
-      await expect(processor.process({ ...job, attemptsMade: 0, opts: { attempts: 3 } })).rejects.toBe(failure);
+      const deferred = { ...job, attemptsMade: 3, opts: { attempts: 3 }, updateData: jest.fn(), moveToDelayed: jest.fn() };
+      await expect(processor.process(deferred)).rejects.toThrow('bullmq:movedToDelayed');
+      expect(deferred.moveToDelayed).toHaveBeenCalledTimes(1);
       expect(prisma.submission.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SYSTEM_ERROR' }) }));
       expect(prisma.judgeTask.update).not.toHaveBeenCalled();
       expect(judge.deleteFile).toHaveBeenCalledWith('program');
     });
 
-    it('publishes SYSTEM_ERROR if a transient database failure exhausts queue attempts', async () => {
+    it('publishes an explicit infrastructure failure without judging after recovery expires', async () => {
       prepare('STANDARD', ['TIME_LIMIT_EXCEEDED']);
       const failure = Object.assign(new Error('pool timeout'), { code: 'P2024' });
-      prisma.$executeRaw.mockRejectedValue(failure);
-      await expect(processor.process({ ...job, attemptsMade: 2, opts: { attempts: 3 } })).rejects.toBe(failure);
+      await expect(processor.process({ ...job, data: { ...job.data, databaseRecovery: { since: Date.now() - 1800001, count: 40 } }, attemptsMade: 2, opts: { attempts: 3 } })).resolves.toEqual({ status: 'SYSTEM_ERROR' });
       expect(prisma.submission.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SYSTEM_ERROR', score: 0 }) }));
+      expect(judge.compile).not.toHaveBeenCalled();
+      expect(prisma.submission.update.mock.calls[0][0].data.compileMessage).toContain('DATABASE_RECOVERY_EXPIRED');
+    });
+
+    it('does not rerun or erase a durable verdict when its acknowledgement was lost', async () => {
+      prisma.submission.findUnique.mockResolvedValue({ problemId: 'p1', problemVersionId: 'v-original', status: 'ACCEPTED', score: 100, judgedAt: new Date() });
+      await expect(processor.process({ ...job, attemptsStarted: 4, data: { ...job.data, databaseRecovery: { since: Date.now() - 1800001, expiredAt: Date.now(), count: 40 } } })).resolves.toEqual({ status: 'ACCEPTED', score: 100 });
+      expect(prisma.submissionCase.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.submission.update).not.toHaveBeenCalled();
+      expect(judge.compile).not.toHaveBeenCalled();
+    });
+
+    it('keeps expiry publication queued if the database is still unavailable', async () => {
+      const outage = Object.assign(new Error('connection lost'), { code: 'P1001' });
+      prisma.submission.findUnique.mockRejectedValue(outage);
+      const task = { ...job, data: { ...job.data, databaseRecovery: { since: Date.now() - 1800001, count: 40 } },
+        updateData: jest.fn(), moveToDelayed: jest.fn() };
+      await expect(processor.process(task)).rejects.toThrow('bullmq:movedToDelayed');
+      expect(task.updateData.mock.calls[0][0].databaseRecovery.expiredAt).toEqual(expect.any(Number));
+      expect(task.moveToDelayed).toHaveBeenCalledTimes(1);
+      expect(judge.compile).not.toHaveBeenCalled();
+    });
+
+    it('recovers a final-write acknowledgement loss without recompiling or deleting case results', async () => {
+      prepare('STANDARD', ['ACCEPTED']);
+      const persisted: any = { problemId: 'p1', problemVersionId: 'v-original', status: 'QUEUING' };
+      prisma.submission.findUnique.mockImplementation(async () => ({ ...persisted }));
+      prisma.submission.update.mockImplementation(async ({ data }) => {
+        Object.assign(persisted, data);
+        if (data.status === 'ACCEPTED') throw Object.assign(new Error('acknowledgement lost'), { code: 'P1017' });
+        return persisted;
+      });
+      const task = { ...job, data: { ...job.data }, attemptsStarted: 1, updateData: jest.fn(), moveToDelayed: jest.fn() };
+      await expect(processor.process(task)).rejects.toThrow('bullmq:movedToDelayed');
+      await expect(processor.process({ ...task, attemptsStarted: 2 })).resolves.toEqual({ status: 'ACCEPTED', score: 100 });
+      expect(judge.compile).toHaveBeenCalledTimes(1);
+      expect(prisma.submissionCase.deleteMany).not.toHaveBeenCalled();
+      expect(storedCases).toHaveLength(1);
+      expect(learning.recordSubmissionResult).toHaveBeenCalledWith('s1', 'ACCEPTED');
+    });
+
+    it('recovers assignment notification using the original judgement timestamp', async () => {
+      const judgedAt = new Date('2026-09-28T12:00:00Z');
+      const assignment = { onLocalAccepted: jest.fn() };
+      const recovering = new JudgeProcessor(prisma, judge, learning, assignment as any, contestCache);
+      prisma.submission.findUnique.mockResolvedValue({ problemId: 'p1', problemVersionId: 'v-original', userId: 'u1', status: 'ACCEPTED', score: 100, judgedAt });
+      await expect(recovering.process(job)).resolves.toEqual({ status: 'ACCEPTED', score: 100 });
+      expect(assignment.onLocalAccepted).toHaveBeenCalledWith('u1', 'p1', judgedAt);
+      expect(judge.compile).not.toHaveBeenCalled();
     });
 
     it('does not downgrade a committed TLE when a post-judgement side effect fails', async () => {
@@ -358,7 +408,7 @@ describe('JudgeProcessor local test data judging', () => {
       const executeRaw = prisma.$executeRaw.getMockImplementation();
       prisma.$executeRaw.mockImplementationOnce(executeRaw)
         .mockRejectedValueOnce(Object.assign(new Error('pool timeout'), { code: 'P2024' }));
-      await expect(processor.process({ ...job, attemptsMade: 0, opts: { attempts: 3 } })).rejects.toThrow('pool timeout');
+      await expect(processor.process({ ...job, attemptsMade: 0, opts: { attempts: 3 }, updateData: jest.fn(), moveToDelayed: jest.fn() })).rejects.toThrow('bullmq:movedToDelayed');
       expect(storedCases.map(row => row.caseIndex)).toEqual([1]);
       judge.run.mockReset(); judge.compile.mockReset();
       prepare('STANDARD', ['TIME_LIMIT_EXCEEDED', 'ACCEPTED', 'ACCEPTED']);

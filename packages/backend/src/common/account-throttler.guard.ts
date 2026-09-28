@@ -11,7 +11,7 @@ import {
   ThrottlerStorage,
 } from '@nestjs/throttler';
 import { createHash } from 'crypto';
-import { REFRESH_COOKIE, hashRefreshToken } from '../auth/refresh-token';
+import { REFRESH_COOKIE, REFRESH_RECOVERY_WINDOW_MS, deriveRefreshSuccessor, hashRefreshToken, isValidRefreshAttempt } from '../auth/refresh-token';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -74,6 +74,22 @@ export class AccountThrottlerGuard extends ThrottlerGuard {
       });
       if (session && session.expiresAt.getTime() > Date.now() && session.user.deletedAt === null) {
         return `refresh-user:${session.userId}`;
+      }
+      const attempt = req.headers?.['x-refresh-attempt'];
+      // A consumed cookie can still identify its account only through an existing
+      // exact successor. Never allocate account buckets from attacker-supplied keys.
+      if (!session && isValidRefreshAttempt(attempt)) {
+        const successor = deriveRefreshSuccessor(token, attempt, this.config.getOrThrow<string>('JWT_ACCESS_SECRET'));
+        const recovered = await this.prisma.userSession.findUnique({
+          where: { refreshTokenHash: hashRefreshToken(successor) },
+          select: { userId: true, expiresAt: true, createdAt: true, user: { select: { deletedAt: true } } },
+        });
+        const now = Date.now();
+        if (recovered && recovered.expiresAt.getTime() > now
+          && recovered.createdAt.getTime() >= now - REFRESH_RECOVERY_WINDOW_MS
+          && recovered.user.deletedAt === null) {
+          return `refresh-user:${recovered.userId}`;
+        }
       }
       return ipTracker;
     }

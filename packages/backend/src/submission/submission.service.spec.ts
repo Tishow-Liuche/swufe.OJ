@@ -28,6 +28,7 @@ describe('SubmissionService contest reserved access', () => {
       add: jest.fn().mockResolvedValue({ id: 'queue-job-1' }),
       getWaitingCount: jest.fn().mockResolvedValue(0),
       getPrioritizedCount: jest.fn().mockResolvedValue(0),
+      getDelayedCount: jest.fn().mockResolvedValue(0),
     };
     const service = new SubmissionService(prisma, {} as any, {} as any, {} as any, judgeQueue);
     return { service, prisma, judgeQueue };
@@ -220,6 +221,15 @@ describe('SubmissionService contest reserved access', () => {
     const { service, prisma, judgeQueue } = createService(reservedProblem);
     judgeQueue.getWaitingCount.mockResolvedValue(100);
     judgeQueue.getPrioritizedCount.mockResolvedValue(400);
+    await expect(service.submit('student-1', {
+      problemId: 'problem-1', language: 'cpp', sourceCode: 'int main() {}',
+    }, { allowContestReserved: true })).rejects.toMatchObject({ status: 429 });
+    expect(prisma.submission.create).not.toHaveBeenCalled();
+  });
+
+  it('counts infrastructure-delayed jobs toward the global backlog cap', async () => {
+    const { service, prisma, judgeQueue } = createService(reservedProblem);
+    judgeQueue.getDelayedCount.mockResolvedValue(500);
     await expect(service.submit('student-1', {
       problemId: 'problem-1', language: 'cpp', sourceCode: 'int main() {}',
     }, { allowContestReserved: true })).rejects.toMatchObject({ status: 429 });

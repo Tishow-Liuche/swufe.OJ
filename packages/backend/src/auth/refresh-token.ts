@@ -1,6 +1,18 @@
-import { createHash } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 
 export const REFRESH_COOKIE = 'oj_refresh';
+export const REFRESH_RECOVERY_WINDOW_MS = 5 * 60_000;
+
+export function isValidRefreshAttempt(attempt: unknown): attempt is string {
+  return typeof attempt === 'string' && /^[a-f0-9]{64}$/.test(attempt);
+}
+
+export function deriveRefreshSuccessor(refreshToken: string, attempt: string, secret: string): string {
+  return createHmac('sha256', secret)
+    .update('swufe:refresh-response-recovery:v1\0')
+    .update(JSON.stringify([refreshToken, attempt]))
+    .digest('hex');
+}
 
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');

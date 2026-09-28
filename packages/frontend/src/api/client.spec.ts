@@ -33,6 +33,7 @@ describe('API session client', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     window.history.replaceState({}, '', '/');
     api.defaults.adapter = apiAdapter;
@@ -67,6 +68,171 @@ describe('API session client', () => {
     expect(request?.url).toBe('/api/auth/refresh');
     expect(request?.data).toBeUndefined();
     expect(request?.withCredentials).toBe(true);
+  });
+
+  it('immediately retries a lost response once with the same cryptographic attempt', async () => {
+    const attempts: unknown[] = [];
+    refreshClient.defaults.adapter = async config => {
+      attempts.push(config.headers.get('X-Refresh-Attempt'));
+      if (attempts.length === 1) throw new Error('response lost after server commit');
+      return response(config, { accessToken: 'recovered' });
+    };
+    await expect(refreshAccessToken()).resolves.toBe('recovered');
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(attempts[1]).toBe(attempts[0]);
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBeNull();
+  });
+
+  it.each([undefined, 429, 503])('retains only the retry key after transient status %s, then uses it on retry', async status => {
+    const attempts: unknown[] = [];
+    refreshClient.defaults.adapter = async config => {
+      attempts.push(config.headers.get('X-Refresh-Attempt'));
+      throw { response: status ? { status } : undefined };
+    };
+    await expect(refreshAccessToken()).rejects.toBeDefined();
+    expect(attempts.length).toBeLessThanOrEqual(2);
+    expect(attempts[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBe(attempts[0]);
+    expect(localStorage.length).toBe(1);
+    refreshClient.defaults.adapter = async config => {
+      expect(config.headers.get('X-Refresh-Attempt')).toBe(attempts[0]);
+      return response(config, { accessToken: 'renewed' });
+    };
+    await refreshAccessToken();
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('reuses a pending key after a reload or in another tab', async () => {
+    refreshClient.defaults.adapter = async () => { throw { response: { status: 429 } }; };
+    await expect(refreshAccessToken()).rejects.toBeDefined();
+    const pending = localStorage.getItem('swufe-refresh-attempt');
+    expect(pending).toMatch(/^[a-f0-9]{64}$/);
+    vi.resetModules();
+    const reloaded = await import('./client');
+    reloaded.refreshClient.defaults.adapter = async config => {
+      expect(config.headers.get('X-Refresh-Attempt')).toBe(pending);
+      return response(config, { accessToken: 'renewed' });
+    };
+    await reloaded.refreshAccessToken();
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('retains the attempt in memory if storage writes are denied but reads still work', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota exceeded'); });
+    let firstAttempt: unknown;
+    refreshClient.defaults.adapter = async config => {
+      firstAttempt = config.headers.get('X-Refresh-Attempt');
+      throw { response: { status: 429 } };
+    };
+    await expect(refreshAccessToken()).rejects.toBeDefined();
+    refreshClient.defaults.adapter = async config => {
+      expect(config.headers.get('X-Refresh-Attempt')).toBe(firstAttempt);
+      return response(config, { accessToken: 'renewed' });
+    };
+    await refreshAccessToken();
+  });
+
+  it.each([400, 401, 403])('clears a pending key on definitive auth failure %s', async status => {
+    localStorage.setItem('swufe-refresh-attempt', 'a'.repeat(64));
+    refreshClient.defaults.adapter = async () => { throw { response: { status } }; };
+    await expect(refreshAccessToken()).rejects.toBeDefined();
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBeNull();
+  });
+
+  it('starts a new retry generation after a new login', async () => {
+    localStorage.setItem('swufe-refresh-attempt', 'a'.repeat(64));
+    setAccessToken('new-login', { newSession: true });
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBeNull();
+    refreshClient.defaults.adapter = async config => {
+      expect(config.headers.get('X-Refresh-Attempt')).toMatch(/^[a-f0-9]{64}$/);
+      expect(config.headers.get('X-Refresh-Attempt')).not.toBe('a'.repeat(64));
+      return response(config, { accessToken: 'renewed' });
+    };
+    await refreshAccessToken();
+  });
+
+  it('sends the pending key on logout before clearing it so an undelivered cookie is revoked', async () => {
+    localStorage.setItem('swufe-refresh-attempt', 'a'.repeat(64));
+    api.defaults.adapter = async config => {
+      expect(config.headers.get('X-Refresh-Attempt')).toBe('a'.repeat(64));
+      return response(config);
+    };
+    await logoutSession();
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('does not clear another tab retry key when merely assigning a restored token', () => {
+    localStorage.setItem('swufe-refresh-attempt', 'b'.repeat(64));
+    setAccessToken('restored-token');
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBe('b'.repeat(64));
+  });
+
+  it('keeps the shared attempt while logout waits and revokes the latest key under the lock', async () => {
+    let release!: () => void;
+    const request = vi.fn((_name, callback) => new Promise(resolve => { release = () => resolve(callback()); }));
+    vi.stubGlobal('navigator', { locks: { request } });
+    localStorage.setItem('swufe-refresh-attempt', 'a'.repeat(64));
+    api.defaults.adapter = async config => {
+      expect(config.headers.get('X-Refresh-Attempt')).toBe('b'.repeat(64));
+      expect(localStorage.getItem('swufe-refresh-attempt')).toBe('b'.repeat(64));
+      return response(config);
+    };
+    const logout = logoutSession();
+    await Promise.resolve();
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBe('a'.repeat(64));
+    // Another tab completed its prior rotation then lost the next response while holding the lock.
+    localStorage.setItem('swufe-refresh-attempt', 'b'.repeat(64));
+    release();
+    await logout;
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBeNull();
+  });
+
+  it('does not execute a queued old logout after a new login', async () => {
+    let release!: () => void;
+    vi.stubGlobal('navigator', { locks: { request: (_name: string, callback: () => unknown) =>
+      new Promise(resolve => { release = () => resolve(callback()); }) } });
+    const adapter = vi.fn(async config => response(config));
+    api.defaults.adapter = adapter;
+    const logout = logoutSession();
+    await Promise.resolve();
+    setAccessToken('new-login', { newSession: true });
+    localStorage.setItem('swufe-refresh-attempt', 'b'.repeat(64));
+    release();
+    await expect(logout).rejects.toThrow('Session changed during logout');
+    expect(adapter).not.toHaveBeenCalled();
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBe('b'.repeat(64));
+  });
+
+  it('does not clear a new login attempt when an in-flight logout finishes', async () => {
+    let finish!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    api.defaults.adapter = config => new Promise(resolve => {
+      finish = () => resolve(response(config));
+      started();
+    });
+    localStorage.setItem('swufe-refresh-attempt', 'a'.repeat(64));
+    const logout = logoutSession();
+    await running;
+    setAccessToken('new-login', { newSession: true });
+    localStorage.setItem('swufe-refresh-attempt', 'b'.repeat(64));
+    finish();
+    await logout;
+    expect(localStorage.getItem('swufe-refresh-attempt')).toBe('b'.repeat(64));
+  });
+
+  it('does not retry or restore an old attempt after login changed during a failed refresh', async () => {
+    let reject!: (error: unknown) => void;
+    let calls = 0;
+    refreshClient.defaults.adapter = () => { calls++; return new Promise((_resolve, fail) => { reject = fail; }); };
+    const pending = refreshAccessToken();
+    await Promise.resolve();
+    setAccessToken('new-login', { newSession: true });
+    reject(new Error('response lost'));
+    await expect(pending).rejects.toBeDefined();
+    expect(calls).toBe(1);
+    expect(localStorage.length).toBe(0);
   });
   it('preserves the token when optional avatar recovery cannot refresh authentication', async () => {
     setAccessToken('existing-token');
@@ -145,7 +311,7 @@ describe('API session client', () => {
     });
     const pending = refreshAccessToken();
     await Promise.resolve();
-    setAccessToken('new-login');
+    setAccessToken('new-login', { newSession: true });
     finish();
     await expect(pending).rejects.toBeDefined();
   });

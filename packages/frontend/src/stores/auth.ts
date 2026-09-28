@@ -34,7 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
     restorePromise = null;
     user.value = null;
     token.value = accessToken;
-    setAccessToken(accessToken);
+    setAccessToken(accessToken, { newSession: true });
     await fetchProfile();
   }
 
@@ -50,10 +50,11 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
+    const generation = sessionGeneration;
     try {
       await logoutSession();
     } finally {
-      clearAuth();
+      if (generation === sessionGeneration) clearAuth();
     }
   }
 

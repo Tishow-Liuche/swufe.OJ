@@ -2,6 +2,15 @@ import { AuthController } from './auth.controller';
 import { UnauthorizedException } from '@nestjs/common';
 
 describe('AuthController refresh cookie', () => {
+  it.each(['refresh', 'logout'])('forwards the browser attempt header on %s', async method => {
+    const attempt = 'a'.repeat(64);
+    const auth: any = { [method]: jest.fn().mockResolvedValue({ accessToken: 'access', refreshToken: 'next', expiresIn: '7d' }) };
+    const controller: any = new (AuthController as any)(auth, { get: () => 'false' });
+    await controller[method]({ cookies: { oj_refresh: 'old' }, headers: { 'x-refresh-attempt': attempt } },
+      { cookie: jest.fn(), clearCookie: jest.fn() });
+    expect(auth[method]).toHaveBeenCalledWith('old', attempt);
+  });
+
   it('writes the refresh token to an HTTP-only cookie and omits it from login JSON', async () => {
     const auth: any = {
       login: jest.fn().mockResolvedValue({

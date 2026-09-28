@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import request from 'supertest';
+import { createHmac } from 'crypto';
 import { LoginDto } from '../auth/dto';
 import { hashRefreshToken } from '../auth/refresh-token';
 import { PrismaService } from '../prisma/prisma.service';
@@ -40,7 +41,7 @@ describe('AccountThrottlerGuard authentication capacity', () => {
   let app: INestApplication;
   let findUnique: jest.Mock;
   let userLookup: jest.Mock;
-  let sessions: Map<string, { userId: string; expiresAt: Date; user: { deletedAt: Date | null } }>;
+  let sessions: Map<string, { userId: string; expiresAt: Date; createdAt?: Date; user: { deletedAt: Date | null } }>;
 
   beforeEach(async () => {
     sessions = new Map();
@@ -74,6 +75,59 @@ describe('AccountThrottlerGuard authentication capacity', () => {
     sessions.set(hashRefreshToken(token), { userId, expiresAt: new Date(Date.now() + 60_000), user: { deletedAt: null } });
     return token;
   };
+  const recoveryAttempt = 'a'.repeat(64);
+  const addRecovery = (n: number, userId = `student-${n}`) => {
+    const token = (n + 10_000).toString(16).padStart(64, '0');
+    // Independent protocol fixture: do not let a helper error mask a service/guard mismatch.
+    const successor = createHmac('sha256', 'test-secret')
+      .update('swufe:refresh-response-recovery:v1\0').update(JSON.stringify([token, recoveryAttempt])).digest('hex');
+    const session = { userId, expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(), user: { deletedAt: null as Date | null } };
+    sessions.set(hashRefreshToken(successor), session);
+    return { token, successor, session };
+  };
+
+  it('allows 100 exact recoverable successors at one classroom IP after their old cookies were consumed', async () => {
+    for (let n = 1; n <= 100; n++) {
+      await refresh(addRecovery(n).token).set('X-Refresh-Attempt', recoveryAttempt).expect(200);
+    }
+    expect(findUnique).toHaveBeenCalledTimes(200);
+  });
+
+  it('shares the existing per-account bucket between recovery and current-cookie requests', async () => {
+    const { token, successor } = addRecovery(1, 'alice');
+    for (let n = 1; n <= 5; n++) {
+      await refresh(token, `192.0.2.${n}`).set('X-Refresh-Attempt', recoveryAttempt).expect(200);
+    }
+    await refresh(successor, '192.0.2.10').expect(429);
+  });
+
+  it.each(['wrong-key', 'missing-key', 'malformed-key', 'expired', 'outside-window', 'revoked', 'deleted-user', 'expired-old'])
+    ('keeps ineligible recovery %s in the shared IP bucket', async condition => {
+      const { token, successor, session } = addRecovery(1);
+      let attempt: string | undefined = recoveryAttempt;
+      if (condition === 'wrong-key') attempt = 'b'.repeat(64);
+      if (condition === 'missing-key') attempt = undefined;
+      if (condition === 'malformed-key') attempt = 'invalid';
+      if (condition === 'expired') session.expiresAt = new Date(0);
+      if (condition === 'outside-window') session.createdAt = new Date(Date.now() - 300_001);
+      if (condition === 'revoked') sessions.delete(hashRefreshToken(successor));
+      if (condition === 'deleted-user') session.user.deletedAt = new Date();
+      if (condition === 'expired-old') sessions.set(hashRefreshToken(token), { ...session, expiresAt: new Date(0) });
+      for (let n = 0; n < 5; n++) {
+        const req = refresh(token);
+        if (attempt !== undefined) req.set('X-Refresh-Attempt', attempt);
+        await req.expect(200);
+      }
+      await refresh().expect(429);
+    });
+
+  it('keeps the aggregate 300-per-IP ceiling ahead of successor lookup', async () => {
+    for (let n = 1; n <= 300; n++) {
+      await refresh(addRecovery(n).token).set('X-Refresh-Attempt', recoveryAttempt).expect(200);
+    }
+    await refresh(addRecovery(301).token).set('X-Refresh-Attempt', recoveryAttempt).expect(429);
+    expect(findUnique).toHaveBeenCalledTimes(600);
+  });
 
   it('allows 100 distinct login identifiers from one classroom IP without database lookups', async () => {
     for (let n = 0; n < 100; n++) await login({ account: `student-${n}`, password: 'irrelevant' }).expect(200);

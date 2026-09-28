@@ -8,6 +8,7 @@ import { JudgeService, CompileResult, RunResult } from '../judge/judge.service';
 import { LearningService } from '../learning/learning.service';
 import { AssignmentProgressService } from '../teacher/assignment-progress.service';
 import { ContestCacheService } from '../contest/contest-cache.service';
+import { databaseRecoveryExpired, deferDatabaseOutage, isTransientDatabaseError } from './database-outage';
 
 interface JudgeJob {
   submissionId: string;
@@ -26,6 +27,8 @@ interface ProblemTestCaseForJudge {
 }
 
 const MAX_STORED_OUTPUT_CHARS = 32_768;
+const TERMINAL_STATUSES = new Set(['ACCEPTED', 'WRONG_ANSWER', 'TIME_LIMIT_EXCEEDED', 'MEMORY_LIMIT_EXCEEDED',
+  'OUTPUT_LIMIT_EXCEEDED', 'RUNTIME_ERROR', 'COMPILE_ERROR', 'PRESENTATION_ERROR', 'SYSTEM_ERROR']);
 
 const configuredConcurrency = Number.parseInt(process.env.JUDGE_WORKER_CONCURRENCY || '1', 10);
 const judgeConcurrency = Number.isInteger(configuredConcurrency) && configuredConcurrency > 0
@@ -46,7 +49,7 @@ export class JudgeProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<JudgeJob>) {
+  async process(job: Job<JudgeJob>, token?: string) {
     const data = job.data;
     this.logger.log(`Judging submission ${data.submissionId}`);
     const artifacts = new Set<string>();
@@ -88,18 +91,28 @@ export class JudgeProcessor extends WorkerHost {
     };
 
     try {
-      // Retried/stalled jobs must not expose a previous attempt's unrun tail.
-      // Keep normal first attempts free of this additional database round trip.
-      if (job.attemptsMade > 0 || job.attemptsStarted > 1) {
-        await this.prisma.submissionCase.deleteMany({ where: { submissionId: data.submissionId } });
-      }
       const submission = await this.prisma.submission.findUnique({
         where: { id: data.submissionId },
-        select: { problemId: true, problemVersionId: true, problem: { select: { outputLimit: true } } },
+        select: { problemId: true, problemVersionId: true, status: true, score: true, judgedAt: true, problem: { select: { outputLimit: true } } },
       });
       if (!submission || submission.problemId !== data.problemId || submission.problemVersionId === undefined) {
         await this.failSubmission(data.submissionId, 'SYSTEM_ERROR', 'Submission snapshot identity is missing or mismatched');
         return { status: 'SYSTEM_ERROR' };
+      }
+      // The DB can commit a verdict before its response is lost. A queue retry
+      // must discover that durable result before deleting cases or running code.
+      if (submission.judgedAt && TERMINAL_STATUSES.has(submission.status)) {
+        committedResult = { status: submission.status, score: submission.score ?? 0 };
+        await this.notifyVerdict(data.submissionId, submission.status, submission.judgedAt);
+        return committedResult;
+      }
+      if (databaseRecoveryExpired(job)) {
+        await this.failSubmission(data.submissionId, 'SYSTEM_ERROR', 'DATABASE_RECOVERY_EXPIRED: 数据库连接中断超过 30 分钟，请联系管理员检查后重判');
+        return { status: 'SYSTEM_ERROR' };
+      }
+      // Only nonterminal retries may replace a previous attempt's partial cases.
+      if (job.attemptsMade > 0 || job.attemptsStarted > 1) {
+        await this.prisma.submissionCase.deleteMany({ where: { submissionId: data.submissionId } });
       }
       if (submission.problemVersionId === null) this.logger.warn(`Legacy submission ${data.submissionId} has no snapshot; using current version`);
       const version = await this.prisma.problemVersion.findFirst({
@@ -123,18 +136,18 @@ export class JudgeProcessor extends WorkerHost {
       if (compileResult.fileId) artifacts.add(compileResult.fileId);
       if (!compileResult.success) {
         const status = compileResult.systemError ? 'SYSTEM_ERROR' : 'COMPILE_ERROR';
+        const judgedAt = new Date();
         await this.prisma.submission.update({
           where: { id: data.submissionId },
           data: {
             status,
             score: 0,
               compileMessage: this.truncateOutput(compileResult.message),
-            judgedAt: new Date(),
+            judgedAt,
           },
         });
         committedResult = { status };
-        await this.finishTask(data.submissionId);
-        await this.learning.recordSubmissionResult(data.submissionId, status);
+        await this.notifyVerdict(data.submissionId, status, judgedAt);
         return { status };
       }
 
@@ -237,21 +250,7 @@ export class JudgeProcessor extends WorkerHost {
         },
       });
       committedResult = { status: finalStatus, score: finalScore };
-      await this.finishTask(data.submissionId);
-      await this.learning.recordSubmissionResult(data.submissionId, finalStatus);
-      if (finalStatus === 'ACCEPTED' && this.assignmentProgress) {
-        const submission = await this.prisma.submission.findUnique({
-          where: { id: data.submissionId },
-          select: { userId: true, problemId: true },
-        });
-        if (submission) {
-          await this.assignmentProgress.onLocalAccepted(
-            submission.userId,
-            submission.problemId,
-            judgedAt,
-          );
-        }
-      }
+      await this.notifyVerdict(data.submissionId, finalStatus, judgedAt);
       this.logger.log(`Submission ${data.submissionId}: ${finalStatus} (${finalScore}分)`);
       return { status: finalStatus, score: finalScore };
     } catch (error: any) {
@@ -261,13 +260,11 @@ export class JudgeProcessor extends WorkerHost {
         this.logger.error(`Post-judgement side effect failed ${data.submissionId}: ${error.message}`);
         return committedResult;
       }
-      const retryableDatabaseError = ['P1001', 'P1002', 'P1008', 'P1017', 'P2024'].includes(error.code);
-      const hasRetry = (job.attemptsMade || 0) + 1 < (job.opts?.attempts || 1);
-      if (retryableDatabaseError && hasRetry) {
-        // Keep the submission in progress until the queue retry. Its next attempt
-        // clears partial case rows; do not publish a misleading terminal verdict.
-        this.logger.warn(`Database temporarily unavailable for ${data.submissionId}; deferring to queue retry: ${error.message}`);
-        throw error;
+      if (isTransientDatabaseError(error)) {
+        // A transport interruption is not a contestant verdict. Persist recovery
+        // in Redis, release this slot, and resume independently of contest end.
+        this.logger.warn(`Database temporarily unavailable for ${data.submissionId}; attempting durable recovery (${error.code || error.errorCode || error.name})`);
+        await deferDatabaseOutage(job, token);
       }
       try {
         await flushCases();
@@ -350,6 +347,17 @@ export class JudgeProcessor extends WorkerHost {
       data: { status, score: 0, compileMessage: this.truncateOutput(msg), judgedAt: new Date() },
     });
     await this.finishTask(id);
+  }
+
+  private async notifyVerdict(id: string, status: string, judgedAt: Date) {
+    await this.finishTask(id);
+    await this.learning.recordSubmissionResult(id, status);
+    if (status === 'ACCEPTED' && this.assignmentProgress) {
+      const submission = await this.prisma.submission.findUnique({
+        where: { id }, select: { userId: true, problemId: true },
+      });
+      if (submission) await this.assignmentProgress.onLocalAccepted(submission.userId, submission.problemId, judgedAt);
+    }
   }
 
   private async finishTask(id: string) {

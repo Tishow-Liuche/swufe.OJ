@@ -139,12 +139,13 @@ export class SubmissionService {
       throw new HttpException(`提交过于频繁，请等待 ${cooldownSeconds} 秒`, HttpStatus.TOO_MANY_REQUESTS);
     }
 
-    const [waiting, prioritized] = await Promise.all([
+    const [waiting, prioritized, delayed] = await Promise.all([
       this.judgeQueue.getWaitingCount(),
       this.judgeQueue.getPrioritizedCount(),
+      this.judgeQueue.getDelayedCount(),
     ]);
     const maxWaiting = this.positiveInteger('JUDGE_QUEUE_MAX_WAITING', 500);
-    if (waiting + prioritized >= maxWaiting) {
+    if (waiting + prioritized + delayed >= maxWaiting) {
       throw new HttpException('判题队列繁忙，请稍后再试', HttpStatus.TOO_MANY_REQUESTS);
     }
   }

@@ -1,6 +1,141 @@
 import * as bcrypt from 'bcryptjs';
 import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { hashRefreshToken } from './refresh-token';
+
+describe('AuthService response-loss recovery', () => {
+  const attempt = 'a'.repeat(64);
+  function fixture() {
+    const sessions = new Map<string, any>();
+    sessions.set(hashRefreshToken('old-cookie'), {
+      id: 'old', userId: 'u1', expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(),
+    });
+    const user = { authVersion: 3, mustChangePassword: true, deletedAt: null as Date | null };
+    const database: any = {
+      user: { findUnique: jest.fn(async () => user) },
+      userSession: {
+        findUnique: jest.fn(async ({ where }) => sessions.get(where.refreshTokenHash) ?? null),
+        deleteMany: jest.fn(async ({ where }) => {
+          const entries = [...sessions].filter(([hash, value]) => where.id
+            ? value.id === where.id
+            : typeof where.refreshTokenHash === 'string' ? hash === where.refreshTokenHash
+              : where.refreshTokenHash.in.includes(hash));
+          entries.forEach(([hash]) => sessions.delete(hash));
+          return { count: entries.length };
+        }),
+        create: jest.fn(async ({ data }) => {
+          const row = { ...data, id: data.refreshTokenHash, createdAt: new Date() };
+          sessions.set(data.refreshTokenHash, row);
+          return row;
+        }),
+      },
+    };
+    database.$transaction = (operation: any) => operation(database);
+    const config: any = {
+      get: (name: string) => name === 'JWT_REFRESH_EXPIRES' ? '7d' : 'server-only-secret',
+      getOrThrow: () => 'server-only-secret',
+    };
+    const jwt: any = { sign: jest.fn(() => 'access-token') };
+    const service: any = new AuthService(database, jwt, config);
+    return { service, sessions, database, user, jwt };
+  }
+
+  it('recovers the exact committed successor after the complete HTTP response was lost', async () => {
+    const { service, sessions, database, jwt } = fixture();
+    const lost = await service.refresh('old-cookie', attempt);
+    const retry = await service.refresh('old-cookie', attempt);
+    expect(retry.refreshToken).toBe(lost.refreshToken);
+    expect(retry.mustChangePassword).toBe(true);
+    expect(jwt.sign).toHaveBeenLastCalledWith({ sub: 'u1', ver: 3 });
+    expect(sessions.size).toBe(1);
+    expect(database.userSession.create).toHaveBeenCalledTimes(1);
+    expect([...sessions.keys()]).toEqual([hashRefreshToken(lost.refreshToken)]);
+    expect([...sessions.values()][0]).not.toHaveProperty('refreshToken');
+  });
+
+  it('accepts a retry when Set-Cookie arrived but the response body did not', async () => {
+    const { service, sessions } = fixture();
+    const lost = await service.refresh('old-cookie', attempt);
+    const retry = await service.refresh(lost.refreshToken, attempt);
+    expect(retry.accessToken).toBe('access-token');
+    expect(sessions.size).toBe(1);
+  });
+
+  it.each([undefined, 'b'.repeat(64)])('rejects consumed cookies without the exact attempt (%s)', async key => {
+    const { service } = fixture();
+    await service.refresh('old-cookie', attempt);
+    await expect(service.refresh('old-cookie', key)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it.each(['', 'a', 'g'.repeat(64), 'a'.repeat(65), ['a'.repeat(64)]])('rejects malformed attempt keys before consuming a session: %s', async key => {
+    const { service, database } = fixture();
+    await expect(service.refresh('old-cookie', key)).rejects.toMatchObject({ status: 400 });
+    expect(database.userSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['window', 'expired', 'revoked', 'deleted-user'])('never recovers an ineligible successor: %s', async condition => {
+    const { service, sessions, user, database } = fixture();
+    await service.refresh('old-cookie', attempt);
+    const successor = [...sessions.values()][0];
+    if (condition === 'window') successor.createdAt = new Date(Date.now() - 300_001);
+    if (condition === 'expired') successor.expiresAt = new Date(0);
+    if (condition === 'revoked') sessions.clear();
+    if (condition === 'deleted-user') user.deletedAt = new Date();
+    await expect(service.refresh('old-cookie', attempt)).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(database.userSession.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets concurrent identical attempts converge even when both read the old session', async () => {
+    const { service, sessions, database } = fixture();
+    // A PostgreSQL delete waiting for another transaction sees count=0 after it commits.
+    const find = database.userSession.findUnique;
+    const old = [...sessions.values()][0];
+    await service.refresh('old-cookie', attempt);
+    find.mockResolvedValueOnce(old);
+    const retry = await service.refresh('old-cookie', attempt);
+    expect(hashRefreshToken(retry.refreshToken)).toBe([...sessions.keys()][0]);
+    expect(database.userSession.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps no-key clients single use', async () => {
+    const { service } = fixture();
+    await service.refresh('old-cookie');
+    await expect(service.refresh('old-cookie')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('revokes a successor on logout even if its Set-Cookie response was lost', async () => {
+    const { service, sessions } = fixture();
+    await service.refresh('old-cookie', attempt);
+    await service.logout('old-cookie', attempt);
+    expect(sessions.size).toBe(0);
+    await expect(service.refresh('old-cookie', attempt)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('cannot revoke an unrelated successor using the wrong logout attempt', async () => {
+    const { service, sessions } = fixture();
+    await service.refresh('old-cookie', attempt);
+    await service.logout('old-cookie', 'b'.repeat(64));
+    expect(sessions.size).toBe(1);
+  });
+
+  it('rechecks the successor after waiting for an in-flight rotation to commit during logout', async () => {
+    const { service, sessions, database } = fixture();
+    const oldEntries = [...sessions];
+    await service.refresh('old-cookie', attempt);
+    const successorEntries = [...sessions];
+    sessions.clear();
+    oldEntries.forEach(([key, value]) => sessions.set(key, value));
+    database.userSession.deleteMany.mockImplementationOnce(async () => {
+      // The first DELETE took its statement snapshot before the refresh committed.
+      sessions.clear();
+      successorEntries.forEach(([key, value]) => sessions.set(key, value));
+      return { count: 0 };
+    });
+    await service.logout('old-cookie', attempt);
+    expect(sessions.size).toBe(0);
+    await expect(service.refresh('old-cookie', attempt)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+});
 
 describe('AuthService refresh sessions', () => {
   it.each([null, { id: 'expired', expiresAt: new Date(0) }])('rejects missing or expired refresh sessions', async session => {

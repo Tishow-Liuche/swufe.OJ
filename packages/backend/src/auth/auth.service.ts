@@ -10,7 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { RegisterDto, LoginDto } from './dto';
-import { hashRefreshToken } from './refresh-token';
+import { deriveRefreshSuccessor, hashRefreshToken, isValidRefreshAttempt, REFRESH_RECOVERY_WINDOW_MS } from './refresh-token';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -97,12 +97,15 @@ export class AuthService {
     return this.generateTokens(user.id);
   }
 
-  async refresh(refreshToken: string) {
+  async refresh(refreshToken: string, attempt?: unknown) {
+    this.validateRefreshAttempt(attempt);
+    const successor = attempt === undefined ? undefined : this.refreshSuccessor(refreshToken, attempt);
     return this.prisma.$transaction(async (transaction) => {
       const refreshTokenHash = hashRefreshToken(refreshToken);
       const session = await transaction.userSession.findUnique({
         where: { refreshTokenHash },
       });
+      if (!session && successor) return this.recoverRefresh(successor, transaction);
       if (!session || session.expiresAt <= new Date()) {
         throw new UnauthorizedException('Token 已过期，请重新登录');
       }
@@ -111,17 +114,59 @@ export class AuthService {
       const consumed = await transaction.userSession.deleteMany({
         where: { id: session.id },
       });
-      if (consumed.count !== 1) throw new UnauthorizedException('Refresh session already consumed');
+      if (consumed.count !== 1) {
+        // Under READ COMMITTED, a concurrent delete waits for the winner to commit.
+        // Recover only its existing exact successor; revocation never creates a row.
+        if (successor) return this.recoverRefresh(successor, transaction);
+        throw new UnauthorizedException('Refresh session already consumed');
+      }
 
-      return this.generateTokens(session.userId, transaction);
+      return this.generateTokens(session.userId, transaction, successor);
     });
   }
 
-  async logout(refreshToken: string) {
-    const refreshTokenHash = hashRefreshToken(refreshToken);
-    await this.prisma.userSession.deleteMany({
-      where: { refreshTokenHash },
+  private validateRefreshAttempt(attempt: unknown): asserts attempt is string | undefined {
+    if (attempt !== undefined && !isValidRefreshAttempt(attempt)) {
+      throw new BadRequestException('Invalid refresh attempt');
+    }
+  }
+
+  private refreshSuccessor(refreshToken: string, attempt: string): string {
+    return deriveRefreshSuccessor(refreshToken, attempt, this.config.getOrThrow<string>('JWT_ACCESS_SECRET'));
+  }
+
+  private async recoverRefresh(refreshToken: string, database: Prisma.TransactionClient) {
+    const session = await database.userSession.findUnique({
+      where: { refreshTokenHash: hashRefreshToken(refreshToken) },
     });
+    const now = Date.now();
+    if (!session || session.expiresAt.getTime() <= now
+      || session.createdAt.getTime() < now - REFRESH_RECOVERY_WINDOW_MS) {
+      throw new UnauthorizedException('Refresh recovery expired or revoked');
+    }
+    const tokens = await this.accessTokenDetails(session.userId, database);
+    return {
+      ...tokens,
+      refreshToken,
+      // Recovery cannot extend the existing session or cookie lifetime.
+      expiresIn: `${Math.max(1, Math.floor((session.expiresAt.getTime() - now) / 1000))}s`,
+    };
+  }
+
+  async logout(refreshToken: string, attempt?: unknown) {
+    this.validateRefreshAttempt(attempt);
+    const refreshTokenHash = hashRefreshToken(refreshToken);
+    if (attempt === undefined) {
+      await this.prisma.userSession.deleteMany({ where: { refreshTokenHash } });
+    } else {
+      const successorHash = hashRefreshToken(this.refreshSuccessor(refreshToken, attempt));
+      await this.prisma.$transaction(async transaction => {
+        await transaction.userSession.deleteMany({ where: { refreshTokenHash } });
+        // A concurrent rotation may have committed while the first delete waited.
+        // A second READ COMMITTED statement sees its successor; one IN query would not.
+        await transaction.userSession.deleteMany({ where: { refreshTokenHash: successorHash } });
+      });
+    }
     return { message: '已退出登录' };
   }
 
@@ -148,15 +193,19 @@ export class AuthService {
     return user;
   }
 
-  private async generateTokens(userId: string, database: Prisma.TransactionClient = this.prisma) {
+  private async accessTokenDetails(userId: string, database: Prisma.TransactionClient) {
     const user = await database.user.findUnique({
       where: { id: userId },
       select: { authVersion: true, mustChangePassword: true, deletedAt: true },
     });
     if (!user || user.deletedAt) throw new UnauthorizedException('账号不存在或已被删除');
     const accessToken = this.jwt.sign({ sub: userId, ver: user.authVersion });
+    return { accessToken, mustChangePassword: user.mustChangePassword };
+  }
 
-    const refreshToken = randomBytes(32).toString('hex');
+  private async generateTokens(userId: string, database: Prisma.TransactionClient = this.prisma, successor?: string) {
+    const tokens = await this.accessTokenDetails(userId, database);
+    const refreshToken = successor ?? randomBytes(32).toString('hex');
     const expiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES') || '7d';
     const ms = this.parseExpires(expiresIn);
 
@@ -168,7 +217,7 @@ export class AuthService {
       },
     });
 
-    return { accessToken, refreshToken, expiresIn, mustChangePassword: user.mustChangePassword };
+    return { ...tokens, refreshToken, expiresIn };
   }
 
   private parseExpires(expires: string): number {

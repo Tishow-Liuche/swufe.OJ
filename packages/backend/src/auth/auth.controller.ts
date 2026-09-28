@@ -60,7 +60,8 @@ export class AuthController {
     if (!refreshToken) {
       throw new UnauthorizedException('登录状态已失效，请重新登录');
     }
-    const result = await this.auth.refresh(refreshToken);
+    const attempt = req.headers?.['x-refresh-attempt'];
+    const result = await this.auth.refresh(refreshToken, attempt);
     return this.withRefreshCookie(res, result);
   }
 
@@ -68,7 +69,11 @@ export class AuthController {
   @HttpCode(200)
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const refreshToken = req.cookies?.[REFRESH_COOKIE];
-    if (refreshToken) await this.auth.logout(refreshToken);
+    if (refreshToken) {
+      const attempt = req.headers?.['x-refresh-attempt'];
+      if (attempt === undefined) await this.auth.logout(refreshToken);
+      else await this.auth.logout(refreshToken, attempt);
+    }
     res.clearCookie(REFRESH_COOKIE, this.refreshCookieOptions());
     return { message: '已退出登录' };
   }
