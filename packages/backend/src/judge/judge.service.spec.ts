@@ -180,4 +180,29 @@ describe('JudgeService go-judge requests', () => {
     }]});
     expect((await service.run('python','',1000,256,undefined,'pass')).status).toBe('SYSTEM_ERROR');
   });
+
+  it.each([
+    ['Memory Limit Exceeded', 'MEMORY_LIMIT_EXCEEDED'],
+    ['Time Limit Exceeded', 'TIME_LIMIT_EXCEEDED'],
+    ['Output Limit Exceeded', 'OUTPUT_LIMIT_EXCEEDED'],
+  ])('preserves measured %s when the output collector also exceeded its limit', async (sandboxStatus, status) => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [{
+      status: sandboxStatus, exitStatus: 9, time: 169907482, memory: 268451840,
+      runTime: 232918614, files: { stderr: '' }, fileIds: { stdout: 'output-cache' },
+      fileError: [{ name: 'stdout', type: 'CollectSizeExceeded', message: 'Output Limit Exceeded' }],
+    }] }).mockResolvedValueOnce(new Response('truncated output'));
+    expect(await service.run('python', '', 1000, 256, undefined, 'while True: print("x")', { cacheOutput: true }))
+      .toEqual(expect.objectContaining({ status, sandboxStatus, timeUsed: 170, memoryUsed: 262160, outputFileId: 'output-cache' }));
+  });
+
+  it.each(['Memory Limit Exceeded', 'Time Limit Exceeded', 'Output Limit Exceeded'])('retains infrastructure collection failures alongside %s', async (status) => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [{
+      status, exitStatus: 9, time: 1, memory: 1,
+      fileError: [
+        { name: 'stdout', type: 'CollectSizeExceeded', message: 'Output Limit Exceeded' },
+        { name: 'stderr', type: 'CopyOutOpenError', message: 'disk failure' },
+      ],
+    }] });
+    expect((await service.run('python', '', 1000, 256, undefined, 'pass')).status).toBe('SYSTEM_ERROR');
+  });
 });

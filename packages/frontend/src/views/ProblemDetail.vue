@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../api/client';
+import { sourceSizeError } from '../utils/source-size';
 import { basicSetup } from 'codemirror';
 import { EditorView } from '@codemirror/view';
 import { editorIndentation } from '../utils/editor-indentation';
@@ -390,6 +391,8 @@ async function copyCfCode() {
 
 async function submitCode() {
   if (submitting.value || !problem.value) return;
+  const sizeError = sourceSizeError(code.value);
+  if (sizeError) { errorMsg.value = sizeError; return; }
   submitting.value = true;
   const submittedProblemId = problem.value.id;
   const submittedCode = code.value;

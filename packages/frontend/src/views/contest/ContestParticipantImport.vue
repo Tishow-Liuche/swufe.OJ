@@ -57,7 +57,7 @@ async function submit(){
 <template>
   <section v-if="auth.user?.role==='ADMIN'" class="participant-import" aria-label="管理员补录参赛者">
     <div class="arena-section-head"><h2>补录参赛者</h2><span class="admin-label">管理员</span></div>
-    <p class="import-help">可在报名截止后补录，比赛时间和已有成绩不变。账号指登录用户名，不是昵称；学号须已绑定本站账号。</p>
+    <p class="import-help">可在报名截止后补录，比赛时间和已有成绩不变。主输入框支持登录账号、唯一昵称或已绑定学号；账号优先匹配，重名时请用登录账号或单独填写绑定学号。</p>
     <p v-if="ended" class="arena-empty">比赛已结束，不能补录参赛者。</p>
     <template v-else>
       <div class="import-tabs" role="group" aria-label="补录方式">
@@ -67,7 +67,7 @@ async function submit(){
       <form @submit.prevent="submit">
         <fieldset :disabled="busy||reading">
           <div v-if="mode==='single'" class="import-fields">
-            <label>登录账号<input v-model="form.username" maxlength="100" placeholder="账号、学号至少填一项" /></label>
+            <label>账号 / 昵称 / 学号<input v-model="form.username" maxlength="100" placeholder="输入登录账号、唯一昵称或绑定学号" /></label>
             <label>绑定学号<input v-model="form.studentId" maxlength="100" placeholder="填写已绑定的学号" /></label>
             <label v-if="contest.visibility==='CAMPUS_PRIVATE'">真实姓名<input v-model="form.realName" required maxlength="40" placeholder="校赛必填" /></label>
           </div>

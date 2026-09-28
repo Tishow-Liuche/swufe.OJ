@@ -18,6 +18,17 @@ describe('contest read capacity and privacy',()=>{
     const {service}=fixture();await service.standings('c',student);
     await expect(service.standings('c',{id:'outsider',role:'STUDENT'})).rejects.toThrow();
   });
+  it('keeps teacher observation in contestant cache scope and denies outsider access to a warm feed',async()=>{
+    const {service}=fixture();
+    await service.standings('c',{id:'admin',role:'ADMIN'});
+    expect(await service.standings('c',{id:'teacher',role:'TEACHER'})).toMatchObject({adminOnly:false});
+    await service.contestSubmissions('c',{id:'teacher',role:'TEACHER'});
+    await expect(service.contestSubmissions('c',{id:'outsider',role:'STUDENT'})).rejects.toThrow();
+  });
+  it('does not grant unenrolled teachers submit privileges',async()=>{
+    const {service,db}=fixture();db.contestParticipant={findUnique:jest.fn().mockResolvedValue(null)};
+    await expect(service.submit('c',{id:'teacher',role:'TEACHER'},{problemId:'p',language:'cpp',sourceCode:''})).rejects.toThrow('报名');
+  });
   it('separates manager, freeze and ended cache scopes',async()=>{
     const {contest,calculator,service}=fixture();await service.standings('c',{id:'admin',role:'ADMIN'});
     expect(await service.standings('c',student)).toMatchObject({adminOnly:false});

@@ -24,7 +24,7 @@ export function contestKind(contest: Contest) {
   return contest.teamMode ? '团队公开赛' : '个人公开赛';
 }
 export function canManageContest(contest: Contest, user?: { id: string; role: string } | null) { return !!user && (user.role === 'ADMIN' || contest.createdBy === user.id); }
-export function canViewFeed(contest: Contest, user?: { id: string; role: string } | null) { return contest.visibility === 'PUBLIC' || !!contest.participant || canManageContest(contest, user); }
+export function canViewFeed(contest: Contest, user?: { id: string; role: string } | null) { return contest.visibility === 'PUBLIC' || !!contest.participant || canManageContest(contest, user) || (contest.visibility === 'CAMPUS_PRIVATE' && user?.role === 'TEACHER'); }
 export function statusText(status: string) {
   return ({ ACCEPTED: 'AC', WRONG_ANSWER: 'WA', TIME_LIMIT_EXCEEDED: 'TLE', MEMORY_LIMIT_EXCEEDED: 'MLE',
     RUNTIME_ERROR: 'RE', COMPILE_ERROR: 'CE', PENDING: '等待', QUEUING: '排队', JUDGING: '评测中', RUNNING: '运行中',

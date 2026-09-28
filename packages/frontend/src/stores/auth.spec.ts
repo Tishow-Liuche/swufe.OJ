@@ -13,6 +13,8 @@ vi.mock('../api/client', () => ({
   clearAccessToken: client.clearAccessToken,
   refreshAccessToken: client.refreshAccessToken,
   setAccessToken: client.setAccessToken,
+  logoutSession: () => client.api.post('/api/auth/logout'),
+  isAuthenticationFailure: (error: any) => error?.response?.status === 401,
 }));
 
 import { useAuthStore } from './auth';
@@ -64,5 +66,67 @@ describe('auth store', () => {
 
     expect(client.api.post).toHaveBeenCalledWith('/api/auth/logout');
     expect(client.clearAccessToken).toHaveBeenCalledOnce();
+  });
+
+  it.each([undefined, 429, 503])('preserves the signed-in profile during temporary failure %s', async status => {
+    const auth = useAuthStore();
+    await auth.setAuth('valid-token');
+    const failure = { response: status ? { status } : undefined };
+    client.api.get.mockRejectedValueOnce(failure);
+    await expect(auth.fetchProfile()).rejects.toBe(failure);
+    expect(auth.isLoggedIn()).toBe(true);
+    expect(client.clearAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes temporary restore failures from invalid credentials', async () => {
+    const auth = useAuthStore();
+    const failure = { response: { status: 503 } };
+    client.refreshAccessToken.mockRejectedValueOnce(failure);
+    await expect(auth.restoreSession()).resolves.toBe(null);
+    expect(client.clearAccessToken).not.toHaveBeenCalled();
+    client.refreshAccessToken.mockRejectedValueOnce({ response: { status: 401 } });
+    await expect(auth.restoreSession()).resolves.toBe(false);
+    expect(client.clearAccessToken).toHaveBeenCalled();
+  });
+
+  it('ignores an old profile response after logout', async () => {
+    const auth = useAuthStore();
+    await auth.setAuth('valid');
+    let finish!: (value: any) => void;
+    client.api.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const pending = auth.fetchProfile();
+    auth.clearAuth();
+    finish({ data: profile });
+    await pending;
+    expect(auth.user).toBeNull();
+  });
+
+  it('does not clear a newer login when an older restore receives 401', async () => {
+    const auth = useAuthStore();
+    let fail!: (error: unknown) => void;
+    client.refreshAccessToken.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const oldRestore = auth.restoreSession();
+    await auth.setAuth('new-login');
+    fail({ response: { status: 401 } });
+    await oldRestore;
+    expect(auth.token).toBe('new-login');
+    expect(auth.user).toEqual(profile);
+    expect(client.clearAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('loads a new account independently and ignores the old account profile response', async () => {
+    const auth = useAuthStore();
+    await auth.setAuth('old-login');
+    let finish!: (value: any) => void;
+    client.api.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const oldProfile = auth.fetchProfile();
+    const newProfile = { id: 'u2', username: 'bob', role: 'TEACHER' };
+    client.api.get.mockResolvedValueOnce({ data: newProfile });
+    const newLogin = auth.setAuth('new-login');
+    expect(client.api.get).toHaveBeenCalledTimes(3);
+    finish({ data: profile });
+    await Promise.all([oldProfile, newLogin]);
+    expect(auth.user).toEqual(newProfile);
+    expect(auth.token).toBe('new-login');
   });
 });

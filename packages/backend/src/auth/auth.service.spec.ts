@@ -3,6 +3,39 @@ import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 describe('AuthService refresh sessions', () => {
+  it.each([null, { id: 'expired', expiresAt: new Date(0) }])('rejects missing or expired refresh sessions', async session => {
+    const transaction: any = { userSession: { findUnique: jest.fn().mockResolvedValue(session), deleteMany: jest.fn() } };
+    const prisma: any = { $transaction: (fn: any) => fn(transaction) };
+    const service = new AuthService(prisma, {} as any, {} as any);
+    await expect(service.refresh('invalid')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(transaction.userSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a session consumed or revoked by another transaction', async () => {
+    const transaction: any = { userSession: {
+      findUnique: jest.fn().mockResolvedValue({ id: 's1', userId: 'u1', expiresAt: new Date(Date.now() + 60_000) }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      create: jest.fn(),
+    } };
+    const service = new AuthService({ $transaction: (fn: any) => fn(transaction) } as any, {} as any, {} as any);
+    await expect(service.refresh('consumed')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(transaction.userSession.create).not.toHaveBeenCalled();
+  });
+  it('rotates within one transaction so replacement failure cannot consume the session', async () => {
+    const transaction: any = {
+      userSession: {
+        findUnique: jest.fn().mockResolvedValue({ id: 's1', userId: 'u1', expiresAt: new Date(Date.now() + 60_000) }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn().mockRejectedValue(new Error('database unavailable')),
+      },
+      user: { findUnique: jest.fn().mockResolvedValue({ authVersion: 0 }) },
+    };
+    const prisma: any = { $transaction: jest.fn(fn => fn(transaction)) };
+    const service = new AuthService(prisma, { sign: () => 'access' } as any, { get: () => '7d' } as any);
+    await expect(service.refresh('old')).rejects.toThrow('database unavailable');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.userSession.deleteMany).toHaveBeenCalledWith({ where: { id: 's1' } });
+  });
   it('registers a teacher applicant with student permissions until approval', async () => {
     const prisma: any = {
       user: {
@@ -134,6 +167,7 @@ describe('AuthService refresh sessions', () => {
       userSession: {
         findUnique: jest.fn().mockResolvedValue({ id: 's1', userId: 'u1', expiresAt: new Date(Date.now() + 60_000) }),
         delete: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         create: jest.fn().mockResolvedValue({}),
       },
     };
@@ -141,6 +175,7 @@ describe('AuthService refresh sessions', () => {
     const config: any = { get: jest.fn().mockReturnValue('7d') };
     const service = new AuthService(prisma, jwt, config);
 
+    prisma.$transaction = jest.fn(fn => fn(prisma));
     const result = await service.refresh('old-refresh-token');
 
     expect(result.mustChangePassword).toBe(true);

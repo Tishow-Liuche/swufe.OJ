@@ -50,6 +50,7 @@ export class JudgeProcessor extends WorkerHost {
     const data = job.data;
     this.logger.log(`Judging submission ${data.submissionId}`);
     const artifacts = new Set<string>();
+    let committedResult: { status: string; score?: number } | undefined;
     const pendingCases: Prisma.SubmissionCaseCreateManyInput[] = [];
     let lastCaseFlush = Date.now();
     let hasFlushedCases = false;
@@ -131,6 +132,7 @@ export class JudgeProcessor extends WorkerHost {
             judgedAt: new Date(),
           },
         });
+        committedResult = { status };
         await this.finishTask(data.submissionId);
         await this.learning.recordSubmissionResult(data.submissionId, status);
         return { status };
@@ -213,9 +215,9 @@ export class JudgeProcessor extends WorkerHost {
         if (caseStatus === 'ACCEPTED') totalScore += tc.score;
         if (caseStatus !== 'ACCEPTED' && finalStatus === 'ACCEPTED') finalStatus = caseStatus;
         if (!hasFlushedCases || pendingCases.length >= 10 || Date.now() - lastCaseFlush >= 1000
-          || caseStatus === 'TIME_LIMIT_EXCEEDED') await flushCases();
-        // Persist the timeout before stopping; unrun cases earn no score.
-        if (caseStatus === 'TIME_LIMIT_EXCEEDED' || caseStatus === 'SYSTEM_ERROR') break;
+          || caseStatus !== 'ACCEPTED') await flushCases();
+        // Persist the first failure before stopping; unrun cases earn no score.
+        if (caseStatus !== 'ACCEPTED') break;
       }
       await flushCases();
 
@@ -234,6 +236,7 @@ export class JudgeProcessor extends WorkerHost {
           judgedAt,
         },
       });
+      committedResult = { status: finalStatus, score: finalScore };
       await this.finishTask(data.submissionId);
       await this.learning.recordSubmissionResult(data.submissionId, finalStatus);
       if (finalStatus === 'ACCEPTED' && this.assignmentProgress) {
@@ -252,6 +255,20 @@ export class JudgeProcessor extends WorkerHost {
       this.logger.log(`Submission ${data.submissionId}: ${finalStatus} (${finalScore}分)`);
       return { status: finalStatus, score: finalScore };
     } catch (error: any) {
+      // Downstream learning/cache notifications cannot change a durable verdict
+      // or cause BullMQ to rerun an already completed judgement.
+      if (committedResult) {
+        this.logger.error(`Post-judgement side effect failed ${data.submissionId}: ${error.message}`);
+        return committedResult;
+      }
+      const retryableDatabaseError = ['P1001', 'P1002', 'P1008', 'P1017', 'P2024'].includes(error.code);
+      const hasRetry = (job.attemptsMade || 0) + 1 < (job.opts?.attempts || 1);
+      if (retryableDatabaseError && hasRetry) {
+        // Keep the submission in progress until the queue retry. Its next attempt
+        // clears partial case rows; do not publish a misleading terminal verdict.
+        this.logger.warn(`Database temporarily unavailable for ${data.submissionId}; deferring to queue retry: ${error.message}`);
+        throw error;
+      }
       try {
         await flushCases();
       } catch (flushError: any) {

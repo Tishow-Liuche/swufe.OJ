@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import api, { clearAccessToken, refreshAccessToken, setAccessToken } from '../api/client';
+import api, { clearAccessToken, refreshAccessToken, setAccessToken, isAuthenticationFailure, logoutSession } from '../api/client';
 
 interface AuthUser {
   id: string;
@@ -23,19 +23,27 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref(false);
   const avatarRevision = ref(0);
   let avatarRecovery: { source: string; at: number; promise: Promise<void> | null } | null = null;
-  let avatarGeneration = 0;
+  let sessionGeneration = 0;
   let profilePromise: Promise<void> | null = null;
-  let restorePromise: Promise<boolean> | null = null;
+  let restorePromise: Promise<boolean | null> | null = null;
 
   async function setAuth(accessToken: string) {
+    sessionGeneration++;
+    avatarRecovery = null;
+    profilePromise = null;
+    restorePromise = null;
+    user.value = null;
     token.value = accessToken;
     setAccessToken(accessToken);
     await fetchProfile();
   }
 
   function clearAuth() {
-    avatarGeneration++;
+    sessionGeneration++;
     avatarRecovery = null;
+    profilePromise = null;
+    restorePromise = null;
+    loading.value = false;
     token.value = '';
     user.value = null;
     clearAccessToken();
@@ -43,7 +51,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      await api.post('/api/auth/logout');
+      await logoutSession();
     } finally {
       clearAuth();
     }
@@ -57,9 +65,9 @@ export const useAuthStore = defineStore('auth', () => {
     }
     const recovery = { source: failedSource, at: Date.now(), promise: null as Promise<void> | null };
     avatarRecovery = recovery;
-    const generation = avatarGeneration;
+    const generation = sessionGeneration;
     const userId = user.value!.id;
-    const stillCurrent = () => generation === avatarGeneration && isLoggedIn()
+    const stillCurrent = () => generation === sessionGeneration && isLoggedIn()
       && user.value?.id === userId && user.value.avatar === failedSource;
     const pending = (async () => {
       // S3 signatures use whole seconds; wait before requesting a fresh URL.
@@ -87,38 +95,49 @@ export const useAuthStore = defineStore('auth', () => {
     if (!token.value) return;
     if (profilePromise) return profilePromise;
 
+    const generation = sessionGeneration;
     profilePromise = (async () => {
       try {
         loading.value = true;
         const { data } = await api.get('/api/user/profile');
-        user.value = data;
-      } catch {
-        clearAuth();
+        if (generation === sessionGeneration) user.value = data;
+      } catch (error) {
+        if (generation === sessionGeneration && isAuthenticationFailure(error)) clearAuth();
+        throw error;
       } finally {
-        loading.value = false;
-        profilePromise = null;
+        if (generation === sessionGeneration) {
+          loading.value = false;
+          profilePromise = null;
+        }
       }
     })();
     return profilePromise;
   }
 
-  async function restoreSession(): Promise<boolean> {
+  async function restoreSession(): Promise<boolean | null> {
     if (isLoggedIn()) return true;
     if (restorePromise) return restorePromise;
 
+    const generation = sessionGeneration;
+    const currentResult = () => isLoggedIn() ? true : token.value ? null : false;
     restorePromise = (async () => {
       try {
         if (!token.value) {
-          token.value = await refreshAccessToken();
+          const restoredToken = await refreshAccessToken();
+          if (generation !== sessionGeneration) return currentResult();
+          token.value = restoredToken;
           setAccessToken(token.value);
         }
         await fetchProfile();
         return isLoggedIn();
-      } catch {
+      } catch (error) {
+        if (generation !== sessionGeneration) return currentResult();
+        // Unknown/transient failures are not evidence of revoked credentials.
+        if (!isAuthenticationFailure(error)) return null;
         clearAuth();
         return false;
       } finally {
-        restorePromise = null;
+        if (generation === sessionGeneration) restorePromise = null;
       }
     })();
     return restorePromise;

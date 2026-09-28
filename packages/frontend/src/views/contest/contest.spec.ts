@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { nextContestTransition, verdictClass } from './contest';
+import { nextContestTransition, verdictClass, canViewFeed, canManageContest } from './contest';
 describe('contest presentation', () => {
+  it('allows campus teacher observation without management privileges',()=>{
+    const contest:any={visibility:'CAMPUS_PRIVATE',createdBy:'owner'};const teacher={id:'teacher',role:'TEACHER'};
+    expect(canViewFeed(contest,teacher)).toBe(true);expect(canManageContest(contest,teacher)).toBe(false);
+    expect(canViewFeed({...contest,visibility:'PRIVATE'},teacher)).toBe(false);
+    expect(canViewFeed(contest,{id:'student',role:'STUDENT'})).toBe(false);
+  });
   it('schedules future registration and contest boundaries including virtual time', () => {
     const now = Date.parse('2026-09-19T10:00:00Z');
     const contest = { registerEnd: '2026-09-19T10:02:00Z', startTime: '2026-09-19T09:00:00Z', endTime: '2026-09-19T11:00:00Z' };

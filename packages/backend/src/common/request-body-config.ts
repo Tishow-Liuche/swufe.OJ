@@ -3,12 +3,16 @@ import { json, urlencoded, type Express, type RequestHandler, type ErrorRequestH
 export function configureRequestBodies(app: Pick<Express, 'use'>) {
   const normal = json({ limit: '100kb' });
   const authoring = json({ limit: '16mb' });
+  // A 4 MiB source can expand sixfold when JSON escapes control characters.
+  const submission = json({ limit: '32mb' });
   const select: RequestHandler = (req, res, next) => {
+    const code = req.method === 'POST' && (/^\/api\/submissions(?:\/preview)?\/?$/i.test(req.path)
+      || /^\/api\/contests\/[^/]+\/submit\/?$/i.test(req.path));
     const large = (req.method === 'POST' && /^\/api\/problems\/?$/i.test(req.path)) ||
       (req.method === 'PATCH' && /^\/api\/problems\/[^/]+\/?$/i.test(req.path));
-    (large ? authoring : normal)(req, res, (error?: any) => {
+    (code ? submission : large ? authoring : normal)(req, res, (error?: any) => {
       if (error?.type === 'entity.too.large') {
-        res.status(413).json({ statusCode: 413, message: large
+        res.status(413).json({ statusCode: 413, message: code ? '代码提交请求超过 32 MiB，源代码最多允许 4 MiB（UTF-8）' : large
           ? '录题表单超过 16 MiB，请将大测试数据通过 ZIP 上传，不要粘贴到题面或样例中'
           : '请求内容超过 100 KiB 限制' });
         return;

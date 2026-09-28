@@ -34,4 +34,7 @@ describe('request body limits', () => {
   it('does not consume multipart uploads', async () => {
     await request(app()).post('/api/problems/p1/testdata').attach('file', Buffer.alloc(200000), 'test.zip').expect(200, { length: 0 });
   });
+  it.each(['/api/submissions', '/api/submissions/preview', '/api/contests/c1/submit'])('accepts 100000 lines on %s', async path => {
+    await request(app()).post(path).send({ sourceCode: 'int value; // test line\n'.repeat(100000) }).expect(200);
+  });
 });

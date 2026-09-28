@@ -15,6 +15,11 @@ vi.mock('../stores/auth', () => ({ useAuthStore: () => auth }));
 import router from './index';
 
 describe('protected route session restore', () => {
+  it('cancels protected navigation without sending a temporary restore failure to login', async () => {
+    auth.restoreSession.mockResolvedValue(null);
+    await router.push('/profile');
+    expect(router.currentRoute.value.path).toBe('/');
+  });
   beforeEach(async () => {
     vi.clearAllMocks();
     auth.token = '';

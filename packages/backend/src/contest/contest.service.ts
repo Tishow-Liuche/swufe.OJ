@@ -79,6 +79,7 @@ export class ContestService {
 
   private assertCanViewStandings(contest: any, viewer: Viewer) {
     if (contest.visibility === 'PUBLIC') return;
+    if (contest.visibility === 'CAMPUS_PRIVATE' && ['ADMIN', 'TEACHER'].includes(viewer.role || '')) return;
     const isParticipant = contest.participants.some((participant: any) => participant.userId === viewer.id);
     const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
     if (!isParticipant && !canManage) throw new ForbiddenException('无权查看该私有比赛的排名');
@@ -412,14 +413,14 @@ export class ContestService {
     if (!acquired) throw new BadRequestException(`提交过于频繁，请 ${cooldownSeconds} 秒后再试`);
   }
 
-  async contestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string) {
+  async contestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string, problemId?: string) {
     // Personalized/search responses must not enter the shared feed cache.
-    if (mine || nickname?.trim()) return this.loadContestSubmissions(id, viewer, mine, nickname);
+    if (mine || nickname?.trim() || problemId?.trim()) return this.loadContestSubmissions(id, viewer, mine, nickname, problemId);
     const key = await this.contestReadKey(id, viewer, 'submissions');
     return this.readCache.get(key, 1000, () => this.loadContestSubmissions(id, viewer));
   }
 
-  private async loadContestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string) {
+  private async loadContestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string, problemId?: string) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -440,13 +441,15 @@ export class ContestService {
       },
     ]));
     const search = nickname?.trim().slice(0, 100);
+    const selectedProblem = problemId?.trim();
+    if (selectedProblem && !labels.has(selectedProblem)) throw new BadRequestException('题目不属于该比赛');
     const identityFilter = search && contest.visibility === 'CAMPUS_PRIVATE'
       ? { OR: [nicknameFilter(search), { userId: { in: contest.participants
           .filter(p => `${p.realName || ''}（${p.studentId || ''}）`.toLowerCase().includes(search.toLowerCase()))
           .map(p => p.userId) } }] }
       : nicknameFilter(search);
     const items = await this.prisma.contestSubmission.findMany({
-      where: { contestId: id, ...((mine || search) ? { submission: { ...(mine ? { userId: viewer.id } : {}), ...identityFilter } } : {}) },
+      where: { contestId: id, ...((mine || search || selectedProblem) ? { submission: { ...(mine ? { userId: viewer.id } : {}), ...(selectedProblem ? { problemId: selectedProblem } : {}), ...identityFilter } } : {}) },
       take: 80,
       orderBy: { submission: { createdAt: 'desc' } },
       include: {
@@ -462,6 +465,7 @@ export class ContestService {
     });
     return {
       contest: { id: contest.id, title: contest.title },
+      problems: Array.from(labels, ([problemId, meta]) => ({ id: problemId, label: meta.label, title: meta.title })),
       items: items.map((item: any) => {
         const submission = item.submission;
         const meta = labels.get(submission.problemId);

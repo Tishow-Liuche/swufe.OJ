@@ -336,9 +336,10 @@ export class JudgeService {
   }
 
   private isOutputLimitEvidence(result: GoJudgeResult): boolean {
-    // go-judge reports truncated stdout/stderr as a collection error as well as OLE.
-    // Only this specific evidence is a contestant limit, not an infrastructure fault.
-    return result.status === 'Output Limit Exceeded'
+    // Output collection can exceed its cap after go-judge has already measured
+    // MLE/TLE. Preserve that resource verdict instead of treating truncation as
+    // infrastructure failure; unrelated copy errors must still fail closed.
+    return ['Output Limit Exceeded', 'Time Limit Exceeded', 'Memory Limit Exceeded'].includes(result.status)
       && (!result.error || result.error === 'Output Limit Exceeded')
       && (result.fileError || []).every((entry) => ['stdout', 'stderr'].includes(entry.name)
         && entry.type === 'CollectSizeExceeded' && entry.message === 'Output Limit Exceeded');

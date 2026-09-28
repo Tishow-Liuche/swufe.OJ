@@ -23,8 +23,9 @@ export async function importContestParticipants(db: PrismaService, contestId: st
     assertOpen();
     const users=await tx.user.findMany({where:{deletedAt:null,OR:[
       {username:{in:rows.filter(r=>!r.malformed&&r.username).map(r=>r.username)}},
-      {studentId:{in:rows.filter(r=>!r.malformed&&r.studentId).map(r=>r.studentId)}},
-    ]},select:{id:true,username:true,studentId:true}});
+      {nickname:{in:rows.filter(r=>!r.malformed&&r.username).map(r=>r.username)}},
+      {studentId:{in:rows.filter(r=>!r.malformed).flatMap(r=>[r.username,r.studentId]).filter(Boolean)}},
+    ]},select:{id:true,username:true,nickname:true,studentId:true}});
     const byName=new Map(users.map(u=>[u.username,u]));
     const byStudent=new Map(users.filter(u=>u.studentId).map(u=>[u.studentId!,u]));
     const existing=await tx.contestParticipant.findMany({where:{contestId,userId:{in:users.map(u=>u.id)}},select:{userId:true}});
@@ -35,7 +36,10 @@ export async function importContestParticipants(db: PrismaService, contestId: st
       const result:RowResult={row:index+1,username:row.username,studentId:row.studentId,status:'invalid',message:''};
       const fail=(message:string)=>{result.message=message;return result;};
       if(row.malformed || (!row.username&&!row.studentId))return fail('请填写账号或绑定学号，且字段必须为文本');
-      const user=row.username?byName.get(row.username):byStudent.get(row.studentId);
+      const exact=row.username?byName.get(row.username):undefined;
+      const alternatives=row.username&&!exact?users.filter(u=>u.nickname===row.username||u.studentId===row.username):[];
+      if(alternatives.length>1)return fail('匹配到多个账号，请填写准确账号或单独填写绑定学号');
+      const user=row.username?(exact||alternatives[0]):byStudent.get(row.studentId);
       if(!user)return fail('账号不存在、已停用或学号未绑定');
       if(row.studentId && row.studentId!==user.studentId)return fail('账号与绑定学号不匹配');
       result.username=user.username;result.studentId=user.studentId||'';

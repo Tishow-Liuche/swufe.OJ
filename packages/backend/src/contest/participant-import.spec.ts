@@ -12,6 +12,28 @@ describe('administrator participant import', () => {
     service=new ContestService(db,{} as any,{} as any,cache);
   });
   const run=(s:any,rows:any,actor:any=admin)=>s.importParticipants('c',actor,{rows});
+  it.each(['42411036','Alice Nick'])('accepts primary account entry %s',async username=>{
+    db.user.findMany.mockResolvedValue([{id:'u',username:'alice',nickname:'Alice Nick',studentId:'42411036'}]);
+    expect(await run(service,[{username}])).toMatchObject({imported:1,invalid:0});
+    expect(db.user.findMany.mock.calls[0][0].where.OR).toEqual(expect.arrayContaining([
+      {nickname:{in:[username]}}, {studentId:{in:[username]}},
+    ]));
+  });
+  it('rejects duplicate nicknames instead of importing an arbitrary user',async()=>{
+    db.user.findMany.mockResolvedValue([{id:'u',username:'alice',nickname:'same'}, {id:'v',username:'bob',nickname:'same'}]);
+    const result=await run(service,[{username:'same'}]);
+    expect(result.results[0].message).toContain('多个');expect(result.invalid).toBe(1);
+  });
+  it('preserves exact username precedence over another user nickname',async()=>{
+    db.user.findMany.mockResolvedValue([{id:'u',username:'alice',nickname:'A'}, {id:'v',username:'bob',nickname:'alice'}]);
+    expect(await run(service,[{username:'alice'}])).toMatchObject({imported:1});
+    expect(db.contestParticipant.createMany.mock.calls[0][0].data[0].userId).toBe('u');
+  });
+  it('still cross-validates student IDs when primary input resolves by nickname',async()=>{
+    db.user.findMany.mockResolvedValue([{id:'u',username:'alice',nickname:'A',studentId:'123'}]);
+    expect(await run(service,[{username:'A',studentId:'456'}])).toMatchObject({invalid:1});
+    expect(db.contestParticipant.createMany).not.toHaveBeenCalled();
+  });
   it.each(['STUDENT','TEACHER',undefined])('rejects role %s',async role=>{
     await expect(run(service,[{username:'alice'}],{id:'owner',role})).rejects.toThrow();
     expect(db.contestParticipant.createMany).not.toHaveBeenCalled();

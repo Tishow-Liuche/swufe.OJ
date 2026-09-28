@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { RegisterDto, LoginDto } from './dto';
 import { hashRefreshToken } from './refresh-token';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -97,20 +98,23 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string) {
-    const refreshTokenHash = hashRefreshToken(refreshToken);
-    const session = await this.prisma.userSession.findUnique({
-      where: { refreshTokenHash },
-    });
-    if (!session || session.expiresAt < new Date()) {
-      throw new UnauthorizedException('Token 已过期，请重新登录');
-    }
+    return this.prisma.$transaction(async (transaction) => {
+      const refreshTokenHash = hashRefreshToken(refreshToken);
+      const session = await transaction.userSession.findUnique({
+        where: { refreshTokenHash },
+      });
+      if (!session || session.expiresAt <= new Date()) {
+        throw new UnauthorizedException('Token 已过期，请重新登录');
+      }
 
-    // Token rotation: delete old, issue new
-    await this.prisma.userSession.delete({
-      where: { id: session.id },
-    });
+      // Consume once and create the replacement atomically. A failed issue rolls back.
+      const consumed = await transaction.userSession.deleteMany({
+        where: { id: session.id },
+      });
+      if (consumed.count !== 1) throw new UnauthorizedException('Refresh session already consumed');
 
-    return this.generateTokens(session.userId);
+      return this.generateTokens(session.userId, transaction);
+    });
   }
 
   async logout(refreshToken: string) {
@@ -144,8 +148,8 @@ export class AuthService {
     return user;
   }
 
-  private async generateTokens(userId: string) {
-    const user = await this.prisma.user.findUnique({
+  private async generateTokens(userId: string, database: Prisma.TransactionClient = this.prisma) {
+    const user = await database.user.findUnique({
       where: { id: userId },
       select: { authVersion: true, mustChangePassword: true, deletedAt: true },
     });
@@ -156,7 +160,7 @@ export class AuthService {
     const expiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES') || '7d';
     const ms = this.parseExpires(expiresIn);
 
-    await this.prisma.userSession.create({
+    await database.userSession.create({
       data: {
         userId,
         refreshTokenHash: hashRefreshToken(refreshToken),

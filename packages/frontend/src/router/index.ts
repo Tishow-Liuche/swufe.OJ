@@ -47,7 +47,8 @@ router.beforeEach(async (to) => {
     || (record.path === '/problems/:id' && Boolean(to.query.contestId)));
 
   if (requiresAuth && !auth.isLoggedIn()) {
-    await auth.restoreSession();
+    // Keep the current page on an outage; retry navigation when connectivity returns.
+    if (await auth.restoreSession() === null) return false;
   }
 
   if (requiresAuth && !auth.isLoggedIn()) {

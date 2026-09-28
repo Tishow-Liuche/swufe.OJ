@@ -48,7 +48,7 @@ describe('JudgeProcessor local test data judging', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  describe('time-limit fail-fast and case persistence', () => {
+  describe('first-failure fail-fast and case persistence', () => {
     const job = { data: {
       submissionId: 's1', problemId: 'p1', language: 'cpp', sourceCode: 'code',
       timeLimit: 1000, memoryLimit: 256,
@@ -172,10 +172,10 @@ describe('JudgeProcessor local test data judging', () => {
       expect(judge.runWithFiles).toHaveBeenCalledWith('cpp', 'ok', 2000, 256, 'checker', 'checker code', expect.any(Object));
     });
 
-    it('lets a system fault override an earlier wrong answer', async () => {
+    it('does not run a later system fault after the first wrong answer', async () => {
       prepare('STANDARD', ['WRONG_ANSWER', 'SYSTEM_ERROR', 'ACCEPTED']);
-      expect(await processor.process(job)).toEqual({ status: 'SYSTEM_ERROR', score: 0 });
-      expect(judge.run).toHaveBeenCalledTimes(2);
+      expect(await processor.process(job)).toEqual({ status: 'WRONG_ANSWER', score: 0 });
+      expect(judge.run).toHaveBeenCalledTimes(1);
     });
 
     it.each(['STANDARD', 'SPJ'])('stops %s after a timed-out case while retaining the full score denominator', async (type) => {
@@ -204,13 +204,30 @@ describe('JudgeProcessor local test data judging', () => {
     it('preserves the first failure when a later case times out', async () => {
       prepare('STANDARD', ['WRONG_ANSWER', 'TIME_LIMIT_EXCEEDED', 'ACCEPTED']);
       expect(await processor.process(job)).toEqual({ status: 'WRONG_ANSWER', score: 0 });
-      expect(judge.run).toHaveBeenCalledTimes(2);
+      expect(judge.run).toHaveBeenCalledTimes(1);
     });
 
-    it('continues after wrong answers to retain partial scoring', async () => {
+    it('does not award unrun cases after a wrong answer', async () => {
       prepare('STANDARD', ['WRONG_ANSWER', 'ACCEPTED', 'ACCEPTED']);
-      expect(await processor.process(job)).toEqual({ status: 'WRONG_ANSWER', score: 83 });
-      expect(judge.run).toHaveBeenCalledTimes(3);
+      expect(await processor.process(job)).toEqual({ status: 'WRONG_ANSWER', score: 0 });
+      expect(judge.run).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['WRONG_ANSWER', 'RUNTIME_ERROR', 'MEMORY_LIMIT_EXCEEDED', 'OUTPUT_LIMIT_EXCEEDED'])('persists and stops at the first %s, retaining the full denominator', async (status) => {
+      prepare('STANDARD', ['ACCEPTED', status, 'ACCEPTED']);
+      expect(await processor.process(job)).toEqual({ status, score: 17 });
+      expect(judge.run).toHaveBeenCalledTimes(2);
+      expect(storedCases.map(row => row.status)).toEqual(['ACCEPTED', status]);
+      expect(prisma.judgeTask.update).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['STANDARD', 'SPJ'])('stops after %s comparison produces a wrong answer', async (type) => {
+      prepare(type, ['ACCEPTED', 'ACCEPTED', 'ACCEPTED']);
+      if (type === 'SPJ') judge.runWithFiles.mockResolvedValue({ status: 'ACCEPTED', output: 'false' });
+      else judge.run.mockReset().mockResolvedValue({ status: 'ACCEPTED', output: 'incorrect', timeUsed: 1, memoryUsed: 1 });
+      expect(await processor.process(job)).toEqual({ status: 'WRONG_ANSWER', score: 0 });
+      expect(judge.run).toHaveBeenCalledTimes(1);
+      expect(storedCases.map(row => row.status)).toEqual(['WRONG_ANSWER']);
     });
 
     it('runs all cases for an accepted submission', async () => {
@@ -232,6 +249,18 @@ describe('JudgeProcessor local test data judging', () => {
       expect(prisma.submissionCase.deleteMany).toHaveBeenCalledWith({ where: { submissionId: 's1' } });
       expect(prisma.submissionCase.deleteMany.mock.invocationCallOrder[0])
         .toBeLessThan(judge.compile.mock.invocationCallOrder[0]);
+    });
+
+    it('clears a retried accepted tail when comparison now fails on the first cached output', async () => {
+      prepare('STANDARD', ['ACCEPTED', 'ACCEPTED', 'ACCEPTED']);
+      storedCases.push(...[1, 2, 3].map(caseIndex => ({ submissionId: 's1', caseIndex, status: 'ACCEPTED' })));
+      judge.run.mockReset().mockResolvedValue({ status: 'ACCEPTED', timeUsed: 1, memoryUsed: 1, output: 'preview', outputFileId: 'out-id' });
+      judge.compareCachedOutput = jest.fn().mockResolvedValue(false);
+      expect(await processor.process({ ...job, attemptsStarted: 2 })).toEqual({ status: 'WRONG_ANSWER', score: 0 });
+      expect(storedCases.map(row => [row.caseIndex, row.status])).toEqual([[1, 'WRONG_ANSWER']]);
+      expect(judge.run).toHaveBeenCalledTimes(1);
+      expect(judge.deleteFile).toHaveBeenCalledWith('out-id');
+      expect(judge.deleteFile).toHaveBeenCalledWith('program');
     });
 
     it('clears stale cases even when a retried submission fails compilation', async () => {
@@ -297,6 +326,45 @@ describe('JudgeProcessor local test data judging', () => {
         data: expect.objectContaining({ status: 'ACCEPTED' }),
       }));
       expect(judge.deleteFile).toHaveBeenCalledWith('program');
+    });
+
+    it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024'])('rethrows transient database %s for queue retry without publishing SYSTEM_ERROR', async (code) => {
+      prepare('STANDARD', ['TIME_LIMIT_EXCEEDED', 'ACCEPTED']);
+      const failure = Object.assign(new Error('database temporarily unavailable'), { code });
+      prisma.$executeRaw.mockRejectedValue(failure);
+      await expect(processor.process({ ...job, attemptsMade: 0, opts: { attempts: 3 } })).rejects.toBe(failure);
+      expect(prisma.submission.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SYSTEM_ERROR' }) }));
+      expect(prisma.judgeTask.update).not.toHaveBeenCalled();
+      expect(judge.deleteFile).toHaveBeenCalledWith('program');
+    });
+
+    it('publishes SYSTEM_ERROR if a transient database failure exhausts queue attempts', async () => {
+      prepare('STANDARD', ['TIME_LIMIT_EXCEEDED']);
+      const failure = Object.assign(new Error('pool timeout'), { code: 'P2024' });
+      prisma.$executeRaw.mockRejectedValue(failure);
+      await expect(processor.process({ ...job, attemptsMade: 2, opts: { attempts: 3 } })).rejects.toBe(failure);
+      expect(prisma.submission.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SYSTEM_ERROR', score: 0 }) }));
+    });
+
+    it('does not downgrade a committed TLE when a post-judgement side effect fails', async () => {
+      prepare('STANDARD', ['TIME_LIMIT_EXCEEDED']);
+      learning.recordSubmissionResult.mockRejectedValue(Object.assign(new Error('pool timeout'), { code: 'P2024' }));
+      expect(await processor.process({ ...job, attemptsMade: 0, opts: { attempts: 3 } })).toEqual({ status: 'TIME_LIMIT_EXCEEDED', score: 0 });
+      expect(prisma.submission.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'TIME_LIMIT_EXCEEDED' }) }));
+    });
+
+    it('recovers a failed case write on queue retry without duplicate rows or an interim terminal verdict', async () => {
+      prepare('STANDARD', ['ACCEPTED', 'TIME_LIMIT_EXCEEDED', 'ACCEPTED']);
+      const executeRaw = prisma.$executeRaw.getMockImplementation();
+      prisma.$executeRaw.mockImplementationOnce(executeRaw)
+        .mockRejectedValueOnce(Object.assign(new Error('pool timeout'), { code: 'P2024' }));
+      await expect(processor.process({ ...job, attemptsMade: 0, opts: { attempts: 3 } })).rejects.toThrow('pool timeout');
+      expect(storedCases.map(row => row.caseIndex)).toEqual([1]);
+      judge.run.mockReset(); judge.compile.mockReset();
+      prepare('STANDARD', ['TIME_LIMIT_EXCEEDED', 'ACCEPTED', 'ACCEPTED']);
+      expect(await processor.process({ ...job, attemptsMade: 1, opts: { attempts: 3 } })).toEqual({ status: 'TIME_LIMIT_EXCEEDED', score: 0 });
+      expect(storedCases.map(row => [row.caseIndex, row.status])).toEqual([[1, 'TIME_LIMIT_EXCEEDED']]);
+      expect(prisma.submission.update.mock.calls.map(([arg]) => arg.data.status)).toEqual(['COMPILING', 'RUNNING', 'COMPILING', 'RUNNING', 'TIME_LIMIT_EXCEEDED']);
     });
 
     it('retains existing rows when the replacement insert fails', async () => {

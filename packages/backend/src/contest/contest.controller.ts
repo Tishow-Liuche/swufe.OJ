@@ -73,8 +73,8 @@ export class ContestController {
 
   @Get(':id/submissions')
   @UseGuards(AuthGuard('jwt'))
-  submissions(@Param('id') id: string, @Req() req: any, @Query('mine') mine?: string, @Query('nickname') nickname?: string) {
-    return this.contests.contestSubmissions(id, req.user, mine === 'true', nickname);
+  submissions(@Param('id') id: string, @Req() req: any, @Query('mine') mine?: string, @Query('nickname') nickname?: string, @Query('problemId') problemId?: string) {
+    return this.contests.contestSubmissions(id, req.user, mine === 'true', nickname, problemId);
   }
 
   @Get(':id/submissions/:submissionId')

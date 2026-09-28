@@ -32,6 +32,12 @@ export class SubmissionService {
     dto: { problemId: string; language: string; sourceCode: string },
     options: { allowContestReserved?: boolean; authorPreviewActor?: { id: string; role?: string } } = {},
   ) {
+    if (typeof dto.sourceCode !== 'string' || !dto.sourceCode.trim()) {
+      throw new BadRequestException('提交代码不能为空');
+    }
+    if (Buffer.byteLength(dto.sourceCode, 'utf8') > 4 * 1024 * 1024) {
+      throw new HttpException('源代码超过 4 MiB 上限（按 UTF-8 字节计算，与运行内存限制无关）', HttpStatus.PAYLOAD_TOO_LARGE);
+    }
     const problem = await this.prisma.problem.findUnique({
       where: { id: dto.problemId },
       include: { versions: { where: { isCurrent: true } }, sourceInfo: true },
