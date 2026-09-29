@@ -18,7 +18,7 @@ import {
 import '@fontsource-variable/manrope/wght.css';
 import '@fontsource-variable/noto-sans-sc/wght.css';
 import { useRoute, useRouter } from 'vue-router';
-import api from '../api/client';
+import { establishSession } from '../api/client';
 import FilterSelect from '../components/FilterSelect.vue';
 import { useAuthStore } from '../stores/auth';
 
@@ -177,7 +177,7 @@ async function submit() {
           account: loginForm.value.account.trim(),
           password: loginForm.value.password,
     };
-    const { data } = await api.post(`/api/auth/${mode.value}`, payload);
+    const { data } = await establishSession(mode.value, payload);
     await auth.setAuth(data.accessToken);
     await router.push(postAuthPath());
   } catch (reason: any) {

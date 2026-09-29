@@ -17,6 +17,7 @@ const tabs = [{ path: 'register', label: '报名' }, { path: 'problems', label: 
 let controller: AbortController | undefined;
 let version = 0;
 let transitionTimer: ReturnType<typeof setTimeout> | undefined;
+let retryCount = 0;
 async function load() {
   clearTimeout(transitionTimer);
   const current = ++version; controller?.abort(); controller = new AbortController();
@@ -24,15 +25,29 @@ async function load() {
   try {
     const { data } = await api.get('/api/contests/' + encodeURIComponent(String(route.params.id)), { signal: controller.signal });
     if (current === version) {
+      retryCount = 0;
       contest.value = data;
       const delay = nextContestTransition(data);
       if (delay !== null) transitionTimer = setTimeout(() => void load(), delay);
     }
   } catch (e: any) {
-    if (current === version && !controller.signal.aborted) error.value = errorText(e, '比赛加载失败');
+    if (current === version && !controller.signal.aborted) {
+      error.value = errorText(e, '比赛加载失败');
+      const status = e?.response?.status;
+      if (status === undefined || status === 408 || status === 429 || status >= 500) {
+        const header = e?.response?.headers?.['retry-after'];
+        const requested = header ? (/^\d+(\.\d+)?$/.test(String(header))
+          ? Number(header) * 1000 : Date.parse(header) - Date.now()) : 0;
+        const backoff = Math.min(30_000, 2000 * 2 ** Math.min(retryCount++, 4));
+        // Honor server backpressure; cap only the browser timer's numeric range.
+        const delay = Math.min(2_147_483_647, Math.max(backoff, Number.isFinite(requested) ? requested : 0));
+        transitionTimer = setTimeout(() => void load(), delay);
+      }
+    }
   } finally { if (current === version) loading.value = false; }
 }
 watch(() => route.fullPath, () => {
+  retryCount = 0;
   if (contest.value?.id !== route.params.id) contest.value = null;
   void load();
 }, { immediate: true });

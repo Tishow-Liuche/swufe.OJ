@@ -37,13 +37,25 @@ export class AccountThrottlerGuard extends ThrottlerGuard {
       const name = `${props.throttler.name}-auth-ip`;
       const tracker = `auth-ip:${action}:${req.ip}`;
       const key = this.generateKey(props.context, tracker, name);
-      const limit = 300;
+      const limit = action === 'refresh' ? 6000 : 300;
       const ttl = 60_000;
       const record = await this.storageService.increment(key, ttl, limit, ttl, name);
       if (record.isBlocked) {
         res.header('Retry-After', record.timeToBlockExpire);
         await this.throwThrottlingException(props.context, { ...record, key, tracker, limit, ttl });
       }
+    }
+    if (action === 'refresh') {
+      // Resolve the database-backed identity once, after the hard IP ceiling.
+      // Only current/recoverable sessions receive the larger account budget;
+      // invalid credentials keep the route's five-per-IP limit. The closure is
+      // request-local, so revocation is checked again on the next request.
+      const tracker = await this.getTracker(req);
+      return super.handleRequest({
+        ...props,
+        ...(tracker.startsWith('refresh-user:') ? { limit: 60, ttl: 60_000, blockDuration: 60_000 } : {}),
+        getTracker: async () => tracker,
+      });
     }
     return super.handleRequest(props);
   }

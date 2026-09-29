@@ -6,6 +6,7 @@ import api, {
   refreshClient,
   setAccessToken,
   logoutSession,
+  establishSession,
 } from './client';
 
 function response(config: InternalAxiosRequestConfig, data: unknown = {}): AxiosResponse<unknown> {
@@ -272,6 +273,69 @@ describe('API session client', () => {
     expect(refreshes).toBe(0);
   });
 
+  it.each(['switch', 'logout'])('never replays a delayed old-session POST after %s', async action => {
+    setAccessToken('account-A', { newSession: true });
+    let fail!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    const calls: string[] = [];
+    api.defaults.adapter = config => {
+      calls.push(String(authorization(config)));
+      if (calls.length > 1) return Promise.resolve(response(config));
+      return new Promise((_resolve, reject) => {
+        fail = () => reject({ config, response: { status: 401 } }); started();
+      });
+    };
+    const refresh = vi.fn(async config => response(config, { accessToken: 'restored-A' }));
+    refreshClient.defaults.adapter = refresh;
+    const pending = api.post('/api/contests/test/submit', { sourceCode: 'A draft' });
+    await running;
+    if (action === 'switch') setAccessToken('account-B', { newSession: true });
+    else clearAccessToken();
+    fail();
+    await expect(pending).rejects.toBeDefined();
+    expect(calls).toEqual(['Bearer account-A']);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('discards a successful response belonging to a previous login', async () => {
+    setAccessToken('A', { newSession: true });
+    let finish!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    api.defaults.adapter = config => new Promise(resolve => {
+      finish = () => resolve(response(config, { privateData: 'A' })); started();
+    });
+    const pending = api.get('/api/user/profile');
+    await running;
+    setAccessToken('B', { newSession: true }); finish();
+    await expect(pending).rejects.toBeDefined();
+  });
+
+  it('captures identity before returning from a business request call', async () => {
+    setAccessToken('A', { newSession: true });
+    const identities: unknown[] = [];
+    api.defaults.adapter = async config => { identities.push(authorization(config)); return response(config); };
+    const pending = api.post('/api/contests/test/submit', { sourceCode: 'A draft' });
+    setAccessToken('B', { newSession: true });
+    await expect(pending).rejects.toBeDefined();
+    expect(identities).not.toContain('Bearer B');
+  });
+
+  it('does not replay an A request using a B token obtained from a changed shared cookie', async () => {
+    const token = (sub: string) => `e30.${btoa(JSON.stringify({ sub }))}.test`;
+    setAccessToken(token('A'), { newSession: true });
+    let calls = 0;
+    api.defaults.adapter = async config => {
+      calls++;
+      if (calls === 1) throw { config, response: { status: 401 } };
+      return response(config);
+    };
+    refreshClient.defaults.adapter = async config => response(config, { accessToken: token('B') });
+    await expect(api.post('/api/contests/test/submit', { sourceCode: 'A draft' })).rejects.toBeDefined();
+    expect(calls).toBe(1);
+  });
+
   it('does not resurrect a token after local logout during refresh', async () => {
     let finish!: (value: AxiosResponse) => void;
     refreshClient.defaults.adapter = config => new Promise(resolve => { finish = data => resolve(response(config, data.data)); });
@@ -331,5 +395,67 @@ describe('API session client', () => {
     finish();
     await Promise.all([refreshing, logout]);
     expect(order).toEqual(['refreshed', 'logout']);
+  });
+
+  it.each(['login', 'register'] as const)('serializes %s after a cookie rotation even without Web Locks', async mode => {
+    vi.stubGlobal('navigator', {});
+    let finish!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    const order: string[] = [];
+    refreshClient.defaults.adapter = config => {
+      if (config.url === '/api/auth/refresh') return new Promise(resolve => {
+        started(); finish = () => { order.push('refresh'); resolve(response(config, { accessToken: 'old' })); };
+      });
+      order.push(mode);
+      return Promise.resolve(response(config, { accessToken: 'new-login' }));
+    };
+    const refreshing = refreshAccessToken();
+    await running;
+    const login = establishSession(mode, { account: 'new', password: 'test' });
+    await Promise.resolve(); expect(order).toEqual([]);
+    finish(); await Promise.all([refreshing, login]);
+    expect(order).toEqual(['refresh', mode]);
+  });
+
+  it.each([false, true])('a later logout revokes an earlier pending login (Web Locks %s)', async locks => {
+    let tail = Promise.resolve();
+    vi.stubGlobal('navigator', locks ? { locks: { request: (_: string, work: () => any) => {
+      const pending = tail.then(work); tail = pending.catch(() => undefined); return pending;
+    } } } : {});
+    setAccessToken('A', { newSession: true });
+    let finish!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    refreshClient.defaults.adapter = config => new Promise(resolve => {
+      started(); finish = () => resolve(response(config, { accessToken: 'B' }));
+    });
+    const logoutRequests: string[] = [];
+    api.defaults.adapter = async config => {
+      if (config.url === '/api/auth/logout') logoutRequests.push(config.url);
+      return response(config, { authorization: authorization(config) });
+    };
+    const login = establishSession('login', { account: 'B' });
+    const loginResult = login.then(() => 'accepted', () => 'cancelled');
+    await running;
+    const logout = logoutSession();
+    const logoutResult = logout.then(() => 'completed', () => 'failed');
+    finish();
+    expect(await loginResult).toBe('cancelled');
+    expect(await logoutResult).toBe('completed');
+    expect(logoutRequests).toEqual(['/api/auth/logout']);
+    expect((await api.get('/api/check')).data.authorization).toBeUndefined();
+  });
+
+  it('a later failed login does not cancel revocation of the previous cookie', async () => {
+    vi.stubGlobal('navigator', {});
+    setAccessToken('A', { newSession: true });
+    const requests: string[] = [];
+    api.defaults.adapter = async config => { requests.push(config.url!); return response(config); };
+    refreshClient.defaults.adapter = async config => { throw { config, response: { status: 401 } }; };
+    const logout = logoutSession();
+    const outcome = logout.then(() => 'revoked', () => 'cancelled');
+    await expect(establishSession('login', { account: 'B', password: 'wrong' })).rejects.toBeDefined();
+    expect(await outcome).toBe('revoked'); expect(requests).toEqual(['/api/auth/logout']);
   });
 });

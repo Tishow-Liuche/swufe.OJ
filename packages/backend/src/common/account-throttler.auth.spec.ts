@@ -93,12 +93,16 @@ describe('AccountThrottlerGuard authentication capacity', () => {
     expect(findUnique).toHaveBeenCalledTimes(200);
   });
 
-  it('shares the existing per-account bucket between recovery and current-cookie requests', async () => {
+  it('shares the 60-per-account bucket between recovery and current-cookie requests across IPs', async () => {
     const { token, successor } = addRecovery(1, 'alice');
-    for (let n = 1; n <= 5; n++) {
-      await refresh(token, `192.0.2.${n}`).set('X-Refresh-Attempt', recoveryAttempt).expect(200);
+    for (let n = 1; n <= 60; n++) {
+      const req = refresh(n % 2 ? token : successor, `192.0.2.${n}`);
+      if (n % 2) req.set('X-Refresh-Attempt', recoveryAttempt);
+      await req.expect(200);
     }
-    await refresh(successor, '192.0.2.10').expect(429);
+    await refresh(successor, '192.0.2.100').expect('Retry-After', /\d+/).expect(429);
+    await refresh(token, '192.0.2.101').set('X-Refresh-Attempt', recoveryAttempt).expect(429);
+    expect(findUnique).toHaveBeenCalledTimes(93);
   });
 
   it.each(['wrong-key', 'missing-key', 'malformed-key', 'expired', 'outside-window', 'revoked', 'deleted-user', 'expired-old'])
@@ -121,13 +125,17 @@ describe('AccountThrottlerGuard authentication capacity', () => {
       await refresh().expect(429);
     });
 
-  it('keeps the aggregate 300-per-IP ceiling ahead of successor lookup', async () => {
-    for (let n = 1; n <= 300; n++) {
-      await refresh(addRecovery(n).token).set('X-Refresh-Attempt', recoveryAttempt).expect(200);
+  it('allows 100 users with 10 pages each at one classroom IP, including exact successor recovery', async () => {
+    for (let n = 1; n <= 100; n++) {
+      const { token, successor } = addRecovery(n);
+      for (let page = 0; page < 10; page++) {
+        const req = refresh(page % 2 ? token : successor);
+        if (page % 2) req.set('X-Refresh-Attempt', recoveryAttempt);
+        await req.expect('X-RateLimit-Limit', '60').expect(200);
+      }
     }
-    await refresh(addRecovery(301).token).set('X-Refresh-Attempt', recoveryAttempt).expect(429);
-    expect(findUnique).toHaveBeenCalledTimes(600);
-  });
+    expect(findUnique).toHaveBeenCalledTimes(1500);
+  }, 30_000);
 
   it('allows 100 distinct login identifiers from one classroom IP without database lookups', async () => {
     for (let n = 0; n < 100; n++) await login({ account: `student-${n}`, password: 'irrelevant' }).expect(200);
@@ -188,9 +196,10 @@ describe('AccountThrottlerGuard authentication capacity', () => {
   });
 
   it('shares refresh limits across IPs and rotated sessions for one account', async () => {
-    for (let n = 1; n <= 5; n++) await refresh(addSession(n, 'alice'), `192.0.2.${n}`).expect(200);
-    await refresh(addSession(6, 'alice'), '192.0.2.10').expect(429);
-    await refresh(addSession(7, 'bob'), '192.0.2.10').expect(200);
+    for (let n = 1; n <= 60; n++) await refresh(addSession(n, 'alice'), `192.0.2.${n}`).expect(200);
+    await refresh(addSession(61, 'alice'), '192.0.2.100').expect(429);
+    await refresh(addSession(62, 'bob'), '192.0.2.100').expect(200);
+    expect(findUnique).toHaveBeenCalledTimes(62);
   });
 
   it('keeps expired, deleted-user, revoked, missing and malformed cookies in the IP bucket', async () => {
@@ -205,11 +214,30 @@ describe('AccountThrottlerGuard authentication capacity', () => {
     expect(findUnique).toHaveBeenCalledTimes(3);
   });
 
-  it('checks the refresh IP ceiling before querying sessions and keeps it separate from login', async () => {
-    for (let n = 1; n <= 300; n++) await refresh(addSession(n)).expect(200);
-    await refresh(addSession(301)).expect(429);
-    expect(findUnique).toHaveBeenCalledTimes(300);
+  it('checks the hard 6000-per-IP refresh ceiling before current or successor lookup, separately from login', async () => {
+    for (let n = 1; n <= 100; n++) {
+      const token = addSession(n);
+      for (let attempt = 0; attempt < 60; attempt++) await refresh(token).expect(200);
+    }
+    await refresh(addSession(101)).expect('Retry-After', /\d+/).expect(429);
+    await refresh(addRecovery(102).token).set('X-Refresh-Attempt', recoveryAttempt).expect(429);
+    expect(findUnique).toHaveBeenCalledTimes(6000);
     await login({ account: 'alice' }).expect(200);
+    await refresh(addSession(103), '192.0.2.2').expect(200);
+  }, 60_000);
+
+  it('keeps invalid refresh traffic separate from verified accounts despite supplied identity hints', async () => {
+    const jwt = new JwtService({ secret: 'test-secret' });
+    for (let n = 0; n < 5; n++) {
+      await refresh().set('Authorization', `Bearer ${jwt.sign({ sub: `student-${n}` })}`)
+        .send({ userId: `student-${n}`, account: `student-${n}` })
+        .expect('X-RateLimit-Limit', '5').expect(200);
+    }
+    await refresh().expect(429);
+    const token = addSession(1);
+    for (let n = 0; n < 10; n++) await refresh(token).expect(200);
+    await refresh().expect(429);
+    expect(findUnique).toHaveBeenCalledTimes(10);
   });
 
   it('rechecks a previously valid session after revocation instead of caching its identity', async () => {
