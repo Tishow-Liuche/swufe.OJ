@@ -25,3 +25,7 @@ No UI redesign, judge-rule changes, new data schema, indefinite POST retries or 
 Code tasks complete: verified refresh budget, stable request identity epoch plus synchronous capture, cross-account refresh subject guard, serialized login/register/refresh/logout Cookie operations, latest-intent protection for pending login, and arena retry/backoff. New regression tests failed against the old behavior before implementation. Independent review's two login/logout ordering findings were reproduced and corrected; final reviewer found no remaining blocking issue.
 
 Frontend 39 files / 163 tests pass; backend 68 suites / 693 tests pass. Both production builds succeed (frontend retains pre-existing third-party annotation and large-chunk warnings). Real isolated API 100 users × 10 page restores gives 1000 successful refreshes, with identity verification; p95 refresh 286 ms. The 17-minute mixed-load run is still in progress: no release or zero-failure certification is claimed at this checkpoint. Final results and deployment verification will be recorded separately.
+
+## Final checkpoint
+
+All tasks above completed and verified, including independent review, full 17-minute real-expiry load, database reconciliation, response-loss recovery, deadline boundary, production deployment and public hash verification. Code commit `3f5bdc2` is pushed to `42411036` and deployed. See `docs/contest-session-fix-verification-20260929.md` for the final metrics and explicit limitations. The earlier checkpoint remains historical, not the current release status.
