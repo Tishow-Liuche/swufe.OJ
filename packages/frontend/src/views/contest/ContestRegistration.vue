@@ -45,7 +45,7 @@ async function act(virtual = false) {
           <h3>参赛状态</h3><p>{{ contest.state === 'UPCOMING' ? '报名成功，请等待比赛开始。' : contest.state === 'ENDED' ? '比赛已结束，可查看排名及提交记录。' : '可以从比赛题目页进入作答。' }}</p>
           <router-link class="arena-button" :to="`/contests/${contest.id}/problems`">查看比赛题目</router-link>
         </template>
-        <form v-else-if="registrationOpen" :class="{ 'campus-registration': contest.visibility === 'CAMPUS_PRIVATE' }" @submit.prevent="act()">
+        <form v-else-if="registrationOpen && auth.user" :class="{ 'campus-registration': contest.visibility === 'CAMPUS_PRIVATE' }" @submit.prevent="act()">
           <h3>报名信息</h3>
           <template v-if="contest.visibility === 'CAMPUS_PRIVATE'">
             <p>需在<router-link to="/profile" target="_blank" rel="noopener">个人中心</router-link>绑定学号，榜单显示“学号_姓名”。</p>
@@ -57,7 +57,7 @@ async function act(virtual = false) {
           <button class="arena-button" :disabled="busy">{{ busy ? '提交中…' : '确认报名' }}</button>
         </form>
         <p v-else class="arena-empty">{{ contest.state === 'ENDED' ? '比赛已结束，报名已关闭。' : '当前不在报名时间内。' }}</p>
-        <button v-if="contest.state === 'ENDED' && contest.allowUpsolve && !contest.participant && (contest.visibility === 'PUBLIC' || canManageContest(contest, auth.user))" class="arena-button secondary" :disabled="busy" @click="act(true)">开始虚拟比赛</button>
+        <button v-if="auth.user && contest.state === 'ENDED' && contest.allowUpsolve && !contest.participant && (contest.visibility === 'PUBLIC' || canManageContest(contest, auth.user))" class="arena-button secondary" :disabled="busy" @click="act(true)">开始虚拟比赛</button>
       </div>
     </div>
     <ContestParticipantImport :contest="contest" @reload="emit('reload')" />

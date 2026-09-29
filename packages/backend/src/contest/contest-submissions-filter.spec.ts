@@ -36,7 +36,7 @@ describe('contest submission ownership filter', () => {
     await (service.contestSubmissions as any)('c1', { id: 'self', role: 'STUDENT' }, mine);
     expect(prisma.contestSubmission.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: mine ? { contestId: 'c1', submission: { userId: 'self' } } : { contestId: 'c1' },
-      take: 80,
+      take: 81,
     }));
   });
 });

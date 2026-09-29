@@ -15,6 +15,11 @@ vi.mock('../stores/auth', () => ({ useAuthStore: () => auth }));
 import router from './index';
 
 describe('protected route session restore', () => {
+  it.each(['register','standings','submissions'])('does not force guest login for contest read route %s',async page=>{
+    await router.push('/contests/c1/'+page);
+    expect(router.currentRoute.value.path).toBe('/contests/c1/'+page);
+    expect(auth.restoreSession).not.toHaveBeenCalled();
+  });
   it('cancels protected navigation without sending a temporary restore failure to login', async () => {
     auth.restoreSession.mockResolvedValue(null);
     await router.push('/profile');

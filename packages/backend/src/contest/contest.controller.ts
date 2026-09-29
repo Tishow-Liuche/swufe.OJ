@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ContestService } from './contest.service';
+import { ContestReadAuthGuard } from './contest-read-auth.guard';
 
 @Controller('api/contests')
 export class ContestController {
@@ -66,19 +67,19 @@ export class ContestController {
   }
 
   @Get(':id/standings')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(ContestReadAuthGuard)
   standings(@Param('id') id: string, @Req() req: any) {
     return this.contests.standings(id, req.user);
   }
 
   @Get(':id/submissions')
-  @UseGuards(AuthGuard('jwt'))
-  submissions(@Param('id') id: string, @Req() req: any, @Query('mine') mine?: string, @Query('nickname') nickname?: string, @Query('problemId') problemId?: string) {
-    return this.contests.contestSubmissions(id, req.user, mine === 'true', nickname, problemId);
+  @UseGuards(ContestReadAuthGuard)
+  submissions(@Param('id') id: string, @Req() req: any, @Query('mine') mine?: string, @Query('nickname') nickname?: string, @Query('problemId') problemId?: string, @Query('page') page?: string) {
+    return this.contests.contestSubmissions(id, req.user, mine === 'true', nickname, problemId, page === undefined ? 1 : Number(page));
   }
 
   @Get(':id/submissions/:submissionId')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(ContestReadAuthGuard)
   submissionDetail(@Param('id') id: string, @Param('submissionId') submissionId: string, @Req() req: any) {
     return this.contests.contestSubmissionDetail(id, submissionId, req.user);
   }
@@ -90,7 +91,7 @@ export class ContestController {
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(ContestReadAuthGuard)
   detail(@Param('id') id: string, @Req() req: any) {
     return this.contests.getContest(id, req.user);
   }

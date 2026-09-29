@@ -1,8 +1,9 @@
 import { createApp, defineComponent, h, nextTick, reactive } from 'vue';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Component from './ContestArena.vue';
-const state = vi.hoisted(() => ({ route: null as any, get: vi.fn() }));
+const state = vi.hoisted(() => ({ route: null as any, auth: null as any, get: vi.fn() }));
 vi.mock('vue-router', () => ({ useRoute: () => state.route }));
+vi.mock('../../stores/auth', () => ({ useAuthStore: () => state.auth }));
 vi.mock('../../api/client', () => ({ default: { get: state.get } }));
 let app: ReturnType<typeof createApp>;
 let host: HTMLDivElement;
@@ -12,6 +13,7 @@ const contest = (extra = {}) => ({ id: 'c1', title: 'Exam', contestNo: 1, mode: 
   state: 'RUNNING', visibility: 'PUBLIC', problems: [], ...extra });
 beforeEach(() => {
   vi.useFakeTimers(); state.get.mockReset();
+  state.auth = reactive({ user: null as any });
   state.route = reactive({ params: { id: 'c1' }, fullPath: '/contests/c1/problems', name: 'contest-problems' });
   host = document.createElement('div');
 });
@@ -22,6 +24,17 @@ async function mount() {
   app.component('router-view', { render: () => h('div') });
   app.mount(host); await flush();
 }
+it('reloads a fresh contest tab when cookie login restoration completes after an anonymous 401', async () => {
+  state.get.mockRejectedValueOnce({ response: { status: 401 } })
+    .mockResolvedValue({ data: contest({ participant: { isVirtual: false } }) });
+  await mount();
+  expect(state.get).toHaveBeenCalledTimes(1);
+  state.auth.user = { id: 'student', role: 'STUDENT' };
+  await flush();
+  expect(state.get).toHaveBeenCalledTimes(2);
+  expect(host.textContent).toContain('Exam');
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
 it('recovers initial 503 without navigation or losing the current page', async () => {
   state.get.mockRejectedValueOnce({ response: { status: 503 } }).mockResolvedValue({ data: contest() });
   await mount();

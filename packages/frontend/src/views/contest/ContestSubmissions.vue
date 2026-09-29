@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { canViewFeed, problemDisplayTitle, statusText, timeText, verdictClass, type Contest } from './contest';
 import { useContestFeed } from './useContestFeed';
@@ -10,18 +10,22 @@ const onlyMine = ref(false);
 const problemId = ref('');
 const nickname = ref('');
 const appliedNickname = ref('');
-const { data, error, loading, updatedAt, refresh } = useContestFeed<{ items: any[]; problems: Array<{ id: string; label: string; title: string }> }>(() => {
+const page = ref(1);
+watch([onlyMine, problemId, appliedNickname, () => props.contest.id], () => { page.value = 1; }, { flush: 'sync' });
+watch(() => auth.user, user => { if (!user) onlyMine.value = false; });
+const { data, error, loading, updatedAt, refresh } = useContestFeed<{ items: any[]; page: number; hasMore: boolean; problems: Array<{ id: string; label: string; title: string }> }>(() => {
   const params = new URLSearchParams();
   if (problemId.value) params.set('problemId', problemId.value);
   if (onlyMine.value) params.set('mine', 'true');
   if (appliedNickname.value) params.set('nickname', appliedNickname.value);
+  if (page.value > 1) params.set('page', String(page.value));
   return `/api/contests/${props.contest.id}/submissions${params.size ? '?' + params.toString() : ''}`;
 }, () => allowed.value);
 const selectedId = ref('');
 </script>
 <template>
   <section class="arena-submissions">
-    <div class="arena-section-head"><div><h2>提交记录</h2><p class="arena-muted">最近 {{ data?.items?.length || 0 }} 条提交{{ updatedAt ? ` · 更新于 ${timeText(updatedAt)}` : '' }}<span v-if="loading"> · 刷新中</span></p></div><button class="arena-button secondary" :disabled="loading || !allowed" @click="refresh">刷新</button></div>
+    <div class="arena-section-head"><div><h2>提交记录</h2><p class="arena-muted">本页 {{ data?.items?.length || 0 }} 条提交{{ updatedAt ? ` · 更新于 ${timeText(updatedAt)}` : '' }}<span v-if="loading"> · 刷新中</span></p></div><button class="arena-button secondary" :disabled="loading || !allowed" @click="refresh">刷新</button></div>
     <p v-if="!allowed" class="arena-empty">该比赛的提交记录仅限参赛者查看，请先报名。</p>
     <template v-else>
       <div class="submission-filter-toolbar">
@@ -30,8 +34,13 @@ const selectedId = ref('');
           <button class="arena-button secondary" type="submit">搜索</button>
           <button class="arena-button secondary" type="button" @click="nickname = ''; appliedNickname = ''; selectedId = ''">重置</button>
         </form>
-        <button class="arena-button" :class="onlyMine ? 'primary' : 'secondary'" :aria-pressed="onlyMine" @click="onlyMine = !onlyMine; selectedId = ''">仅查看自己的提交</button>
+        <button v-if="auth.user" class="arena-button" :class="onlyMine ? 'primary' : 'secondary'" :aria-pressed="onlyMine" @click="onlyMine = !onlyMine; selectedId = ''">仅查看自己的提交</button>
       </div>
+      <nav class="submission-pagination" aria-label="提交记录分页">
+        <button class="arena-button secondary" :disabled="loading || page <= 1" @click="page--; selectedId = ''">上一页</button>
+        <span>第 {{ page }} 页</span>
+        <button class="arena-button secondary" :disabled="loading || !!error || data?.page !== page || !data?.hasMore" @click="page++; selectedId = ''">下一页</button>
+      </nav>
       <p v-if="error" class="arena-error" role="alert">{{ error }}</p>
       <div class="arena-table-wrap" role="region" aria-label="比赛提交记录列表" tabindex="0">
         <table class="arena-table submissions-table"><thead><tr><th scope="col">时间</th><th scope="col">选手</th><th scope="col"><div class="submission-problem-heading"><span>题目</span><select v-model="problemId" class="submission-problem-filter" aria-label="筛选题目" @change="selectedId = ''">
@@ -53,6 +62,7 @@ const selectedId = ref('');
 .arena-submissions .submission-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .arena-submissions .submission-search input { width: 320px; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #dbe3eb; border-radius: 8px; background: transparent; color: inherit; }
 .submission-filter-toolbar > button { margin-left: auto; }
+.submission-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding-block: 16px; color: #667b9a; }
 .submission-problem-heading { display: flex; align-items: center; gap: 10px; }
 .submission-problem-filter { width: 160px; min-width: 0; padding: 6px 9px; border: 1px solid #ccdbef; border-radius: 7px; background: #fff; color: #435e84; font: inherit; font-weight: 400; text-overflow: ellipsis; }
 .submission-problem-filter:focus-visible { outline: 2px solid #2874eb; outline-offset: 2px; }

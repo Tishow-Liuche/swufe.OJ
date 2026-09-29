@@ -336,7 +336,7 @@ describe('ContestService live contest board', () => {
 
     expect(prisma.contestSubmission.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { contestId: 'contest-1' },
-      take: 80,
+      take: 81,
     }));
     expect(result.items[0]).toEqual(expect.objectContaining({
       id: 's1',

@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -50,7 +51,7 @@ export class ContestService {
       ? participant.virtualEnd
       : contest.endTime;
     if (now < start) return 'UPCOMING';
-    if (now > end) return 'ENDED';
+    if (now >= end) return 'ENDED';
     return 'RUNNING';
   }
 
@@ -65,7 +66,7 @@ export class ContestService {
       const { password: _password, ...safeContest } = contest;
       const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
       const hideProblems = !canManage && (new Date() < contest.startTime ||
-        (contest.visibility === 'CAMPUS_PRIVATE' && !contest.participant));
+        (contest.visibility === 'CAMPUS_PRIVATE' && !contest.participant && !this.hasEnded(contest)));
       return {
       ...safeContest,
       problems: hideProblems ? [] : contest.problems,
@@ -77,7 +78,13 @@ export class ContestService {
     });
   }
 
-  private assertCanViewStandings(contest: any, viewer: Viewer) {
+  private hasEnded(contest: { endTime?: Date }) {
+    return !!contest.endTime && Date.now() >= contest.endTime.getTime();
+  }
+
+  private assertCanViewStandings(contest: any, viewer?: Viewer) {
+    if (this.hasEnded(contest)) return;
+    if (!viewer) throw new UnauthorizedException('比赛结束前请先登录');
     if (contest.visibility === 'PUBLIC') return;
     if (contest.visibility === 'CAMPUS_PRIVATE' && ['ADMIN', 'TEACHER'].includes(viewer.role || '')) return;
     const isParticipant = contest.participants.some((participant: any) => participant.userId === viewer.id);
@@ -97,7 +104,7 @@ export class ContestService {
 
   async listPublic() {
     const contests = await this.prisma.contest.findMany({
-      where: { visibility: { in: ['PUBLIC', 'CAMPUS_PRIVATE'] } },
+      where: { OR: [{ visibility: { in: ['PUBLIC', 'CAMPUS_PRIVATE'] } }, { endTime: { lte: new Date() } }] },
       include: this.contestInclude,
       orderBy: { startTime: 'desc' },
     });
@@ -112,6 +119,7 @@ export class ContestService {
       where: {
         OR: [
           { visibility: { in: ['PUBLIC', 'CAMPUS_PRIVATE'] } },
+          { endTime: { lte: new Date() } },
           { createdBy: viewer.id },
           { participants: { some: { userId: viewer.id } } },
         ],
@@ -144,7 +152,8 @@ export class ContestService {
 
     const participant = viewer ? (contest as any).participants?.[0] : null;
     const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
-    if (!['PUBLIC', 'CAMPUS_PRIVATE'].includes(contest.visibility) && !participant && !canManage) {
+    if (!viewer && !this.hasEnded(contest)) throw new UnauthorizedException('比赛结束前请先登录');
+    if (!this.hasEnded(contest) && !['PUBLIC', 'CAMPUS_PRIVATE'].includes(contest.visibility) && !participant && !canManage) {
       throw new ForbiddenException('无权查看该比赛');
     }
 
@@ -337,18 +346,18 @@ export class ContestService {
     };
   }
 
-  async standings(id: string, viewer: Viewer) {
+  async standings(id: string, viewer?: Viewer) {
     const key = await this.contestReadKey(id, viewer, 'standings');
     return this.readCache.get(key, 2000, () => this.calculateStandings(id, viewer));
   }
 
-  private async contestReadKey(id: string, viewer: Viewer, kind: string) {
+  private async contestReadKey(id: string, viewer: Viewer | undefined, kind: string) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       select: {
         id: true, visibility: true, createdBy: true, updatedAt: true,
         startTime: true, endTime: true, freezeTime: true,
-        participants: { where: { userId: viewer.id }, take: 1, select: { userId: true } },
+        participants: viewer ? { where: { userId: viewer.id }, take: 1, select: { userId: true } } : false,
       },
     });
     if (!contest) throw new NotFoundException('比赛不存在');
@@ -357,11 +366,11 @@ export class ContestService {
     const phase = now >= contest.endTime?.getTime() ? 'ended'
       : now < contest.startTime?.getTime() ? 'upcoming'
       : contest.freezeTime && now >= contest.freezeTime.getTime() ? 'frozen' : 'live';
-    return JSON.stringify([id, kind, viewer.role === 'ADMIN' || contest.createdBy === viewer.id,
+    return JSON.stringify([id, kind, !!viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id),
       contest.updatedAt, contest.visibility, contest.startTime, contest.endTime, contest.freezeTime, phase]);
   }
 
-  private async calculateStandings(id: string, viewer: Viewer) {
+  private async calculateStandings(id: string, viewer?: Viewer) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -383,7 +392,7 @@ export class ContestService {
     });
     if (!contest) throw new NotFoundException('比赛不存在');
     this.assertCanViewStandings(contest, viewer);
-    const canManage = viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
+    const canManage = !!viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
     const result = this.standingsCalculator.calculate({
       contest,
       participants: contest.participants,
@@ -413,14 +422,16 @@ export class ContestService {
     if (!acquired) throw new BadRequestException(`提交过于频繁，请 ${cooldownSeconds} 秒后再试`);
   }
 
-  async contestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string, problemId?: string) {
+  async contestSubmissions(id: string, viewer?: Viewer, mine = false, nickname?: string, problemId?: string, page = 1) {
+    if (!Number.isSafeInteger(page) || page < 1 || page > 10000) throw new BadRequestException('无效的页码');
+    if (mine && !viewer) throw new UnauthorizedException('请登录后查看自己的提交');
     // Personalized/search responses must not enter the shared feed cache.
-    if (mine || nickname?.trim() || problemId?.trim()) return this.loadContestSubmissions(id, viewer, mine, nickname, problemId);
-    const key = await this.contestReadKey(id, viewer, 'submissions');
-    return this.readCache.get(key, 1000, () => this.loadContestSubmissions(id, viewer));
+    if (mine || nickname?.trim() || problemId?.trim()) return this.loadContestSubmissions(id, viewer, mine, nickname, problemId, page);
+    const key = await this.contestReadKey(id, viewer, 'submissions:' + page);
+    return this.readCache.get(key, 1000, () => this.loadContestSubmissions(id, viewer, false, undefined, undefined, page));
   }
 
-  private async loadContestSubmissions(id: string, viewer: Viewer, mine = false, nickname?: string, problemId?: string) {
+  private async loadContestSubmissions(id: string, viewer?: Viewer, mine = false, nickname?: string, problemId?: string, page = 1) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -449,9 +460,10 @@ export class ContestService {
           .map(p => p.userId) } }] }
       : nicknameFilter(search);
     const items = await this.prisma.contestSubmission.findMany({
-      where: { contestId: id, ...((mine || search || selectedProblem) ? { submission: { ...(mine ? { userId: viewer.id } : {}), ...(selectedProblem ? { problemId: selectedProblem } : {}), ...identityFilter } } : {}) },
-      take: 80,
-      orderBy: { submission: { createdAt: 'desc' } },
+      where: { contestId: id, ...((mine || search || selectedProblem) ? { submission: { ...(mine ? { userId: viewer!.id } : {}), ...(selectedProblem ? { problemId: selectedProblem } : {}), ...identityFilter } } : {}) },
+      take: 81,
+      skip: (page - 1) * 80,
+      orderBy: [{ submission: { createdAt: 'desc' } }, { submissionId: 'desc' }],
       include: {
         submission: {
           select: {
@@ -465,8 +477,9 @@ export class ContestService {
     });
     return {
       contest: { id: contest.id, title: contest.title },
+      page, pageSize: 80, hasMore: items.length > 80,
       problems: Array.from(labels, ([problemId, meta]) => ({ id: problemId, label: meta.label, title: meta.title })),
-      items: items.map((item: any) => {
+      items: items.slice(0, 80).map((item: any) => {
         const submission = item.submission;
         const meta = labels.get(submission.problemId);
         return {
@@ -488,7 +501,7 @@ export class ContestService {
     };
   }
 
-  async contestSubmissionDetail(id: string, submissionId: string, viewer: Viewer) {
+  async contestSubmissionDetail(id: string, submissionId: string, viewer?: Viewer) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       include: {
@@ -510,10 +523,9 @@ export class ContestService {
     });
     if (!contest) throw new NotFoundException('比赛不存在');
     this.assertCanViewStandings(contest, viewer);
-    const canManage = viewer.role === 'ADMIN' || contest.createdBy === viewer.id;
-    const now = new Date();
-    const isOwner = contest.submissions[0]?.submission.userId === viewer.id;
-    if (now <= contest.endTime && !canManage && !isOwner) {
+    const canManage = !!viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
+    const isOwner = !!viewer && contest.submissions[0]?.submission.userId === viewer.id;
+    if (!this.hasEnded(contest) && !canManage && !isOwner) {
       throw new ForbiddenException('比赛结束后才能查看其他选手的源码');
     }
     const item = contest.submissions[0];

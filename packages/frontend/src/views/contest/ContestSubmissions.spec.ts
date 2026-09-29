@@ -1,8 +1,8 @@
 import {createApp,nextTick} from 'vue';
 import {expect,it,vi} from 'vitest';
 import Component from './ContestSubmissions.vue';
-const feed=vi.hoisted(()=>({url:undefined as undefined|(()=>string)}));
-vi.mock('../../stores/auth',()=>({useAuthStore:()=>({user:{id:'self',role:'TEACHER'}})}));
+const feed=vi.hoisted(()=>({url:undefined as undefined|(()=>string),user:{id:'self',role:'TEACHER'} as any}));
+vi.mock('../../stores/auth',()=>({useAuthStore:()=>({user:feed.user})}));
 vi.mock('./useContestFeed',()=>({useContestFeed:(url:()=>string)=>{feed.url=url;return {data:{problems:[{id:'p1',label:'A',title:'Sum'}]},error:'',loading:false,updatedAt:null,refresh:vi.fn()};}}));
 it('combines problem selection with nickname and ownership in the feed URL',async()=>{
   const app=createApp(Component,{contest:{id:'c1',visibility:'CAMPUS_PRIVATE',problems:[]} as any});
@@ -18,4 +18,17 @@ it('combines problem selection with nickname and ownership in the feed URL',asyn
     const url=new URL(feed.url!(),'http://localhost');
     expect(Object.fromEntries(url.searchParams)).toEqual({problemId:'p1',mine:'true',nickname:'Alice'});
   }finally{app.unmount();}
+});
+it('allows guests to page through ended submissions without a misleading mine button',async()=>{
+  feed.user=null;
+  const app=createApp(Component,{contest:{id:'c1',visibility:'PRIVATE',state:'ENDED',problems:[]} as any});
+  const host=document.createElement('div');app.mount(host);
+  try{
+    expect(host.textContent).not.toContain('仅查看自己的提交');
+    expect(host.querySelector('[aria-label="提交记录分页"]')).not.toBeNull();
+    const state=(app as any)._instance.setupState;state.page=2;await nextTick();
+    expect(new URL(feed.url!(),'http://localhost').searchParams.get('page')).toBe('2');
+    state.appliedNickname='Alice';await nextTick();
+    expect(new URL(feed.url!(),'http://localhost').searchParams.has('page')).toBe(false);
+  }finally{app.unmount();feed.user={id:'self',role:'TEACHER'};}
 });

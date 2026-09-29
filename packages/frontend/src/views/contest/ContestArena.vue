@@ -2,9 +2,11 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '../../api/client';
+import { useAuthStore } from '../../stores/auth';
 import { contestKind, dateText, errorText, nextContestTransition, stateText, type Contest } from './contest';
 import '../../styles/contest-arena.css';
 const route = useRoute();
+const auth = useAuthStore();
 const contest = ref<Contest | null>(null);
 const loading = ref(true);
 const error = ref('');
@@ -46,7 +48,7 @@ async function load() {
     }
   } finally { if (current === version) loading.value = false; }
 }
-watch(() => route.fullPath, () => {
+watch([() => route.fullPath, () => auth.user?.id], () => {
   retryCount = 0;
   if (contest.value?.id !== route.params.id) contest.value = null;
   void load();

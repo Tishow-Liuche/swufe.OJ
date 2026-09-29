@@ -152,7 +152,7 @@ onMounted(async () => {
           </span>
         </button>
 
-        <button type="button" class="feature-banner contest-banner" @click="openAuthenticated('/contests')">
+        <button type="button" class="feature-banner contest-banner" @click="router.push('/contests')">
           <span class="banner-copy">
             <span class="banner-kicker"><Trophy :size="18" aria-hidden="true" /> 赛事训练</span>
             <strong>比赛</strong>

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { nextContestTransition, verdictClass, canViewFeed, canManageContest } from './contest';
 describe('contest presentation', () => {
+  it.each(['PUBLIC','PRIVATE','PASSWORD','CAMPUS_PRIVATE'])('opens ended %s feeds to everyone',visibility=>{
+    expect(canViewFeed({visibility,state:'ENDED',endTime:new Date(0).toISOString()} as any,null)).toBe(true);
+  });
+  it('does not open a running public feed to anonymous visitors',()=>{
+    expect(canViewFeed({visibility:'PUBLIC',state:'RUNNING'} as any,null)).toBe(false);
+  });
   it('allows campus teacher observation without management privileges',()=>{
     const contest:any={visibility:'CAMPUS_PRIVATE',createdBy:'owner'};const teacher={id:'teacher',role:'TEACHER'};
     expect(canViewFeed(contest,teacher)).toBe(true);expect(canManageContest(contest,teacher)).toBe(false);

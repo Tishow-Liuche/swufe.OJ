@@ -11,10 +11,10 @@ const router = createRouter({
     { path: '/problems/:id', component: () => import('../views/ProblemDetail.vue') },
     { path: '/leaderboard', component: () => import('../views/Leaderboard.vue') },
     { path: '/contests', component: () => import('../views/Contests.vue') },
-    { path: '/contests/:id', component: () => import('../views/contest/ContestArena.vue'), meta: { requiresAuth: true }, children: [
+    { path: '/contests/:id', component: () => import('../views/contest/ContestArena.vue'), children: [
       { path: '', redirect: to => ({ name: 'contest-registration', params: { id: to.params.id } }) },
       { path: 'register', name: 'contest-registration', component: () => import('../views/contest/ContestRegistration.vue') },
-      { path: 'problems', name: 'contest-problems', component: () => import('../views/contest/ContestProblems.vue') },
+      { path: 'problems', name: 'contest-problems', component: () => import('../views/contest/ContestProblems.vue'), meta: { requiresAuth: true } },
       { path: 'standings', name: 'contest-standings', component: () => import('../views/contest/ContestStandings.vue') },
       { path: 'submissions', name: 'contest-submissions', component: () => import('../views/contest/ContestSubmissions.vue') },
     ] },

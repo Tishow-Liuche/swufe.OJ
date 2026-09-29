@@ -38,7 +38,7 @@ export class ContestStandingsCalculatorService {
         participantSubmissions,
         firstAcceptedByProblem,
         now,
-        end,
+        contest.endTime,
         canManage,
       );
       if (contest.mode === 'IOI') {
@@ -105,7 +105,7 @@ export class ContestStandingsCalculatorService {
     submissions: any[],
     firstAcceptedByProblem: Map<string, { submissionId: string; userId: string; acceptedAt: Date }>,
     now: Date,
-    participantEnd: Date,
+    officialEnd: Date,
     canManage: boolean,
   ) {
     return problems.map((problem, index) => {
@@ -122,7 +122,7 @@ export class ContestStandingsCalculatorService {
         title: problem.problem?.title || `Problem ${label}`,
         status: this.cellStatus(attempts, accepted),
         accepted: !!accepted,
-        viewableSubmissionId: now > participantEnd || canManage ? accepted?.id || null : null,
+        viewableSubmissionId: now >= officialEnd || canManage ? accepted?.id || null : null,
         attempts: attempts.length,
         wrongAttempts,
         score: bestScore,
