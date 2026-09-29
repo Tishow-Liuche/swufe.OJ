@@ -9,6 +9,10 @@ it('combines problem selection with nickname and ownership in the feed URL',asyn
   const host=document.createElement('div');app.mount(host);
   try{
     const select=host.querySelector('select[aria-label="筛选题目"]') as HTMLSelectElement;
+    expect(host.querySelector('.submission-filter-toolbar')?.firstElementChild?.matches('form.submission-search')).toBe(true);
+    expect(select?.closest('th')?.getAttribute('scope')).toBe('col');
+    expect(host.querySelector('.submission-filter-toolbar select')).toBeNull();
+    expect(host.querySelector('tbody')?.textContent).toContain('暂无提交记录');
     expect(select).not.toBeNull();expect(select.textContent).toContain('Sum');select.value='p1';select.dispatchEvent(new Event('change'));await nextTick();
     const state=(app as any)._instance.setupState;state.onlyMine=true;state.appliedNickname='Alice';await nextTick();
     const url=new URL(feed.url!(),'http://localhost');

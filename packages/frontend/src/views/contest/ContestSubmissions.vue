@@ -25,10 +25,6 @@ const selectedId = ref('');
     <p v-if="!allowed" class="arena-empty">该比赛的提交记录仅限参赛者查看，请先报名。</p>
     <template v-else>
       <div class="submission-filter-toolbar">
-        <select v-model="problemId" aria-label="筛选题目" @change="selectedId = ''">
-          <option value="">全部题目</option>
-          <option v-for="problem in data?.problems || []" :key="problem.id" :value="problem.id">{{ problem.label }} · {{ problem.title }}</option>
-        </select>
         <form class="submission-search" @submit.prevent="appliedNickname = nickname.trim(); selectedId = ''">
           <input v-model="nickname" maxlength="100" :aria-label="contest.visibility === 'CAMPUS_PRIVATE' ? '搜索报名姓名或学号' : '搜索选手昵称'" :placeholder="contest.visibility === 'CAMPUS_PRIVATE' ? '输入报名姓名或学号' : '输入选手昵称'" />
           <button class="arena-button secondary" type="submit">搜索</button>
@@ -37,12 +33,16 @@ const selectedId = ref('');
         <button class="arena-button" :class="onlyMine ? 'primary' : 'secondary'" :aria-pressed="onlyMine" @click="onlyMine = !onlyMine; selectedId = ''">仅查看自己的提交</button>
       </div>
       <p v-if="error" class="arena-error" role="alert">{{ error }}</p>
-      <div v-if="data?.items?.length" class="arena-table-wrap" role="region" aria-label="比赛提交记录列表" tabindex="0">
-        <table class="arena-table submissions-table"><thead><tr><th scope="col">时间</th><th scope="col">选手</th><th scope="col">题目</th><th scope="col">语言</th><th scope="col">结果</th><th scope="col">耗时</th><th scope="col">内存</th><th scope="col">详情</th></tr></thead>
-          <tbody><tr v-for="submission in data.items" :key="submission.id"><td>{{ timeText(submission.createdAt) }}</td><td>{{ submission.user?.displayName || submission.user?.nickname || submission.user?.username }}</td><td>{{ submission.problem?.label }} · {{ problemDisplayTitle(submission.problem) }}</td><td>{{ submission.language }}</td><td><span class="arena-verdict" :class="verdictClass(submission.status)">{{ statusText(submission.status) }}</span></td><td>{{ submission.timeUsed ?? '—' }} ms</td><td>{{ submission.memoryUsed ?? '—' }} KB</td><td><button class="arena-text-button" @click="selectedId = submission.id">查看</button></td></tr></tbody>
+      <div class="arena-table-wrap" role="region" aria-label="比赛提交记录列表" tabindex="0">
+        <table class="arena-table submissions-table"><thead><tr><th scope="col">时间</th><th scope="col">选手</th><th scope="col"><div class="submission-problem-heading"><span>题目</span><select v-model="problemId" class="submission-problem-filter" aria-label="筛选题目" @change="selectedId = ''">
+          <option value="">全部题目</option>
+          <option v-for="problem in data?.problems || []" :key="problem.id" :value="problem.id">{{ problem.label }} · {{ problem.title }}</option>
+        </select></div></th><th scope="col">语言</th><th scope="col">结果</th><th scope="col">耗时</th><th scope="col">内存</th><th scope="col">详情</th></tr></thead>
+          <tbody><tr v-for="submission in data?.items || []" :key="submission.id"><td>{{ timeText(submission.createdAt) }}</td><td>{{ submission.user?.displayName || submission.user?.nickname || submission.user?.username }}</td><td>{{ submission.problem?.label }} · {{ problemDisplayTitle(submission.problem) }}</td><td>{{ submission.language }}</td><td><span class="arena-verdict" :class="verdictClass(submission.status)">{{ statusText(submission.status) }}</span></td><td>{{ submission.timeUsed ?? '—' }} ms</td><td>{{ submission.memoryUsed ?? '—' }} KB</td><td><button class="arena-text-button" @click="selectedId = submission.id">查看</button></td></tr>
+            <tr v-if="!data?.items?.length"><td colspan="8"><p class="submission-empty" role="status">{{ loading ? '正在加载提交记录…' : error ? '暂时无法加载提交记录，请重试。' : '暂无提交记录。' }}</p></td></tr>
+          </tbody>
         </table>
       </div>
-      <p v-else-if="!loading && !error" class="arena-empty">暂无提交记录。</p>
     </template>
     <ContestSubmissionDialog v-if="selectedId" :contest-id="contest.id" :submission-id="selectedId" @close="selectedId = ''" />
   </section>
@@ -50,9 +50,14 @@ const selectedId = ref('');
 <style scoped>
 .arena-submissions .arena-section-head { margin-bottom: 0; }
 .submission-filter-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-block: 16px; }
-.submission-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.submission-search input { min-width: 0; max-width: 100%; padding: 9px 12px; border: 1px solid #dbe3eb; border-radius: 8px; background: transparent; color: inherit; }
-.submission-filter-toolbar select { max-width: 100%; padding: 9px 12px; border: 1px solid #dbe3eb; border-radius: 8px; background: transparent; color: inherit; }
+.arena-submissions .submission-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.arena-submissions .submission-search input { width: 320px; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #dbe3eb; border-radius: 8px; background: transparent; color: inherit; }
+.submission-filter-toolbar > button { margin-left: auto; }
+.submission-problem-heading { display: flex; align-items: center; gap: 10px; }
+.submission-problem-filter { width: 160px; min-width: 0; padding: 6px 9px; border: 1px solid #ccdbef; border-radius: 7px; background: #fff; color: #435e84; font: inherit; font-weight: 400; text-overflow: ellipsis; }
+.submission-problem-filter:focus-visible { outline: 2px solid #2874eb; outline-offset: 2px; }
+.submissions-table { min-width: 820px; }
+.submission-empty { margin: 12px 0; text-align: center; color: #667b9a; }
 .arena-submissions .arena-table-wrap { max-height: min(520px, 55vh); max-height: min(520px, 55dvh); min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .arena-submissions .arena-table-wrap:focus-visible { outline: 2px solid #2874eb; outline-offset: 2px; }
 .submissions-table th { position: sticky; top: 0; z-index: 1; }
