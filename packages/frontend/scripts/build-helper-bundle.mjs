@@ -13,7 +13,7 @@ const header = [
   '// ==UserScript==',
   '// @name         SWUFE Singularity OJ - All Platforms Helper',
   '// @namespace    https://oj.example.com',
-  '// @version      1.0',
+  '// @version      1.1',
   '// @description  One installation for Codeforces, Luogu and QOJ. Disable standalone SWUFE helpers before enabling this bundle.',
   ...[...matches].map(m => '// @match        ' + m),
   ...[...grants].map(g => '// @grant        ' + g),

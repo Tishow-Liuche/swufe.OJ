@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWUFE Singularity OJ - All Platforms Helper
 // @namespace    https://oj.example.com
-// @version      1.0
+// @version      1.1
 // @description  One installation for Codeforces, Luogu and QOJ. Disable standalone SWUFE helpers before enabling this bundle.
 // @match        https://test.singularitylab.online/*
 // @match        https://singularitylab.online/*
@@ -632,7 +632,7 @@ if (['test.singularitylab.online', 'singularitylab.online', 'localhost', '127.0.
         data.type !== 'SWUFE_HELPER_PING' || data.platform !== 'LUOGU' ||
         typeof data.requestId !== 'string' || data.requestId.length > 128) return;
     window.postMessage({ type: 'SWUFE_HELPER_PONG', platform: 'LUOGU',
-      requestId: data.requestId, version: '1.10' }, location.origin);
+      requestId: data.requestId, version: '1.11' }, location.origin);
   });
   return;
 }
@@ -641,7 +641,7 @@ if (['test.singularitylab.online', 'singularitylab.online', 'localhost', '127.0.
 var DEFAULT_API = 'http://127.0.0.1:3000';
 var API_BASE_KEY = 'swufe_luogu_api_base';
 var API = resolveApiBase();
-var HELPER_VERSION = '1.10';
+var HELPER_VERSION = '1.11';
 var STATE_KEY = 'swufe_luogu_auto_state';
 var SUBMIT_ONCE_KEY_PREFIX = 'swufe_luogu_submit_once_';
 var LOGIN_REQUIRED_KEY = 'swufe_luogu_login_required_at';
@@ -1239,7 +1239,14 @@ function startSubmitFlow() {
       }
 
       var attempts = 0;
+      var languageResets = 0;
+      function taskStillPending() {
+        var current = loadState();
+        return current.submissionId === task.submissionId && current.token === task.token &&
+          !current.submittedAt && !gv(SUBMIT_ONCE_KEY_PREFIX + task.submissionId, '');
+      }
       function fillAndClick() {
+        if (!taskStillPending()) return;
         attempts++;
         ensureSubmitPanel();
         var languageOk = chooseLanguage(task.language);
@@ -1262,8 +1269,15 @@ function startSubmitFlow() {
 
         banner('正在自动提交到洛谷...', '#3498db');
         setTimeout(function() {
+          if (!taskStillPending()) return;
           if (!isLanguageSelected(task.language)) {
-            reportBlockedForTask(loadState(), 'LANGUAGE_MISMATCH', '洛谷编译语言在提交前发生变化，已停止自动提交。');
+            languageResets++;
+            if (languageResets >= 8 || attempts >= 80) {
+              reportBlockedForTask(loadState(), 'LANGUAGE_MISMATCH', '多次自动切换后仍无法确认洛谷编译语言与本站一致，未提交代码。请刷新洛谷页面重试。');
+              return;
+            }
+            banner('洛谷语言设置尚未稳定，正在重新选择本站提交语言...', '#3498db');
+            setTimeout(fillAndClick, 1000);
             return;
           }
           button = findSubmitButton();

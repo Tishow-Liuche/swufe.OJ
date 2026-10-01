@@ -6,7 +6,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const source = fs.readFileSync(new URL('../public/luogu-helper.user.js', import.meta.url), 'utf8');
 // Expose existing closure functions in the test only; production has no test API.
 const instrumented = source.replace('if (!shouldActivateHelper()) return;', 'window.helperTest = { chooseLanguage, startSubmitFlow }; return;');
-const browser = await chromium.launch({ channel: 'chromium' });
+const browser = await chromium.launch(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : { channel: 'chromium' });
 let failures = 0;
 async function test(name, run) {
   const page = await browser.newPage();
@@ -73,10 +73,24 @@ await test('missing language control never submits and reports mismatch', async 
   assert.equal(await page.evaluate(() => window.clicks), 0);
   assert.equal(await page.evaluate(() => requests.some(r => r.failureCode === 'LANGUAGE_MISMATCH')), true);
 });
-await test('selection reset during deferred submit never clicks or marks submitted', async page => {
+await test('selection reset is repaired before submitting exactly once', async page => {
   await page.setContent('<a href="/user/1">user</a><textarea></textarea>' + native + '<button>提交</button>');
   await page.evaluate(() => { document.querySelector('button').onclick = () => window.clicks++; helperTest.startSubmitFlow(); setTimeout(() => document.querySelector('select').value = 'c', 100); });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1800);
+  assert.equal(await page.evaluate(() => window.clicks), 1);
+  assert.equal(await page.locator('select').inputValue(), 'cpp');
+  assert.equal(await page.evaluate(() => requests.some(r => r.failureCode === 'LANGUAGE_MISMATCH')), false);
+});
+await test('persistent language resets stop after bounded retries without submitting', async page => {
+  await page.setContent('<a href="/user/1">user</a><textarea></textarea>' + native + '<button>提交</button>');
+  await page.evaluate(() => {
+    document.querySelector('button').onclick = () => window.clicks++;
+    document.querySelector('select').onchange = () => setTimeout(() => document.querySelector('select').value = 'c', 50);
+    const original = window.setTimeout;
+    window.setTimeout = (fn, ms) => original(fn, ms === 1000 ? 10 : ms);
+    helperTest.startSubmitFlow();
+  });
+  await page.waitForTimeout(4000);
   assert.equal(await page.evaluate(() => window.clicks), 0);
   assert.equal(await page.evaluate(() => GM_getValue('swufe_luogu_submit_once_1', '')), '');
   assert.equal(await page.evaluate(() => requests.some(r => r.failureCode === 'LANGUAGE_MISMATCH')), true);
@@ -118,5 +132,21 @@ await test('Python and Java select their own native options', async page => {
   assert.equal(await page.evaluate(() => helperTest.chooseLanguage('java')), true);
   assert.equal(await page.locator('select').inputValue(), 'Java 21');
 });
+for (const action of ['replace-task', 'already-submitted']) {
+  await test('language retry stops when ' + action, async page => {
+    await page.setContent('<a href="/user/1">user</a><textarea></textarea>' + native + '<button>提交</button>');
+    await page.evaluate(action => {
+      document.querySelector('button').onclick = () => window.clicks++;
+      helperTest.startSubmitFlow();
+      setTimeout(() => document.querySelector('select').value = 'c', 100);
+      setTimeout(() => {
+        if (action === 'replace-task') GM_setValue('swufe_luogu_auto_state', JSON.stringify({ submissionId: 'other', token: 'other' }));
+        else GM_setValue('swufe_luogu_submit_once_1', '1');
+      }, 500);
+    }, action);
+    await page.waitForTimeout(1800);
+    assert.equal(await page.evaluate(() => window.clicks), 0);
+  });
+}
 await browser.close();
 if (failures) process.exitCode = 1;

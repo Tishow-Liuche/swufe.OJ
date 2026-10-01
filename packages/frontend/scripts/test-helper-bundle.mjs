@@ -5,7 +5,7 @@ import { test } from 'node:test';
 const publicDir = new URL('../public/', import.meta.url);
 test('one-click install is one direct bundle link, not a timer popup loop', () => {
   const html = fs.readFileSync(new URL('install-oj-helpers.html', publicDir), 'utf8');
-  assert.match(html, /<a[^>]+id="install-all"[^>]+href="\/oj-helpers\.user\.js\?v=1\.0"/);
+  assert.match(html, /<a[^>]+id="install-all"[^>]+href="\/oj-helpers\.user\.js\?v=1\.1"/);
   assert.doesNotMatch(html, /window\.open\(/);
   assert.match(html, /停用.*独立脚本/);
 });

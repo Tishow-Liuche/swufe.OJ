@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const source = fs.readFileSync(new URL('../public/luogu-helper.user.js', import.meta.url), 'utf8');
 const instrumented = source.replace('if (!shouldActivateHelper()) return;', 'window.helperTest = { normalizeLuoguVerdictStatus, extractLuoguVerdictText, parseRemoteId, readRecordResult, watchResult, reportResult, saveState }; return;');
-const browser = await chromium.launch({ channel: 'chromium', headless: true });
+const browser = await chromium.launch(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH, headless: true } : { channel: 'chromium', headless: true });
 let failures = 0;
 async function test(name, run) {
   const page = await browser.newPage();
