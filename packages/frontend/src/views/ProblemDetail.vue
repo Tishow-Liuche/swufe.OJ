@@ -32,6 +32,7 @@ const isAuthorPreview = computed(() => String(route.query.preview || '') === '1'
 const problem = ref<any>(null);
 const hideHints = computed(() => hideContestHints(contestId.value, problem.value?.contestState));
 const problemState = ref<any>(null);
+const solutionRevision = ref(0);
 const code = ref('');
 const language = ref('cpp');
 const result = ref<any>(null);
@@ -56,6 +57,7 @@ const resultPoller = createSubmissionPoller({
     const row = problemSubmissions.value.find(item => item.id === id);
     if (row) Object.assign(row, data);
     if (final) {
+      solutionRevision.value++;
       void refreshProblemState().then(() => {
         if (!disposed && data.status === 'ACCEPTED' && problemState.value?.wrong) wrongResolvedOpen.value = true;
       }).catch(() => {});
@@ -333,7 +335,11 @@ async function loadProblemSubmissions() {
     const { data } = await api.get('/api/submissions', {
       params: { problemId: problem.value.id, page: 1, pageSize: 30 },
     });
-    if (!disposed && revision === historyRevision) problemSubmissions.value = data.items || [];
+    if (!disposed && revision === historyRevision) {
+      const hadAccepted = problemSubmissions.value.some(item => item.status === 'ACCEPTED');
+      problemSubmissions.value = data.items || [];
+      if (!hadAccepted && problemSubmissions.value.some(item => item.status === 'ACCEPTED')) solutionRevision.value++;
+    }
   } catch {
     // Keep the last known results on temporary network failure.
   } finally {
@@ -620,7 +626,7 @@ function descriptionAlreadyContainsSample(description: string | undefined, input
         </div>
       </div>
 
-      <ProblemDiscussionPanel v-if="!hideHints" :problem-id="problem.id" :problem-title="problem.title" />
+      <ProblemDiscussionPanel v-if="!hideHints" :problem-id="problem.id" :problem-title="problem.title" :revision="solutionRevision" />
     </template>
 
     <HelperInstallDialog v-if="missingHelper" :platform="missingHelper" @close="missingHelper = null" />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ArrowRight, BookOpen, MessageCircle, PenLine, Send, Wrench } from '@lucide/vue';
 import api from '../api/client';
@@ -8,8 +8,8 @@ import { useAuthStore } from '../stores/auth';
 const props = defineProps<{
   problemId: string;
   problemTitle: string;
-  /** Optional: parent can pass PASSED state to avoid an extra request. */
-  solved?: boolean;
+  /** Invalidate eligibility after submission results change. */
+  revision?: number;
 }>();
 const router = useRouter();
 const auth = useAuthStore();
@@ -17,8 +17,10 @@ const feedbackOpen = ref(false);
 const feedback = ref({ type: 'STATEMENT', content: '' });
 const message = ref('');
 const error = ref('');
-const hasSolved = ref(Boolean(props.solved));
+const hasSolved = ref(false);
 const checkingSolved = ref(false);
+const checkFailed = ref(false);
+let requestVersion = 0;
 
 const isModerator = computed(() => auth.isTeacher() || auth.isAdmin());
 const canWriteSolution = computed(() => {
@@ -29,6 +31,8 @@ const canWriteSolution = computed(() => {
 const writeSolutionHint = computed(() => {
   if (!auth.isLoggedIn()) return '登录并完成本题后可写题解。';
   if (isModerator.value) return '教师 / 管理员可直接发布本题题解。';
+  if (checkingSolved.value) return '正在确认题解发布权限…';
+  if (checkFailed.value) return '暂时无法确认过题状态，请重新检查。';
   if (hasSolved.value) return '你已通过本题，可以撰写题解复盘。';
   return '通过本题（Accepted）后可写题解。';
 });
@@ -52,10 +56,10 @@ function requireLogin() {
 }
 
 async function refreshSolvedState() {
-  if (typeof props.solved === 'boolean') {
-    hasSolved.value = props.solved;
-    return;
-  }
+  const version = ++requestVersion;
+  hasSolved.value = false;
+  checkFailed.value = false;
+  checkingSolved.value = false;
   if (!auth.isLoggedIn()) {
     hasSolved.value = false;
     return;
@@ -66,17 +70,18 @@ async function refreshSolvedState() {
   }
   checkingSolved.value = true;
   try {
-    const { data } = await api.get(`/api/learning/problem-states/${props.problemId}`);
-    hasSolved.value = data?.status === 'PASSED';
+    const { data } = await api.get(`/api/community/problems/${props.problemId}/solution-eligibility`);
+    if (version === requestVersion) hasSolved.value = data?.canWriteSolution === true;
   } catch {
-    hasSolved.value = false;
+    if (version === requestVersion) checkFailed.value = true;
   } finally {
-    checkingSolved.value = false;
+    if (version === requestVersion) checkingSolved.value = false;
   }
 }
 
 function writeSolution() {
   if (!requireLogin()) return;
+  if (checkFailed.value) { void refreshSolvedState(); return; }
   if (!canWriteSolution.value) {
     error.value = writeSolutionHint.value;
     return;
@@ -84,11 +89,15 @@ function writeSolution() {
   openCommunity('solutions', true);
 }
 
-watch(() => props.solved, (value) => {
-  if (typeof value === 'boolean') hasSolved.value = value;
+watch(() => [props.problemId, props.revision, auth.user?.id], () => { void refreshSolvedState(); }, { immediate: true });
+function onVisible() {
+  if (document.visibilityState !== 'hidden') void refreshSolvedState();
+}
+onMounted(() => document.addEventListener('visibilitychange', onVisible));
+onUnmounted(() => {
+  requestVersion++;
+  document.removeEventListener('visibilitychange', onVisible);
 });
-watch(() => props.problemId, () => { void refreshSolvedState(); });
-onMounted(() => { void refreshSolvedState(); });
 
 async function submitFeedback() {
   if (!requireLogin()) return;
@@ -148,11 +157,11 @@ async function submitFeedback() {
           <p>{{ writeSolutionHint }}</p>
           <button
             type="button"
-            :disabled="checkingSolved || (auth.isLoggedIn() && !canWriteSolution)"
+            :disabled="checkingSolved || (auth.isLoggedIn() && !canWriteSolution && !checkFailed)"
             @click="writeSolution"
           >
             <PenLine :size="15" />
-            {{ canWriteSolution ? '去写题解' : (auth.isLoggedIn() ? '尚未通过' : '登录后查看') }}
+            {{ checkingSolved ? '正在检查' : checkFailed ? '重新检查' : canWriteSolution ? '去写题解' : (auth.isLoggedIn() ? '尚未通过' : '登录后查看') }}
             <ArrowRight :size="15" />
           </button>
         </div>

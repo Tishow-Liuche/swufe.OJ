@@ -483,11 +483,18 @@ export class CommunityService {
     return this.hasSolved(viewer.id, post.problemId);
   }
 
+  async solutionEligibility(viewer: Viewer, problemId: string) {
+    return { canWriteSolution: this.isModerator(viewer) || await this.hasSolved(viewer.id, problemId) };
+  }
+
   private async hasSolved(userId: string, problemId: string) {
     const accepted = await this.prisma.submission.findFirst({
       where: { userId, problemId, status: 'ACCEPTED' }, select: { id: true },
     });
-    return Boolean(accepted);
+    if (accepted) return true;
+    return Boolean(await this.prisma.externalSolvedProblem.findFirst({
+      where: { userId, problemId }, select: { id: true },
+    }));
   }
 
   private async ensureReportTarget(targetType: string, targetId: string) {

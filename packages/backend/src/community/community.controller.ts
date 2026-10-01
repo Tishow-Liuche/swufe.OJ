@@ -17,6 +17,12 @@ import { CommunityService } from './community.service';
 export class CommunityController {
   constructor(private readonly community: CommunityService) {}
 
+  @Get('problems/:problemId/solution-eligibility')
+  @UseGuards(AuthGuard('jwt'))
+  solutionEligibility(@Param('problemId') problemId: string, @Req() req: any) {
+    return this.community.solutionEligibility(req.user, problemId);
+  }
+
   @Get('announcements')
   listAnnouncements() {
     return this.community.listAnnouncements();
