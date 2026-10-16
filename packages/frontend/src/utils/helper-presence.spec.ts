@@ -1,18 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { detectHelper, helperPlatform, requiredHelperVersions, type HelperPlatform } from './helper-presence';
-import { readFileSync } from 'node:fs';
+import { detectHelper, helperPlatform, type HelperPlatform } from './helper-presence';
 afterEach(() => vi.restoreAllMocks());
 describe('helper installation detection', () => {
-  it('keeps the required versions aligned with distributed standalone and bundled helpers', () => {
-    const bundle = readFileSync('public/oj-helpers.user.js', 'utf8');
-    for (const [platform, file] of [['CODEFORCES', 'cf'], ['LUOGU', 'luogu'], ['QOJ', 'qoj']] as const) {
-      const source = readFileSync(`public/${file}-helper.user.js`, 'utf8');
-      const version = requiredHelperVersions[platform];
-      expect(source.match(/@version\s+(\S+)/)?.[1]).toBe(version);
-      expect(source).toContain(`requestId: data.requestId, version: '${version}'`);
-      expect(bundle).toContain(`requestId: data.requestId, version: '${version}'`);
-    }
-  });
   it.each([['CODEFORCES', '7.6', false], ['CODEFORCES', '7.7', true], ['QOJ', '2.6', false], ['QOJ', '2.7', true]] as const)('checks %s version %s', async (platform, version, expected) => {
     vi.spyOn(window, 'postMessage').mockImplementation((data: any) => {
       window.dispatchEvent(new MessageEvent('message', { origin: location.origin, source: window, data: { ...data, type: 'SWUFE_HELPER_PONG', version } }));

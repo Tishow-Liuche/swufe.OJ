@@ -241,6 +241,57 @@ export class CfTaskLeaseService {
     };
   }
 
+  async reportBlocked(
+    submissionId: string,
+    token: string,
+    data: {
+      leaseNonce?: string;
+      failureCode?: string;
+      failureMessage?: string;
+      rawStatus?: string;
+    },
+  ) {
+    const task = await this.loadTask(submissionId, token);
+    if (task.leaseNonce && data.leaseNonce && task.leaseNonce !== data.leaseNonce) {
+      throw new ConflictException('Lease nonce mismatch');
+    }
+
+    const failureCode = normalizeHelperFailureCode(data.failureCode);
+    const failureMessage = String(
+      data.failureMessage || helperFailureMessage(failureCode),
+    ).slice(0, 1000);
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.remoteSubmissionTask.update({
+        where: { submissionId },
+        data: {
+          status: 'FAILED',
+          helperStage: failureCode,
+          failureCode,
+          failureMessage,
+        },
+      });
+      await tx.remoteJudgeJob.update({
+        where: { submissionId },
+        data: {
+          rawStatus: data.rawStatus || failureCode,
+          errorMessage: failureMessage,
+          finishedAt: now,
+        },
+      });
+      await tx.submission.update({
+        where: { id: submissionId },
+        data: {
+          status: 'REMOTE_ERROR',
+          compileMessage: failureMessage,
+          judgedAt: now,
+        },
+      });
+    });
+
+    return { ok: true, submissionId, status: 'REMOTE_ERROR', failureCode };
+  }
   private async persistSid(submissionId: string, sid: string) {
     await this.prisma.$transaction(async (tx) => {
       await tx.remoteSubmissionTask.update({
@@ -285,4 +336,23 @@ export class CfTaskLeaseService {
 
     return task;
   }
+}
+function normalizeHelperFailureCode(raw?: string): string {
+  const code = String(raw || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (/^(LOGIN_REQUIRED|CAPTCHA_REQUIRED|VERIFICATION_REQUIRED|FORM_TIMEOUT|SUBMIT_BLOCKED|HELPER_BLOCKED)$/.test(code)) {
+    return code;
+  }
+  return 'HELPER_BLOCKED';
+}
+
+function helperFailureMessage(code: string): string {
+  const messages: Record<string, string> = {
+    LOGIN_REQUIRED: 'External OJ login is required before the helper can submit.',
+    CAPTCHA_REQUIRED: 'External OJ captcha is required before the helper can submit.',
+    VERIFICATION_REQUIRED: 'External OJ verification is required before the helper can submit.',
+    FORM_TIMEOUT: 'External OJ submit form did not become ready.',
+    SUBMIT_BLOCKED: 'External OJ submit action was blocked.',
+    HELPER_BLOCKED: 'External OJ helper was blocked before submission.',
+  };
+  return messages[code] || messages.HELPER_BLOCKED;
 }

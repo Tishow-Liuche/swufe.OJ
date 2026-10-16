@@ -3,6 +3,17 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { test } from 'node:test';
 const publicDir = new URL('../public/', import.meta.url);
+test('required versions match distributed standalone and bundled helpers', () => {
+  const detector = fs.readFileSync(new URL('../src/utils/helper-presence.ts', import.meta.url), 'utf8');
+  const bundle = fs.readFileSync(new URL('oj-helpers.user.js', publicDir), 'utf8');
+  for (const [platform, file] of [['CODEFORCES', 'cf'], ['LUOGU', 'luogu'], ['QOJ', 'qoj']]) {
+    const source = fs.readFileSync(new URL(file + '-helper.user.js', publicDir), 'utf8');
+    const version = source.match(/@version\s+(\S+)/)[1];
+    assert(detector.includes(`${platform}: '${version}'`));
+    assert(source.includes(`requestId: data.requestId, version: '${version}'`));
+    assert(bundle.includes(`requestId: data.requestId, version: '${version}'`));
+  }
+});
 test('one-click install is one direct bundle link, not a timer popup loop', () => {
   const html = fs.readFileSync(new URL('install-oj-helpers.html', publicDir), 'utf8');
   assert.match(html, /<a[^>]+id="install-all"[^>]+href="\/oj-helpers\.user\.js\?v=1\.1"/);
