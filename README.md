@@ -2,6 +2,41 @@
 
 > 面向高校的「统一题库 + 在线评测 + 教学管理 + 竞赛训练」综合性平台
 
+## 当前版本（2026-10-16）
+
+`main` 已同步近期开发工作区的项目代码；2026-10-16 的代码汇总提交为 `d4997ec`。GitHub 代码更新与服务器部署是两个独立操作，推送 main 不代表自动部署。
+
+- **题库与录题**：平台题号、本地题目及 Codeforces / 洛谷 / QOJ 题目、Markdown 与公式展示、历史录题编辑、比赛预备题库、压缩包测试数据和 SPJ 评测。
+- **比赛**：独立比赛页面、报名与管理员导入参赛者、题目/排名/提交记录分页展示和筛选；比赛结束后公开排名、提交记录和提交代码。
+- **外站提交**：由浏览器辅助脚本填写代码、选择语言、点击原站提交并回传结果。提交前检测脚本是否可用且满足版本要求；洛谷语言被页面重置时会有限次重选并校验，不能确认时不会盲目提交。
+- **题解权限**：本站 AC 与已关联到本地题目的外站同步 AC 均用于题解权限判定；新结果到达后更新按钮，查询失败不再显示成“未通过”。
+- **登录与比赛稳定性**：包含会话恢复、多标签页刷新协调、比赛查询与判题队列相关优化。具体压力测试条件和结果见 `docs/`，不将测试结果等同于任意服务器配置下的容量保证。
+
+### 外站辅助脚本
+
+[打开安装 / 更新页面](https://test.singularitylab.online/install-oj-helpers.html)。三平台整合版与独立版二选一，不要重复启用同一平台的脚本。
+
+| 脚本 | 当前发布版本 |
+|------|--------------|
+| 三平台整合版 | 1.1 |
+| Codeforces 独立版 | 7.7 |
+| 洛谷独立版 | 1.11 |
+| QOJ 独立版 | 2.7 |
+
+整合版检测使用其内置的平台版本，不使用整合包版本号。更新脚本后关闭旧外站提交页，刷新本站，再发起新的提交；历史失败记录不会因脚本升级而改变。
+
+### 队友同步
+
+```bash
+git fetch origin
+git switch main
+git pull --ff-only origin main
+```
+
+执行前先提交或保存自己的本地修改；不要直接丢弃工作区。原 main 保留在 `backup/main-before-sync-20261016`。密钥、生产环境配置、个人成绩表及测试录题数据不随本次代码同步上传，数据库内容也不会因 `git pull` 自动同步。
+
+以下架构、规划和历史验收介绍应结合当前源码与部署文档阅读，规划项不代表全部已经在生产启用。
+
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)](https://www.typescriptlang.org/)
@@ -31,14 +66,15 @@ SWUFE Singularity OJ（西财奇点OJ）不是单纯的在线评测系统，而�
 ```
 用户提交 → 统一提交服务
               ├── 本地题目 → Local Judge Worker → 沙箱执行 → 结果比对
-              └── 外部题目 → Remote Judge Worker → 第三方 OJ
+              └── 外部题目 → 浏览器辅助脚本 → 原站提交 → 结果回传
 ```
 
 - **真实编译执行**：g++ / gcc / python3 / javac 编译后执行，非模拟
 - **多语言支持**：C、C++、Python、Java
 - **15 种统一评测状态**：AC / WA / TLE / MLE / RE / CE / OLE / PE / SYSTEM_ERROR / CANCELLED / REMOTE_ERROR 等
 - **测试点分组计分**：支持子任务、部分分
-- **后续扩展**：Special Judge、交互题、提交答案题、多文件题
+- **Special Judge**：支持录入评测代码和测试数据，具体协议见录题界面及相关评测文档
+- **后续扩展**：交互题、提交答案题、多文件题（以实际支持范围为准）
 
 ### 三种角色权限体系
 
@@ -56,7 +92,7 @@ SWUFE Singularity OJ（西财奇点OJ）不是单纯的在线评测系统，而�
 
 | 等级 | 模式 | 说明 |
 |------|------|------|
-| A | 官方评测 API | 洛谷等提供正式提交和查询接口 |
+| A | 官方评测 API | 仅适用于已取得官方接口支持的平台；不是当前洛谷提交方式 |
 | B | 官方授权适配 | 无标准 API 但已取得授权 |
 | C | 非官方网页适配 | 模拟登录提交，稳定性较低 |
 | D | 仅同步元数据 | 同步题目、难度、标签和原站链接 |
@@ -118,8 +154,8 @@ npx prisma generate
 ### 克隆与安装
 
 ```bash
-git clone https://github.com/your-org/swufe-oj.git
-cd swufe-oj
+git clone https://github.com/Tishow-Liuche/swufe.OJ.git
+cd swufe.OJ
 ```
 
 ### 启动基础设施
@@ -317,7 +353,7 @@ SWUFE Singularity OJ/
 6. ✅ 正确返回 AC / WA / TLE / RE / CE
 7. ✅ 教师创建 ACM 模式比赛
 8. ✅ 管理本地和外部题目
-9. ✅ 洛谷官方 Remote Judge 接入
+9. ✅ 洛谷浏览器辅助脚本提交与结果回传（非官方 Remote Judge 接口）
 10. ✅ 不支持的平台跳转原站
 11. ✅ 教师查看班级统计
 12. ✅ 学生能力雷达图与推荐
