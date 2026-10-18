@@ -2,11 +2,13 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import api from '../api/client';
+import { useAuthStore } from '../stores/auth';
 import FilterSelect from '../components/FilterSelect.vue';
 
 type LeaderboardScope = 'GLOBAL' | 'CONTEST' | 'OVERALL';
 
 const route = useRoute();
+const auth = useAuthStore();
 const router = useRouter();
 const scope = ref<LeaderboardScope>(route.query.contestId ? 'CONTEST' : 'GLOBAL');
 const targetId = ref(String(route.query.contestId || ''));
@@ -48,7 +50,8 @@ async function loadContests() {
   try {
     const { data } = await api.get('/api/contests');
     contests.value = (Array.isArray(data) ? data : data.items || [])
-      .filter((item: any) => item.state === 'ENDED');
+      .filter((item: any) => item.state === 'ENDED' && !(item.visibility === 'CAMPUS_PRIVATE' &&
+        item.hideStandingsForStudents && !['TEACHER', 'ADMIN'].includes(auth.user?.role || '')));
   } catch {
     contests.value = [];
   }

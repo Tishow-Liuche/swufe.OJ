@@ -351,16 +351,24 @@ export class ContestService {
     return this.readCache.get(key, 2000, () => this.calculateStandings(id, viewer));
   }
 
+  private assertStandingsVisible(contest: any, viewer?: Viewer) {
+    if (contest.visibility === 'CAMPUS_PRIVATE' && contest.hideStandingsForStudents &&
+        !['TEACHER', 'ADMIN'].includes(viewer?.role || '')) {
+      throw new ForbiddenException('该比赛榜单仅对教师和管理员开放');
+    }
+  }
+
   private async contestReadKey(id: string, viewer: Viewer | undefined, kind: string) {
     const contest = await this.prisma.contest.findUnique({
       where: { id },
       select: {
         id: true, visibility: true, createdBy: true, updatedAt: true,
-        startTime: true, endTime: true, freezeTime: true,
+        startTime: true, endTime: true, freezeTime: true, hideStandingsForStudents: true,
         participants: viewer ? { where: { userId: viewer.id }, take: 1, select: { userId: true } } : false,
       },
     });
     if (!contest) throw new NotFoundException('比赛不存在');
+    if (kind === 'standings') this.assertStandingsVisible(contest, viewer);
     this.assertCanViewStandings(contest, viewer);
     const now = Date.now();
     const phase = now >= contest.endTime?.getTime() ? 'ended'
@@ -392,6 +400,7 @@ export class ContestService {
     });
     if (!contest) throw new NotFoundException('比赛不存在');
     this.assertCanViewStandings(contest, viewer);
+    this.assertStandingsVisible(contest, viewer);
     const canManage = !!viewer && (viewer.role === 'ADMIN' || contest.createdBy === viewer.id);
     const result = this.standingsCalculator.calculate({
       contest,

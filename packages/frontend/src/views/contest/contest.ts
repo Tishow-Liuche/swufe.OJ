@@ -1,4 +1,5 @@
 export type Contest = {
+  hideStandingsForStudents?: boolean;
   id: string; contestNo: number; title: string; description?: string; mode: 'ACM' | 'IOI'; visibility: string;
   startTime: string; endTime: string; registerStart?: string | null; registerEnd?: string | null; freezeTime?: string | null;
   allowUpsolve: boolean; penaltyTime: number; teamMode: boolean; isRated: boolean; createdBy?: string;

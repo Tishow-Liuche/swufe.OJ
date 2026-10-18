@@ -143,7 +143,7 @@ export class TeacherController {
   createContest(@Req() req: any, @Body() data: {
     title: string; description?: string; mode?: string; startTime: string; endTime: string;
     problemIds?: string[]; visibility?: string; registerStart?: string; registerEnd?: string;
-    freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
+    freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number; hideStandingsForStudents?: boolean;
     penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
   }) {
     return this.teacherService.createContest(req.user, data);

@@ -5,6 +5,7 @@ import Leaderboard from './Leaderboard.vue';
 const mocks = vi.hoisted(() => ({ query: {} as Record<string, string>, get: vi.fn() }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: mocks.query }), useRouter: () => ({ replace: vi.fn() }) }));
 vi.mock('../api/client', () => ({ default: { get: mocks.get } }));
+vi.mock('../stores/auth', () => ({ useAuthStore: () => ({ user: { id: 'student', role: 'STUDENT' } }) }));
 
 beforeEach(() => {
   mocks.query = {};

@@ -16,6 +16,9 @@ const durationMinutes = computed(() => {
   return Number.isFinite(minutes) && minutes > 0 ? minutes : '—';
 });
 const tabs = [{ path: 'register', label: '报名' }, { path: 'problems', label: '比赛题目' }, { path: 'standings', label: '排名' }, { path: 'submissions', label: '提交记录' }];
+const standingsHidden = computed(() => contest.value?.visibility === 'CAMPUS_PRIVATE' &&
+  contest.value?.hideStandingsForStudents && !['TEACHER', 'ADMIN'].includes(auth.user?.role || ''));
+const visibleTabs = computed(() => tabs.filter(tab => tab.path !== 'standings' || !standingsHidden.value));
 let controller: AbortController | undefined;
 let version = 0;
 let transitionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -75,10 +78,11 @@ onUnmounted(() => { version++; controller?.abort(); clearTimeout(transitionTimer
         </dl>
       </header>
       <nav class="arena-tabs" aria-label="比赛页面">
-        <router-link v-for="tab in tabs" :key="tab.path" :to="`/contests/${contest.id}/${tab.path}`">{{ tab.label }}</router-link>
+        <router-link v-for="tab in visibleTabs" :key="tab.path" :to="`/contests/${contest.id}/${tab.path}`">{{ tab.label }}</router-link>
       </nav>
       <div class="arena-content">
-        <router-view v-slot="{ Component }"><component :is="Component" :key="`${contest.id}:${String(route.name)}`" :contest="contest" @reload="load" /></router-view>
+        <p v-if="standingsHidden && route.path.endsWith('/standings')" class="arena-empty">该比赛榜单仅对教师和管理员开放。</p>
+        <router-view v-else v-slot="{ Component }"><component :is="Component" :key="`${contest.id}:${String(route.name)}`" :contest="contest" @reload="load" /></router-view>
       </div>
     </template>
   </main>

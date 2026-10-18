@@ -518,6 +518,7 @@ model Contest {
   registerStart  DateTime?
   registerEnd    DateTime?
   freezeTime     DateTime?
+  hideStandingsForStudents Boolean @default(false)
   allowUpsolve   Boolean   @default(true)
   maxSubmissions Int?
   penaltyTime    Int       @default(20)

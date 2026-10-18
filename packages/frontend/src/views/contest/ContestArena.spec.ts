@@ -24,6 +24,16 @@ async function mount() {
   app.component('router-view', { render: () => h('div') });
   app.mount(host); await flush();
 }
+it.each(['STUDENT', 'TEACHER', 'ADMIN'])('enforces permanently hidden campus standings UI for %s', async role => {
+  state.auth.user = { id: 'u', role };
+  state.route.path = '/contests/c1/standings';
+  state.get.mockResolvedValue({data: contest({visibility:'CAMPUS_PRIVATE', hideStandingsForStudents:true, state:'ENDED'})});
+  await mount();
+  const links = [...host.querySelectorAll('.arena-tabs a')].map(link => link.textContent);
+  expect(links.includes('排名')).toBe(role !== 'STUDENT');
+  expect(host.textContent?.includes('该比赛榜单仅对教师和管理员开放')).toBe(role === 'STUDENT');
+  expect(links).toContain('提交记录');
+});
 it('reloads a fresh contest tab when cookie login restoration completes after an anonymous 401', async () => {
   state.get.mockRejectedValueOnce({ response: { status: 401 } })
     .mockResolvedValue({ data: contest({ participant: { isVirtual: false } }) });

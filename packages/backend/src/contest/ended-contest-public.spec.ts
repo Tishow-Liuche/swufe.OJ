@@ -45,6 +45,27 @@ describe('ended contest public reads', () => {
     const {service}=fixture();
     await expect(service.contestSubmissions('c',undefined as any,true)).rejects.toThrow();
   });
+  it.each(['ACM', 'IOI'])('hides opted-out campus %s standings at all times without hiding submissions', async mode => {
+    for (const offset of [-60000, 0, 60000]) {
+      for (const viewer of [undefined, { id: 'owner', role: 'STUDENT' }]) {
+        const {service, contest}=fixture('CAMPUS_PRIVATE', mode);
+        contest.hideStandingsForStudents = true;
+        contest.endTime = new Date(now.getTime() + offset);
+        contest.participants = [{ userId: 'owner' }];
+        await expect(service.standings('c', viewer)).rejects.toThrow('榜单仅对教师和管理员开放');
+      }
+    }
+    const {service, contest}=fixture('CAMPUS_PRIVATE', mode);
+    contest.hideStandingsForStudents = true;
+    await expect(service.contestSubmissions('c')).resolves.toHaveProperty('items');
+    for (const role of ['TEACHER', 'ADMIN']) await expect(service.standings('c', {id:'staff', role})).resolves.toHaveProperty('rows');
+  });
+  it('rechecks hidden standings before serving a previously public cached result', async () => {
+    const {service,contest}=fixture('CAMPUS_PRIVATE');
+    await service.standings('c');
+    contest.hideStandingsForStudents = true;
+    await expect(service.standings('c')).rejects.toThrow('榜单仅对教师和管理员开放');
+  });
   it('does not reuse public cache access when an end time is extended',async()=>{
     const {service,contest}=fixture();await service.standings('c',undefined as any);
     contest.endTime=new Date(now.getTime()+60000);

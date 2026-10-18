@@ -560,6 +560,12 @@ describe('TeacherService', () => {
     });
     expect(result).toEqual({ id: 'contest-1', title: '校内赛' });
   });
+  it.each([['CAMPUS_PRIVATE', true], ['PUBLIC', false]])('stores hidden standings only for %s', async (visibility, expected) => {
+    prisma.contest.create.mockResolvedValue({id:'c'});
+    await service.createContest('teacher-1', {title:'Exam', visibility: visibility as string,
+      startTime:'2026-10-20T10:00:00Z', endTime:'2026-10-20T12:00:00Z', hideStandingsForStudents:true});
+    expect(prisma.contest.create).toHaveBeenCalledWith({data:expect.objectContaining({hideStandingsForStudents:expected})});
+  });
 
   it('rejects contest creation when selected problems are not from the contest reserved bank', async () => {
     prisma.problem.findMany.mockResolvedValue([{ id: 'reserved-1' }]);

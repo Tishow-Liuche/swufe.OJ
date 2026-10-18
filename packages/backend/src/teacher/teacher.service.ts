@@ -834,10 +834,13 @@ export class TeacherService {
     title: string; description?: string; mode?: string;
     startTime: string; endTime: string; problemIds?: string[];
     visibility?: string; registerStart?: string; registerEnd?: string;
-    freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number;
+    freezeTime?: string; allowUpsolve?: boolean; maxSubmissions?: number; hideStandingsForStudents?: boolean;
     penaltyTime?: number; password?: string; teamMode?: boolean; isRated?: boolean;
   }) {
     const teacherId = typeof actor === 'string' ? actor : actor.id;
+    if (data.hideStandingsForStudents !== undefined && typeof data.hideStandingsForStudents !== 'boolean') {
+      throw new BadRequestException('榜单可见性必须为布尔值');
+    }
     const isAdmin = typeof actor !== 'string' && actor.role === 'ADMIN';
     if (data.visibility && !['PUBLIC', 'PRIVATE', 'PASSWORD', 'CAMPUS_PRIVATE'].includes(data.visibility)) {
       throw new BadRequestException('不支持的比赛类型');
@@ -874,6 +877,7 @@ export class TeacherService {
         registerStart: data.registerStart ? new Date(data.registerStart) : null,
         registerEnd: data.registerEnd ? new Date(data.registerEnd) : null,
         freezeTime: data.freezeTime ? new Date(data.freezeTime) : null,
+        hideStandingsForStudents: data.visibility === 'CAMPUS_PRIVATE' && data.hideStandingsForStudents === true,
         allowUpsolve: data.allowUpsolve ?? true,
         maxSubmissions: data.maxSubmissions || null,
         penaltyTime: data.penaltyTime || 20,

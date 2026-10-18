@@ -19,6 +19,7 @@ type Contest = {
 
 const router = useRouter();
 const campusVisibility = ref('PUBLIC');
+const hideStandingsForStudents = ref(false);
 function moveProblem(index: number, delta: number) {
   const next = index + delta;
   if (next < 0 || next >= form.value.problemIds.length) return;
@@ -93,10 +94,12 @@ async function createContest() {
     await api.post('/api/teacher/contests', {
       ...form.value,
       visibility: campusVisibility.value,
+      hideStandingsForStudents: campusVisibility.value === 'CAMPUS_PRIVATE' && hideStandingsForStudents.value,
       startTime: iso(form.value.startTime), endTime: iso(form.value.endTime),
       registerStart: iso(form.value.registerStart), registerEnd: iso(form.value.registerEnd), freezeTime: form.value.freezeMode === 'NO_FREEZE' ? undefined : iso(form.value.freezeTime),
     });
     showCreator.value = false;
+    hideStandingsForStudents.value = false;
     form.value = { title: '', description: '', mode: 'ACM', startTime: '', endTime: '', registerStart: '', registerEnd: '', freezeMode: 'NO_FREEZE', freezeTime: '', penaltyTime: 20, allowUpsolve: true, teamMode: false, isRated: false, problemIds: [] };
     await load();
   } catch (e: any) { error.value = e.response?.data?.message || '创建比赛失败'; }
@@ -193,6 +196,7 @@ onMounted(load);
         <div class="form-grid">
           <label class="wide">比赛名称<input v-model="form.title" required placeholder="例如：2026 夏季算法挑战赛" /></label>
           <label>比赛类型<select v-model="campusVisibility"><option value="PUBLIC">公开赛</option><option value="CAMPUS_PRIVATE">校赛私有赛</option></select></label>
+          <label v-if="campusVisibility === 'CAMPUS_PRIVATE'" class="check wide"><input v-model="hideStandingsForStudents" type="checkbox" /> 榜单不对学生开放（赛前、赛中、赛后均隐藏，仅教师和管理员可见）</label>
           <label>计分模式<select v-model="form.mode"><option value="ACM">ACM / ICPC</option><option value="IOI">IOI / 得分制</option></select></label>
           <label>每次错误罚时<input v-model.number="form.penaltyTime" type="number" min="0" /></label>
           <label class="wide">比赛说明<textarea v-model="form.description" rows="3" placeholder="说明比赛范围、注意事项与参赛要求"></textarea></label>
