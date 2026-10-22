@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { Check, Clock3, Trash2, X } from '@lucide/vue';
 import api from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const users = ref<any[]>([]);
+const userQuery = ref('');
+const filteredUsers = computed(() => {
+  const query = userQuery.value.trim().toLocaleLowerCase();
+  return query ? users.value.filter(user => [user.studentId, user.username, user.nickname]
+    .some(value => String(value || '').toLocaleLowerCase().includes(query))) : users.value;
+});
 const loading = ref(true);
 const msg = ref('');
 const showResetPwd = ref('');
 const newPassword = ref('');
+watch(userQuery, () => { showResetPwd.value = ''; newPassword.value = ''; });
 const reviewing = ref('');
 const classApplications = ref<any[]>([]);
 const classReviewing = ref('');
@@ -131,13 +138,19 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
       </div>
       <p v-else class="empty-review">暂无班级申请</p>
     </section>
+    <form class="user-search" role="search" @submit.prevent>
+      <label for="user-query">查询用户</label>
+      <input id="user-query" v-model="userQuery" aria-label="查询用户" type="search" placeholder="输入学号、用户名或昵称" autocomplete="off" />
+      <button v-if="userQuery" type="button" class="btn-sm" aria-label="清空用户查询" @click="userQuery = ''">清空</button>
+      <span v-if="!loading" role="status">匹配 {{ filteredUsers.length }} / {{ users.length }} 位用户</span>
+    </form>
     <div v-if="!loading" class="table-wrap">
       <table class="table">
         <thead>
           <tr><th>用户</th><th>学校</th><th>当前角色</th><th>教师申请</th><th>提交数</th><th>加入时间</th><th>操作</th></tr>
         </thead>
         <tbody>
-          <tr v-for="u in users" :key="u.id">
+          <tr v-for="u in filteredUsers" :key="u.id">
             <td><div><strong :title="u.username">{{ u.nickname || u.username }}</strong><small v-if="u.studentId?.trim()">学号：{{ u.studentId }}</small></div></td>
             <td>{{ u.school || '-' }}</td>
             <td>
@@ -197,6 +210,7 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
               ><Trash2 :size="15" aria-hidden="true" /></button>
             </td>
           </tr>
+          <tr v-if="!filteredUsers.length"><td colspan="7" class="empty-users">{{ userQuery.trim() ? '没有匹配的用户，请检查学号是否绑定或尝试用户名、昵称。' : '暂无用户' }}</td></tr>
         </tbody>
       </table>
     </div>
@@ -205,6 +219,12 @@ async function reviewClassApplication(classId: string, status: 'APPROVED' | 'REJ
 </template>
 
 <style scoped>
+.user-search { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 18px 0 12px; }
+.user-search label { color: #26384d; font-size: 14px; font-weight: 600; }
+.user-search input { flex: 1 1 260px; min-width: 0; max-width: 420px; padding: 10px 12px; border: 1px solid #dbe4ed; border-radius: 8px; background: #fff; color: #26384d; font: inherit; }
+.user-search input:focus { outline: 2px solid #b4ccdf; outline-offset: 1px; }
+.user-search span { color: #718094; font-size: 13px; }
+.empty-users { padding: 26px !important; text-align: center; color: #718094; }
 .page { max-width: 1280px; margin: 0 auto; padding: 24px; }
 h2 { margin-bottom: 16px; }
 .msg { padding: 8px 12px; background: #e8f5e9; border-radius: 4px; margin-bottom: 12px; font-size: 13px; }
