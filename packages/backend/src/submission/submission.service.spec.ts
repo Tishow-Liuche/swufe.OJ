@@ -133,7 +133,25 @@ describe('SubmissionService contest reserved access', () => {
     }, { allowContestReserved: true })).resolves.toMatchObject({ status: 'QUEUING' });
     expect(prisma.submission.count).toHaveBeenCalledWith({ where: {
       userId: 'student-1', status: { in: ['PENDING', 'QUEUING', 'COMPILING', 'RUNNING', 'JUDGING'] },
+      problem: { source: 'LOCAL' },
     } });
+  });
+
+  it.each([0, 4, 5])('counts only local pending work when there are %i local and six external submissions', async (localCount) => {
+    const { service, prisma, judgeQueue } = createService(reservedProblem);
+    prisma.submission.count.mockImplementation(({ where }) =>
+      Promise.resolve(where.problem?.source === 'LOCAL' ? localCount : localCount + 6));
+    const submission = service.submit('student-1', {
+      problemId: 'problem-1', language: 'cpp', sourceCode: 'int main() {}',
+    }, { allowContestReserved: true });
+    if (localCount < 5) {
+      await expect(submission).resolves.toMatchObject({ status: 'QUEUING' });
+      expect(judgeQueue.add).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(submission).rejects.toMatchObject({ status: 429 });
+      expect(prisma.submission.create).not.toHaveBeenCalled();
+      expect(judgeQueue.add).not.toHaveBeenCalled();
+    }
   });
 
   it('rejects submissions at the default five pending submissions per user', async () => {

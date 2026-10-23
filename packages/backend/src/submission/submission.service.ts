@@ -120,11 +120,12 @@ export class SubmissionService {
   private async assertLocalQueueCapacity(userId: string, tx: Prisma.TransactionClient) {
     const activeStatuses = ['PENDING', 'QUEUING', 'COMPILING', 'RUNNING', 'JUDGING'];
     const active = await tx.submission.count({
-      where: { userId, status: { in: activeStatuses } },
+      // External helper tasks do not consume local judge capacity and may await user action.
+      where: { userId, status: { in: activeStatuses }, problem: { source: 'LOCAL' } },
     });
     const maxPending = this.positiveInteger('JUDGE_MAX_PENDING_PER_USER', 5);
     if (active >= maxPending) {
-      throw new HttpException(`最多允许 ${maxPending} 个待完成提交，请等待部分评测完成后再提交`, HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(`最多允许 ${maxPending} 个待完成的本地评测提交，请等待部分评测完成后再提交`, HttpStatus.TOO_MANY_REQUESTS);
     }
 
     const cooldownSeconds = this.positiveInteger('JUDGE_SUBMISSION_COOLDOWN_SECONDS', 5);
