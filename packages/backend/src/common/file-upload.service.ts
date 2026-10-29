@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as Minio from 'minio';
 import * as crypto from 'crypto';
 import * as path from 'path';
+import { isUtf8 } from 'node:buffer';
 
 @Injectable()
 export class FileUploadService implements OnModuleInit {
@@ -55,7 +56,7 @@ export class FileUploadService implements OnModuleInit {
 
     await this.storageClient.putObject(this.bucket, key, file.buffer, file.size, {
       'Content-Type': file.mimetype,
-      'x-amz-meta-original-name': Buffer.from(file.originalname, 'latin1').toString('utf8'),
+      ...this.filenameMetadata(file.originalname),
     });
 
     return `s3://${this.bucket}/${key}`;
@@ -83,13 +84,28 @@ export class FileUploadService implements OnModuleInit {
     const key = `testdata/${problemId}/${crypto.randomUUID()}.zip`;
     await this.storageClient.putObject(this.bucket, key, file.buffer, file.size, {
       'Content-Type': 'application/zip',
-      'x-amz-meta-original-name': file.originalname,
+      ...this.filenameMetadata(file.originalname),
     });
 
     return {
       path: `s3://${this.bucket}/${key}`,
       fileCount: 0, // 解压后才能确定
       totalSize: file.size,
+    };
+  }
+
+  private filenameMetadata(originalname: string): Record<string, string> {
+    // Multipart filenames may arrive as UTF-8 bytes interpreted as Latin-1.
+    // Preserve already-decoded Unicode and genuine Latin-1 names as well.
+    let name = originalname;
+    if (/^[\u0000-\u00ff]*$/.test(name)) {
+      const bytes = Buffer.from(name, 'latin1');
+      if (isUtf8(bytes)) name = bytes.toString('utf8');
+    }
+    // S3 metadata is sent in HTTP headers: raw Unicode/control characters are invalid.
+    return {
+      'x-amz-meta-original-name': Buffer.from(name, 'utf8').toString('base64'),
+      'x-amz-meta-original-name-encoding': 'base64',
     };
   }
 
